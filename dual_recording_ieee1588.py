@@ -14,7 +14,6 @@ import time
 import cv2
 import os
 import _thread
-import pynput
 
 # Defining window size based on number
 # of cameras(key)
@@ -262,6 +261,7 @@ def record_dual(vid_file, max_frames=100, num_cams=4, frame_pause=0, preview = T
                                  'json_queue': json_queue[c.DeviceSerialNumber], 'serial': serial}).start()
 
     if preview:
+        import pynput
         # Starting a daemon thread that hosts the OpenCV visualization (cv2.imshow())
         threading.Thread(target=visualize,kwargs={'image_queue':visualization_queue},daemon=visualize).start()
 
