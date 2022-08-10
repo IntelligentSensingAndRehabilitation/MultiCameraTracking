@@ -193,7 +193,7 @@ def record_dual(vid_file, max_frames=100, num_cams=4, frame_pause=0, preview = T
     def write_queue(vid_file, image_queue, json_queue, serial):
         now = datetime.now()
         time_str = now.strftime('%Y%m%d_%H%M%S')
-        vid_file = os.path.splitext(vid_file)[0] + f"_{serial}_{time_str}.mp4"
+        vid_file = os.path.splitext(vid_file)[0] + f"_{time_str}.{serial}.mp4"
 
         print(vid_file)
 
