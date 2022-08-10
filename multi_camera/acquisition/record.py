@@ -319,8 +319,7 @@ if __name__ == "__main__":
     parser.add_argument('-m', '--max_frames', type=int, default=10000, help='Maximum frames to record')
     parser.add_argument('-n', '--num_cams', type=int, default=4, help='Number of input cameras')
     parser.add_argument('-f', '--frame_pause', type=int, default=0, help='Time to pause between frames of video')
-    parser.add_argument('-p','--preview', default=True, action='store_true', help='Allow real-time visualization of video')
-    parser.add_argument('--no-preview', dest='preview', action='store_false', help='Do not allow real-time visualization of video')
+    parser.add_argument('-p', '--preview', default=True, action='store_true', help='Allow real-time visualization of video')
     parser.add_argument('-s', '--scaling', type=float, default=0.5, help='Ratio to use for scaling the real-time visualization output (should be a float between 0 and 1)')
     args = parser.parse_args()
 
