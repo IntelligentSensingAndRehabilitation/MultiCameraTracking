@@ -280,7 +280,7 @@ def run_calibration(vid_base, vid_path='.'):
     cam_names = [os.path.split(v)[1].split('.')[1] for v in vids]
     error, camera_params = calibrate_bundle(parsers, cam_names, verbose=False)
 
-    camera_hash = hex(hash(tuple(np.sort(cam_names))))[2:12]
+    camera_hash = hex(hash(tuple(np.sort(cals[1]['camera_names'])))).split('x')[1][:10]
     timestamp = vid_base.split('calibration_')[1]
     timestamp = datetime.strptime(timestamp, '%Y%m%d_%H%M%S')
 

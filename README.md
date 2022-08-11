@@ -18,4 +18,4 @@ set_mtu.sh script is used to enable jumbo packets with linux.
 To record calibration data, analyze it, and insert it into the database run
 
     python -m multi_camera.acquisition.record [-n NUM_CAMS] calibration
-    python -m multi_camera.calibrate_cameras calibration_<basefile>
+    python -m multi_camera.datajoint.calibrate_cameras calibration_<basefile>

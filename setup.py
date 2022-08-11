@@ -18,5 +18,5 @@ setuptools.setup(
         "Operating System :: OS Independent",
     ],
     python_requires='>=3.6',
-    install_requires=['anipose', 'opencv-python', 'numpy', 'tqdm']
+    install_requires=['aniposelib', 'opencv-python', 'numpy', 'tqdm']
 )

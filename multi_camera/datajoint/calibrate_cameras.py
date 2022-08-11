@@ -1,4 +1,25 @@
 
+import datajoint as dj
+schema = dj.schema('multicamera_tracking')
+
+
+# keeping this class definition in this file to avoid it needing to depend
+# on the pose pipeline, which is required for the rest of the class definitions
+
+@schema
+class Calibration(dj.Manual):
+    definition = """
+    # Calibration of multiple camera system
+    cal_timestamp        : timestamp
+    camera_config_hash   : varchar(10)
+    ---
+    num_cameras          : int
+    camera_names         : longblob   # list of camera names
+    camera_calibration   : longblob   # calibration results
+    reprojection_error   : float
+    """
+
+
 def run_calibration(vid_base, vid_path='.'):
 
     from .multi_camera_dj import Calibration
@@ -24,7 +45,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description='Compute calibration from specified videos and insert into database')
     parser.add_argument('vid_base', help='Base filenames to use for calibration')
-    parser.add_argument('vid_path', help='Path to files', default='.')
+    parser.add_argument('--vid_path', help='Path to files', default='.')
     args = parser.parse_args()
 
     run_calibration(vid_base=args.vid_base, vid_path=args.vid_path)
