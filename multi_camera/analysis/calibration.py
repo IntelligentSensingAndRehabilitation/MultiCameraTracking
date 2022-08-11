@@ -1,21 +1,20 @@
-
 import cv2
 import numpy as np
 from tqdm import trange
 
-class CheckerboardAccumulator:
-    '''
-        Helper class to detect and store the checkerboards in a
-        video.
-    '''
 
-    def __init__(self, checkerboard_size=110.0, cherboard_dim=(4,6),
-                 downsample=1, save_images=False):
+class CheckerboardAccumulator:
+    """
+    Helper class to detect and store the checkerboards in a
+    video.
+    """
+
+    def __init__(self, checkerboard_size=110.0, cherboard_dim=(4, 6), downsample=1, save_images=False):
         self.rows, self.cols = cherboard_dim
 
         # prepare object points, like (0,0,0), (1,0,0), (2,0,0) ....,(6,5,0)
-        self.objp = np.zeros((self.rows*self.cols,3), np.float32)
-        self.objp[:,:2] = np.mgrid[0:self.cols,0:self.rows].T.reshape(-1,2) * checkerboard_size # cm
+        self.objp = np.zeros((self.rows * self.cols, 3), np.float32)
+        self.objp[:, :2] = np.mgrid[0 : self.cols, 0 : self.rows].T.reshape(-1, 2) * checkerboard_size  # cm
 
         self.frames = []
         self.corners = []
@@ -33,7 +32,7 @@ class CheckerboardAccumulator:
         img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
 
         chessboard_flags = cv2.CALIB_CB_ADAPTIVE_THRESH + cv2.CALIB_CB_NORMALIZE_IMAGE + cv2.CALIB_CB_FAST_CHECK
-        #chessboard_flags = cv2.CALIB_CB_FAST_CHECK + cv2.CALIB_CB_LARGER + chessboard_flags
+        # chessboard_flags = cv2.CALIB_CB_FAST_CHECK + cv2.CALIB_CB_LARGER + chessboard_flags
 
         gray_ds = cv2.resize(gray, (img.shape[1] // self.downsample, img.shape[0] // self.downsample))
         ret, corners = cv2.findChessboardCorners(gray_ds, (self.cols, self.rows), chessboard_flags)
@@ -46,7 +45,7 @@ class CheckerboardAccumulator:
 
             criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
 
-            corners2 = cv2.cornerSubPix(gray, corners, (11,11), (-1,-1), criteria)
+            corners2 = cv2.cornerSubPix(gray, corners, (11, 11), (-1, -1), criteria)
 
             self.frames.append(idx)
             self.corners.append(corners2)
@@ -69,27 +68,26 @@ class CheckerboardAccumulator:
         ret, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(objpoints, imgpoints, (h, w), cv2.CALIB_RATIONAL_MODEL, None)
         newcameramtx, roi = cv2.getOptimalNewCameraMatrix(mtx, dist, (w, h), 1, (w, h))
 
-        return {'mtx': mtx, 'dist': dist, 'rvecs': rvecs, 'tvecs': tvecs,
-                'newcameramtx': newcameramtx, 'roi': roi}
+        return {"mtx": mtx, "dist": dist, "rvecs": rvecs, "tvecs": tvecs, "newcameramtx": newcameramtx, "roi": roi}
 
     def get_points(self, idx):
         return [self.objp] * len(idx), list(np.array(self.corners)[idx])
 
 
 def get_checkerboards(filenames, max_frames=None, skip=1, multithread=False, **kwargs):
-    '''
-        Detect checkboards in a list of videos.
+    """
+    Detect checkboards in a list of videos.
 
-            Parameters:
-                filenames (list) : list of pths to videos
-                max_frames (int, optional) : maximum number of frames to parse
-                skip (int, optional) : skip between frames to detect
-                multithread (boolean, optional): where to have a per-video frame
-                kwargs : optional parameters passed to the accumulator
+        Parameters:
+            filenames (list) : list of pths to videos
+            max_frames (int, optional) : maximum number of frames to parse
+            skip (int, optional) : skip between frames to detect
+            multithread (boolean, optional): where to have a per-video frame
+            kwargs : optional parameters passed to the accumulator
 
-            Returns:
-                list of CheckboardAccumulators for each video
-    '''
+        Returns:
+            list of CheckboardAccumulators for each video
+    """
 
     num_views = len(filenames)
 
@@ -115,6 +113,7 @@ def get_checkerboards(filenames, max_frames=None, skip=1, multithread=False, **k
     else:
         import multiprocessing
         from multiprocessing.dummy import Pool as ThreadPool
+
         pool = ThreadPool(num_views)
 
         def process_video(params):
@@ -142,19 +141,19 @@ def get_checkerboards(filenames, max_frames=None, skip=1, multithread=False, **k
     return parsers
 
 
-def calibrate_pair(p1, p2,
-                   stereocalib_flags=cv2.CALIB_USE_INTRINSIC_GUESS,
-                   rectify_scale=1.0, rectify_flags=cv2.CALIB_ZERO_DISPARITY):
-    '''
-        Perform stereo camera calibration with OpenCV on a pair of cameras
+def calibrate_pair(
+    p1, p2, stereocalib_flags=cv2.CALIB_USE_INTRINSIC_GUESS, rectify_scale=1.0, rectify_flags=cv2.CALIB_ZERO_DISPARITY
+):
+    """
+    Perform stereo camera calibration with OpenCV on a pair of cameras
 
-            Parameters:
-                p1 (Accumulator) : the accumulator for first camera
-                p2 (Accumulator) : the accumulator for second camera
+        Parameters:
+            p1 (Accumulator) : the accumulator for first camera
+            p2 (Accumulator) : the accumulator for second camera
 
-            Returns:
-                dictionary of calibration parameters
-    '''
+        Returns:
+            dictionary of calibration parameters
+    """
 
     _, idx0, idx1 = np.intersect1d(p1.frames, p2.frames, return_indices=True)
 
@@ -170,49 +169,71 @@ def calibrate_pair(p1, p2,
 
     stereocalib_criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 1000, 1e-6)
 
-    res = cv2.stereoCalibrate(objpoints, im1points, im2points,
-                              calibration1['mtx'].copy(), calibration1['dist'].copy(),
-                              calibration2['mtx'].copy(), calibration2['dist'].copy(),
-                              (h, w),
-                              criteria = stereocalib_criteria,
-                              flags = stereocalib_flags)
+    res = cv2.stereoCalibrate(
+        objpoints,
+        im1points,
+        im2points,
+        calibration1["mtx"].copy(),
+        calibration1["dist"].copy(),
+        calibration2["mtx"].copy(),
+        calibration2["dist"].copy(),
+        (h, w),
+        criteria=stereocalib_criteria,
+        flags=stereocalib_flags,
+    )
     stereocalib_retval, cameraMatrix1, distCoeffs1, cameraMatrix2, distCoeffs2, R, T, E, F = res
 
-    cal = {'cameraMatrix1': cameraMatrix1, 'distCoeffs1': distCoeffs1,
-           'cameraMatrix2': cameraMatrix2, 'distCoeffs2': distCoeffs2,
-           'R': R, 'T': T, 'E': E, 'F': F, 'N': len(idx0)}
+    cal = {
+        "cameraMatrix1": cameraMatrix1,
+        "distCoeffs1": distCoeffs1,
+        "cameraMatrix2": cameraMatrix2,
+        "distCoeffs2": distCoeffs2,
+        "R": R,
+        "T": T,
+        "E": E,
+        "F": F,
+        "N": len(idx0),
+    }
 
-    R1, R2, P1, P2, Q, roi1, roi2 = cv2.stereoRectify(cal["cameraMatrix1"], cal["distCoeffs1"],
-                                                      cal["cameraMatrix2"], cal["distCoeffs2"],
-                                                      (w, h), R=cal["R"], T=cal["T"], alpha=rectify_scale,
-                                                      newImageSize=(w, h), flags=rectify_flags)
+    R1, R2, P1, P2, Q, roi1, roi2 = cv2.stereoRectify(
+        cal["cameraMatrix1"],
+        cal["distCoeffs1"],
+        cal["cameraMatrix2"],
+        cal["distCoeffs2"],
+        (w, h),
+        R=cal["R"],
+        T=cal["T"],
+        alpha=rectify_scale,
+        newImageSize=(w, h),
+        flags=rectify_flags,
+    )
 
-    cal['R1'] = R1
-    cal['R2'] = R2
-    cal['P1'] = P1
-    cal['P2'] = P2
-    cal['Q'] = Q
-    cal['roi1'] = roi1
-    cal['roi2'] = roi2
+    cal["R1"] = R1
+    cal["R2"] = R2
+    cal["P1"] = P1
+    cal["P2"] = P2
+    cal["Q"] = Q
+    cal["roi1"] = roi1
+    cal["roi2"] = roi2
 
     return cal
 
 
 def calibrate_bundle(parsers, camera_names=None, verbose=False):
-    '''
-        Calibrate multiple cameras using bundle adjustment
+    """
+    Calibrate multiple cameras using bundle adjustment
 
-        This uses the bundle adjustment implemented in aniposelib to perform
-        the calibration.
+    This uses the bundle adjustment implemented in aniposelib to perform
+    the calibration.
 
-            Parameters:
-                parsers (list) : list of checkerboard video parser results
-                camera_names (list, optional) : list of camera names
+        Parameters:
+            parsers (list) : list of checkerboard video parser results
+            camera_names (list, optional) : list of camera names
 
-            Returns:
-                reprojection error
-                dictionary of configurations
-    '''
+        Returns:
+            reprojection error
+            dictionary of configurations
+    """
 
     from aniposelib.cameras import CameraGroup
     from aniposelib.boards import Checkerboard
@@ -221,12 +242,12 @@ def calibrate_bundle(parsers, camera_names=None, verbose=False):
         camera_names = list(range(len(parsers)))
 
     p = parsers[0]
-    square_length = p.objp[1,0] - p.objp[0,0]
+    square_length = p.objp[1, 0] - p.objp[0, 0]
     cols = p.cols
     rows = p.rows
 
     cgroup = CameraGroup.from_names(camera_names, fisheye=True)
-    board = Checkerboard(cols,rows,square_length=square_length)
+    board = Checkerboard(cols, rows, square_length=square_length)
 
     for cam, p in zip(cgroup.cameras, parsers):
         h, w, _ = p.last_image.shape
@@ -237,7 +258,7 @@ def calibrate_bundle(parsers, camera_names=None, verbose=False):
     for p in parsers:
         rows = []
         for frame_num, corner in zip(p.frames, p.corners):
-            rows.append({'framenum': frame_num, 'corners': corner, 'ids': None})
+            rows.append({"framenum": frame_num, "corners": corner, "ids": None})
         all_rows.append(rows)
 
     error = cgroup.calibrate_rows(all_rows, board, verbose=verbose)
@@ -245,20 +266,20 @@ def calibrate_bundle(parsers, camera_names=None, verbose=False):
     return error, cgroup.get_dicts()
 
 
-def run_calibration(vid_base, vid_path='.'):
-    '''
-        Run the calibration routine on a video recording session
+def run_calibration(vid_base, vid_path="."):
+    """
+    Run the calibration routine on a video recording session
 
-        Designed to be used on data recorded with acquisition.record and assumes the
-        files have a calibration_ prefix.
+    Designed to be used on data recorded with acquisition.record and assumes the
+    files have a calibration_ prefix.
 
-            Parameters:
-                vid_base (str): filter to match (e.g. calibration_20220802_110011)
-                vid_path (str, optional): bath to files, otherwise assumes PWD
+        Parameters:
+            vid_base (str): filter to match (e.g. calibration_20220802_110011)
+            vid_path (str, optional): bath to files, otherwise assumes PWD
 
-            Returns:
-                calibration dictionary
-    '''
+        Returns:
+            calibration dictionary
+    """
 
     import os
     import numpy as np
@@ -268,27 +289,30 @@ def run_calibration(vid_base, vid_path='.'):
     vids = []
     for v in os.listdir(vid_path):
         base, ext = os.path.splitext(v)
-        if ext == '.mp4' and base.split('.')[0] == vid_base:
+        if ext == ".mp4" and base.split(".")[0] == vid_base:
             vids.append(os.path.join(vid_path, v))
 
-    print(f'Found {len(vids)} videos. Now detecting checkerboards.')
+    print(f"Found {len(vids)} videos. Now detecting checkerboards.")
 
-    parsers = get_checkerboards(vids, max_frames=5000, skip=20, save_images=True,
-                                downsample=2, multithread=True, checkerboard_size=11.0)
+    parsers = get_checkerboards(
+        vids, max_frames=5000, skip=20, save_images=True, downsample=2, multithread=True, checkerboard_size=11.0
+    )
 
-    print('Now running calibration')
-    cam_names = [os.path.split(v)[1].split('.')[1] for v in vids]
+    print("Now running calibration")
+    cam_names = [os.path.split(v)[1].split(".")[1] for v in vids]
     error, camera_params = calibrate_bundle(parsers, cam_names, verbose=False)
 
-    camera_hash = hex(hash(tuple(np.sort(cals[1]['camera_names'])))).split('x')[1][:10]
-    timestamp = vid_base.split('calibration_')[1]
-    timestamp = datetime.strptime(timestamp, '%Y%m%d_%H%M%S')
+    camera_hash = hex(hash(tuple(np.sort(cals[1]["camera_names"])))).split("x")[1][:10]
+    timestamp = vid_base.split("calibration_")[1]
+    timestamp = datetime.strptime(timestamp, "%Y%m%d_%H%M%S")
 
-    entry = {'cal_timestamp': timestamp,
-             'camera_config_hash': camera_hash,
-             'num_cameras': len(cam_names),
-             'camera_names': cam_names,
-             'camera_calibration': camera_params,
-             'reprojection_error': error}
+    entry = {
+        "cal_timestamp": timestamp,
+        "camera_config_hash": camera_hash,
+        "num_cameras": len(cam_names),
+        "camera_names": cam_names,
+        "camera_calibration": camera_params,
+        "reprojection_error": error,
+    }
 
     return entry

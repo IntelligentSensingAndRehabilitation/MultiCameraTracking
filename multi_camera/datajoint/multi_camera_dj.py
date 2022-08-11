@@ -1,7 +1,7 @@
-
 import datajoint as dj
 
-schema = dj.schema('multicamera_tracking')
+schema = dj.schema("multicamera_tracking")
+
 
 @schema
 class Calibration(dj.Manual):
