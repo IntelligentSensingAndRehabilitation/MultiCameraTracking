@@ -243,3 +243,52 @@ def calibrate_bundle(parsers, camera_names=None, verbose=False):
     error = cgroup.calibrate_rows(all_rows, board, verbose=verbose)
 
     return error, cgroup.get_dicts()
+
+
+def run_calibration(vid_base, vid_path='.'):
+    '''
+        Run the calibration routine on a video recording session
+
+        Designed to be used on data recorded with acquisition.record and assumes the
+        files have a calibration_ prefix.
+
+            Parameters:
+                vid_base (str): filter to match (e.g. calibration_20220802_110011)
+                vid_path (str, optional): bath to files, otherwise assumes PWD
+
+            Returns:
+                calibration dictionary
+    '''
+
+    import os
+    import numpy as np
+    from datetime import datetime
+
+    # search for files. expects them to be in the format vid_base.serial_number.mp4
+    vids = []
+    for v in os.listdir(vid_path):
+        base, ext = os.path.splitext(v)
+        if ext == '.mp4' and base.split('.')[0] == vid_base:
+            vids.append(os.path.join(vid_path, v))
+
+    print(f'Found {len(vids)} videos. Now detecting checkerboards.')
+
+    parsers = get_checkerboards(vids, max_frames=5000, skip=20, save_images=True,
+                                downsample=2, multithread=True, checkerboard_size=11.0)
+
+    print('Now running calibration')
+    cam_names = [os.path.split(v)[1].split('.')[1] for v in vids]
+    error, camera_params = calibrate_bundle(parsers, cam_names, verbose=False)
+
+    camera_hash = hex(hash(tuple(np.sort(cam_names))))[2:12]
+    timestamp = vid_base.split('calibration_')[1]
+    timestamp = datetime.strptime(timestamp, '%Y%m%d_%H%M%S')
+
+    entry = {'cal_timestamp': timestamp,
+             'camera_config_hash': camera_hash,
+             'num_cameras': len(cam_names),
+             'camera_names': cam_names,
+             'camera_calibration': camera_params,
+             'reprojection_error': error}
+
+    return entry
