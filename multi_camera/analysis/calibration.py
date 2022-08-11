@@ -4,8 +4,13 @@ import numpy as np
 from tqdm import trange
 
 class CheckerboardAccumulator:
+    '''
+        Helper class to detect and store the checkerboards in a
+        video.
+    '''
 
-    def __init__(self, checkerboard_size=110.0, cherboard_dim=(4,6), downsample=1):
+    def __init__(self, checkerboard_size=110.0, cherboard_dim=(4,6),
+                 downsample=1, save_images=False):
         self.rows, self.cols = cherboard_dim
 
         # prepare object points, like (0,0,0), (1,0,0), (2,0,0) ....,(6,5,0)
@@ -14,21 +19,24 @@ class CheckerboardAccumulator:
 
         self.frames = []
         self.corners = []
+        self.images = []
+        self.last_image = None
 
         self.shape = None
 
-        self.downsample=downsample
+        self.save_images = save_images
+        self.downsample = downsample
 
     def process_frame(self, idx, img):
 
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
 
-        chessboard_flags = cv2.CALIB_CB_ADAPTIVE_THRESH + cv2.CALIB_CB_NORMALIZE_IMAGE
+        chessboard_flags = cv2.CALIB_CB_ADAPTIVE_THRESH + cv2.CALIB_CB_NORMALIZE_IMAGE + cv2.CALIB_CB_FAST_CHECK
         #chessboard_flags = cv2.CALIB_CB_FAST_CHECK + cv2.CALIB_CB_LARGER + chessboard_flags
 
         gray_ds = cv2.resize(gray, (img.shape[1] // self.downsample, img.shape[0] // self.downsample))
-        ret, corners = cv2.findChessboardCorners(gray, (self.cols, self.rows), chessboard_flags)
-
+        ret, corners = cv2.findChessboardCorners(gray_ds, (self.cols, self.rows), chessboard_flags)
 
         if not self.shape:
             self.shape = img.shape
@@ -43,6 +51,12 @@ class CheckerboardAccumulator:
             self.frames.append(idx)
             self.corners.append(corners2)
 
+            if self.save_images:
+                self.images.append(img)
+
+        if self.save_images:
+            self.last_image = img
+
         return ret
 
     def calibrate_camera(self):
@@ -52,7 +66,7 @@ class CheckerboardAccumulator:
 
         h, w, _ = self.shape
 
-        ret, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(objpoints, imgpoints, (h, w), None, None)
+        ret, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(objpoints, imgpoints, (h, w), cv2.CALIB_RATIONAL_MODEL, None)
         newcameramtx, roi = cv2.getOptimalNewCameraMatrix(mtx, dist, (w, h), 1, (w, h))
 
         return {'mtx': mtx, 'dist': dist, 'rvecs': rvecs, 'tvecs': tvecs,
@@ -62,30 +76,65 @@ class CheckerboardAccumulator:
         return [self.objp] * len(idx), list(np.array(self.corners)[idx])
 
 
-def get_checkerboards(filenames, max_frames=None, skip=1, downsample=1):
+def get_checkerboards(filenames, max_frames=None, skip=1, multithread=False, **kwargs):
+    '''
+        Detect checkboards in a list of videos.
+
+            Parameters:
+                filenames (list) : list of pths to videos
+                max_frames (int, optional) : maximum number of frames to parse
+                skip (int, optional) : skip between frames to detect
+                multithread (boolean, optional): where to have a per-video frame
+                kwargs : optional parameters passed to the accumulator
+
+            Returns:
+                list of CheckboardAccumulators for each video
+    '''
 
     num_views = len(filenames)
 
     caps = [cv2.VideoCapture(f) for f in filenames]
-    parsers = [CheckerboardAccumulator(downsample=downsample) for _ in range(num_views)]
+    parsers = [CheckerboardAccumulator(**kwargs) for _ in range(num_views)]
 
     frames = int(caps[0].get(cv2.CAP_PROP_FRAME_COUNT))
     frames = min(max_frames or frames, frames)
 
-    for i in trange(0, frames, skip):
+    if multithread == False:
+        for i in trange(0, frames, skip):
 
-        for c, p in zip(caps, parsers):
+            for c, p in zip(caps, parsers):
 
-            c.set(cv2.CAP_PROP_POS_FRAMES, i)
-            ret, img = c.read()
+                c.set(cv2.CAP_PROP_POS_FRAMES, i)
+                ret, img = c.read()
 
-            if not ret or img is None:
-                break
+                if not ret or img is None:
+                    break
 
-            if (i % 50) != 0:
-                continue
+                p.process_frame(i, img)
 
-            p.process_frame(i, img)
+    else:
+        import multiprocessing
+        from multiprocessing.dummy import Pool as ThreadPool
+        pool = ThreadPool(num_views)
+
+        def process_video(params):
+            cap, parser, idx = params
+            if idx == 0:
+                progress_fn = trange
+            else:
+                progress_fn = range
+
+            for i in progress_fn(0, frames, skip):
+                cap.set(cv2.CAP_PROP_POS_FRAMES, i)
+                ret, img = cap.read()
+                if not ret or img is None:
+                    break
+
+                parser.process_frame(i, img)
+
+            return parser
+
+        parsers = pool.map(process_video, zip(caps, parsers, range(num_views)))
 
     for c in caps:
         c.release()
@@ -94,7 +143,19 @@ def get_checkerboards(filenames, max_frames=None, skip=1, downsample=1):
 
 
 def calibrate_pair(p1, p2,
-                   stereocalib_flags = cv2.CALIB_USE_INTRINSIC_GUESS):
+                   stereocalib_flags=cv2.CALIB_USE_INTRINSIC_GUESS,
+                   rectify_scale=1.0, rectify_flags=cv2.CALIB_ZERO_DISPARITY):
+    '''
+        Perform stereo camera calibration with OpenCV on a pair of cameras
+
+            Parameters:
+                p1 (Accumulator) : the accumulator for first camera
+                p2 (Accumulator) : the accumulator for second camera
+
+            Returns:
+                dictionary of calibration parameters
+    '''
+
     _, idx0, idx1 = np.intersect1d(p1.frames, p2.frames, return_indices=True)
 
     assert len(idx0) > 0, "No overlapping frames"
@@ -121,4 +182,64 @@ def calibrate_pair(p1, p2,
            'cameraMatrix2': cameraMatrix2, 'distCoeffs2': distCoeffs2,
            'R': R, 'T': T, 'E': E, 'F': F, 'N': len(idx0)}
 
+    R1, R2, P1, P2, Q, roi1, roi2 = cv2.stereoRectify(cal["cameraMatrix1"], cal["distCoeffs1"],
+                                                      cal["cameraMatrix2"], cal["distCoeffs2"],
+                                                      (w, h), R=cal["R"], T=cal["T"], alpha=rectify_scale,
+                                                      newImageSize=(w, h), flags=rectify_flags)
+
+    cal['R1'] = R1
+    cal['R2'] = R2
+    cal['P1'] = P1
+    cal['P2'] = P2
+    cal['Q'] = Q
+    cal['roi1'] = roi1
+    cal['roi2'] = roi2
+
     return cal
+
+
+def calibrate_bundle(parsers, camera_names=None, verbose=False):
+    '''
+        Calibrate multiple cameras using bundle adjustment
+
+        This uses the bundle adjustment implemented in aniposelib to perform
+        the calibration.
+
+            Parameters:
+                parsers (list) : list of checkerboard video parser results
+                camera_names (list, optional) : list of camera names
+
+            Returns:
+                reprojection error
+                dictionary of configurations
+    '''
+
+    from aniposelib.cameras import CameraGroup
+    from aniposelib.boards import Checkerboard
+
+    if camera_names is None:
+        camera_names = list(range(len(parsers)))
+
+    p = parsers[0]
+    square_length = p.objp[1,0] - p.objp[0,0]
+    cols = p.cols
+    rows = p.rows
+
+    cgroup = CameraGroup.from_names(camera_names, fisheye=True)
+    board = Checkerboard(cols,rows,square_length=square_length)
+
+    for cam, p in zip(cgroup.cameras, parsers):
+        h, w, _ = p.last_image.shape
+        cam.set_size((w, h))
+
+    # convert parser results to the "rows" used by aniposelib
+    all_rows = []
+    for p in parsers:
+        rows = []
+        for frame_num, corner in zip(p.frames, p.corners):
+            rows.append({'framenum': frame_num, 'corners': corner, 'ids': None})
+        all_rows.append(rows)
+
+    error = cgroup.calibrate_rows(all_rows, board, verbose=verbose)
+
+    return error, cgroup.get_dicts()
