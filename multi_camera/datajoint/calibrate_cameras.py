@@ -28,14 +28,12 @@ def run_calibration(vid_base, vid_path="."):
 
     entry = run_calibration(vid_base, vid_path)
 
-    if np.isnan(entry['reproject_error']):
+    if np.isnan(entry['reprojection_error']):
         raise Exception(f'Calibration failed: {entry}')
 
     if entry["reprojection_error"] > 0.3:
-        print(
-            f'The error was {entry["reprojection_error"]}. '
-            "Are you sure you would like to store this in the database? [Yes/No]"
-        )
+        print(entry)
+        print(f'The error was {entry["reprojection_error"]}. Are you sure you would like to store this in the database? [Yes/No]')
 
         response = input()
         if response[0].upper() != "Y":
