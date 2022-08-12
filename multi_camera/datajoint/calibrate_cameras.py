@@ -1,3 +1,4 @@
+import numpy as np
 import datajoint as dj
 
 schema = dj.schema("multicamera_tracking")
@@ -23,10 +24,12 @@ class Calibration(dj.Manual):
 
 def run_calibration(vid_base, vid_path="."):
 
-    from .multi_camera_dj import Calibration
     from ..analysis.calibration import run_calibration
 
     entry = run_calibration(vid_base, vid_path)
+
+    if np.isnan(entry['reproject_error']):
+        raise Exception(f'Calibration failed: {entry}')
 
     if entry["reprojection_error"] > 0.3:
         print(

@@ -2,18 +2,28 @@ import datajoint as dj
 
 schema = dj.schema("multicamera_tracking")
 
+@schema
+class MultiCameraRecording(dj.Manual):
+    definition = '''
+    # Recording from multiple synchronized cameras
+    recording_timestamp : timestamp
+    camera_config_hash  : varchar(50)    # camera configuration
+    video_project       : varchar(50)    # video project, which should match pose pipeline
+    ---
+    video_base_filename : varchar(100)   # base name for the videos without serial prefix
+    num_cameras         : int
+    camera_names        : longblob
+    '''
 
 @schema
-class Calibration(dj.Manual):
+class SingleCameraVideo(dj.Manual):
     definition = """
-    # Calibration of multiple camera system
-    cal_timestamp        : timestamp
-    camera_config_hash   : varchar(10)
+    # Single view of a multiview recording
+    -> MultiCameraRecording
+    -> Video
     ---
-    num_cameras          : int
-    camera_names         : longblob   # list of camera names
-    camera_calibration   : longblob   # calibration results
-    reprojection_error   : float
+    camera_name          : varchar(50)
+    frame_timstamps      : longblob   # precise timestamps from that camera
     """
 
 def import_recording(vid_base, vid_path='.', video_project='MULTICAMERA_TEST'):
@@ -24,13 +34,14 @@ def import_recording(vid_base, vid_path='.', video_project='MULTICAMERA_TEST'):
     from datetime import datetime
 
     from multi_camera.datajoint.multi_camera_dj import MultiCameraRecording, SingleCameraVideo
+    from pose_pipeline import Video
 
     # search for files. expects them to be in the format vid_base.serial_number.mp4
     vids = []
     camera_names = []
     for v in os.listdir(vid_path):
         base, ext = os.path.splitext(v)
-        if ext == '.mp4' and base.split('.')[0] == vid_base:
+        if ext == '.mp4' and len(base.split('.')) == 2 and base.split('.')[0] == vid_base:
             vids.append(os.path.join(vid_path, v))
 
     print(f'Found {len(vids)} videos.')
@@ -61,13 +72,14 @@ def import_recording(vid_base, vid_path='.', video_project='MULTICAMERA_TEST'):
     for v, serial in zip(vids, camera_names):
 
         vid_filename = os.path.split(v)[1]
+        vid_filename = os.path.splitext(vid_filename)[0]
 
         vid_struct = {'video_project': video_project, 'filename': vid_filename,
                       'start_time': timestamp, 'video': v}
 
         ts_idx = serials.index(serial)
         single_struct = {'recording_timestamps': timestamp, 'camera_config_hash': camera_hash, 'camera_name': serial,
-                         'video_project': video_project, 'filename': vid_filename, 'frame_timestamps': 0} #list(frame_timestamps[:, ts_idx])}
+                         'video_project': video_project, 'filename': vid_filename, 'frame_timestamps': list(frame_timestamps[:, ts_idx])}
 
         vid_structs.append(vid_struct)
         single_structs.append(single_struct)
