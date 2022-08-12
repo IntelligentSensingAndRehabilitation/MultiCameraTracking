@@ -3,6 +3,14 @@ import numpy as np
 from tqdm import trange
 
 
+def hash_names(x):
+    ''' Hash a list of camera names '''
+    import hashlib
+    x = list(np.sort(x))
+    x = ', '.join(x)
+    return hashlib.sha256(x.encode('utf-8')).hexdigest()[:10]
+
+
 class CheckerboardAccumulator:
     """
     Helper class to detect and store the checkerboards in a
@@ -289,19 +297,21 @@ def run_calibration(vid_base, vid_path="."):
     vids = []
     for v in os.listdir(vid_path):
         base, ext = os.path.splitext(v)
-        if ext == ".mp4" and base.split(".")[0] == vid_base:
+        if ext == ".mp4" and len(base.split('.')) == 2 and base.split(".")[0] == vid_base:
             vids.append(os.path.join(vid_path, v))
 
-    print(f"Found {len(vids)} videos. Now detecting checkerboards.")
+    cam_names = [os.path.split(v)[1].split(".")[1] for v in vids]
+    camera_hash = hash_names(cam_names)
+    print(f'Cam names: {cam_names} camera hash: {camera_hash}')
 
+    print(f"Found {len(vids)} videos. Now detecting checkerboards.")
     parsers = get_checkerboards(
         vids, max_frames=5000, skip=20, save_images=True, downsample=2, multithread=True, checkerboard_size=11.0
     )
 
+
     print("Now running calibration")
-    cam_names = [os.path.split(v)[1].split(".")[1] for v in vids]
     error, camera_params = calibrate_bundle(parsers, cam_names, verbose=False)
-    camera_hash = hex(hash(tuple(np.sort(cam_names)))).split("x")[1][:10]
     timestamp = vid_base.split("calibration_")[1]
     timestamp = datetime.strptime(timestamp, "%Y%m%d_%H%M%S")
 

@@ -53,3 +53,5 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     run_calibration(vid_base=args.vid_base, vid_path=args.vid_path)
+
+    print('Complete')

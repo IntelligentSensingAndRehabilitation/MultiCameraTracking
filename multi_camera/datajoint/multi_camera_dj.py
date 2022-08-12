@@ -34,6 +34,7 @@ def import_recording(vid_base, vid_path='.', video_project='MULTICAMERA_TEST'):
     from datetime import datetime
 
     from multi_camera.datajoint.multi_camera_dj import MultiCameraRecording, SingleCameraVideo
+    from ..analysis.calibration import hash_names
     from pose_pipeline import Video
 
     # search for files. expects them to be in the format vid_base.serial_number.mp4
@@ -54,7 +55,7 @@ def import_recording(vid_base, vid_path='.', video_project='MULTICAMERA_TEST'):
         return base, date
 
     camera_names = [os.path.split(v)[1].split('.')[1] for v in vids]
-    camera_hash = hex(hash(tuple(np.sort(camera_names)))).split('x')[1][:10]
+    camera_hash = hash_names(camera_names)
     _, timestamp = mysplit(vid_base)
     timestamp = datetime.strptime(timestamp, '%Y%m%d_%H%M%S')
 
@@ -87,7 +88,7 @@ def import_recording(vid_base, vid_path='.', video_project='MULTICAMERA_TEST'):
     dj.conn().start_transaction()
     try:
         MultiCameraRecording.insert1(parent)
-        Video.insert(vid_structs)
+        Video.insert(vid_structs, skip_duplicates=True)
         SingleCameraVideo.insert(single_structs)
     except Exception as e:
         dj.conn().cancel_transaction()
