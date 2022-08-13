@@ -47,6 +47,18 @@ def make_splits(dual_file_name, num_splits=2, camera_names=None):
     return filenames
 
 
+def grab_preview(vid_name):
+    from PIL import Image
+
+    vid = cv2.VideoCapture(vid_name)
+    for i in range(10):
+        _, frame = vid.read()
+    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    vid.release()
+
+    return Image.fromarray(frame)
+
+
 def convert_legacy(vid_name, flip=None):
 
     vid_base = os.path.splitext(vid_name)[0]
@@ -58,7 +70,13 @@ def convert_legacy(vid_name, flip=None):
         make_splits(vid_name, len(serials), serials)
 
     else:
-        print('Not implemented yet for no serials')
+        camera_names = ['UnknownRight', 'UnknownLeft']
+        assert flip is not None, "Please specify flip direction for videos without serial numbers"
+        if flip:
+            camera_names.reverse()
+        print(camera_names)
+        make_splits(vid_name, len(camera_names), camera_names)
+
 
 if __name__ == "__main__":
 

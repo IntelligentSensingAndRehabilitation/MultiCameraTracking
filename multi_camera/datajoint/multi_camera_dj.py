@@ -1,6 +1,9 @@
 import datajoint as dj
+from .calibrate_cameras import Calibration
+from pose_pipeline import VideoInfo, TopDownPerson
 
 schema = dj.schema("multicamera_tracking")
+
 
 @schema
 class MultiCameraRecording(dj.Manual):
@@ -15,6 +18,7 @@ class MultiCameraRecording(dj.Manual):
     camera_names        : longblob
     '''
 
+
 @schema
 class SingleCameraVideo(dj.Manual):
     definition = """
@@ -26,7 +30,78 @@ class SingleCameraVideo(dj.Manual):
     frame_timstamps      : longblob   # precise timestamps from that camera
     """
 
-def import_recording(vid_base, vid_path='.', video_project='MULTICAMERA_TEST'):
+
+@schema
+class CalibratedRecording(dj.Manual):
+    definition = '''
+    # Match calibration to a recording
+    -> MultiCameraRecording
+    -> Calibration
+    '''
+
+
+@schema
+class PersonKeypointReconstruction(dj.Computed):
+    definition = '''
+    # Use the TopDownKeypoints to reconstruct the 3D joint locations
+    -> CalibratedRecording
+    top_down_method     :  int
+    ---
+    keypoints3d         : longblob
+    '''
+
+    top_down_method = 0
+
+    def __init__(self, top_down_method=None):
+        super().__init__()
+        if top_down_method is not None:
+            self.top_down_method = top_down_method
+
+    def make(self, key):
+
+        from .triangulate import reconstruct
+
+        calibration_key = (Calibration & key).fetch1('KEY')
+        recording_key = (MultiCameraRecording & key).fetch1('KEY')
+
+        key['keypoints3d'] = reconstruct(recording_key, calibration_key, top_down_method=self.top_down_method)
+        key['top_down_method'] = self.top_down_method
+        self.insert1(key)
+
+    @property
+    def key_source(self):
+        return CalibratedRecording - (SingleCameraVideo - TopDownPerson & {'top_down_method': self.top_down_method})
+
+
+@schema
+class PersonKeypointReconstructionVideo(dj.Computed):
+    definition = '''
+    # Video from reconstruction
+    -> PersonKeypointReconstruction
+    ---
+    output_video      : attach@localattach    # datajoint managed video file
+    '''
+
+    def make(self, key):
+        import os
+        import tempfile
+        import numpy as np
+        from ..utils.visualization import skeleton_video
+
+        fd, out_file_name = tempfile.mkstemp(suffix=".mp4")
+        os.close(fd)
+
+        fps = np.unique((VideoInfo * SingleCameraVideo & key).fetch('fps'))[0]
+        #fps = np.round(fps)[0]
+
+        keypoints3d = (PersonKeypointReconstruction & key).fetch1('keypoints3d')
+        skeleton_video(keypoints3d, out_file_name, fps=fps)
+
+        key["output_video"] = out_file_name
+        self.insert1(key)
+
+
+def import_recording(vid_base, vid_path='.', video_project='MULTICAMERA_TEST', legacy_flip=None):
     import os
     import json
     import numpy as np
@@ -63,8 +138,15 @@ def import_recording(vid_base, vid_path='.', video_project='MULTICAMERA_TEST'):
               'video_base_filename': vid_base, 'num_cameras': len(vids), 'camera_names': camera_names}
 
     timestamps = json.load(open(os.path.join(vid_path, vid_base + '.json'), 'r'))
-    serials = timestamps['serials']
     frame_timestamps = np.array(timestamps['timestamps'])
+    if 'serials' in timestamps.keys():
+        serials = timestamps['serials']
+    else:
+        assert legacy_flip is not None, "Please specify flip direction for videos without serial numbers"
+        if legacy_flip:
+            serials = ['UnknownLeft', 'UnknownRight']
+        else:
+            serials = ['UnknownRight', 'UnknownLeft']
 
     assert all(np.sort(serials) == np.sort(camera_names))
 
