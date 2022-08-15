@@ -15,6 +15,7 @@ class Calibration(dj.Manual):
     cal_timestamp        : timestamp
     camera_config_hash   : varchar(10)
     ---
+    recording_base       : varchar(50)
     num_cameras          : int
     camera_names         : longblob   # list of camera names
     camera_calibration   : longblob   # calibration results
@@ -22,9 +23,15 @@ class Calibration(dj.Manual):
     """
 
 
-def run_calibration(vid_base, vid_path="."):
+def run_calibration(vid_base, vid_path=None):
 
     from ..analysis.calibration import run_calibration
+
+    if vid_path is None:
+        import os
+        vid_path, vid_base = os.path.split(vid_base)
+
+    print(vid_path, vid_base)
 
     entry = run_calibration(vid_base, vid_path)
 
@@ -40,6 +47,8 @@ def run_calibration(vid_base, vid_path="."):
             print("Cancelling")
             return
 
+    entry['recording_base'] = vid_base
+
     Calibration.insert1(entry)
 
 
@@ -49,7 +58,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Compute calibration from specified videos and insert into database")
     parser.add_argument("vid_base", help="Base filenames to use for calibration")
-    parser.add_argument("--vid_path", help="Path to files", default=".")
+    parser.add_argument("--vid_path", help="Path to files", default=None)
     args = parser.parse_args()
 
     run_calibration(vid_base=args.vid_base, vid_path=args.vid_path)

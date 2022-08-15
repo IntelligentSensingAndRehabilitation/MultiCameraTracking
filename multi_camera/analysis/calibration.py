@@ -227,7 +227,7 @@ def calibrate_pair(
     return cal
 
 
-def calibrate_bundle(parsers, camera_names=None, verbose=False):
+def calibrate_bundle(parsers, camera_names=None, fisheye=False, verbose=False, **kwargs):
     """
     Calibrate multiple cameras using bundle adjustment
 
@@ -237,6 +237,10 @@ def calibrate_bundle(parsers, camera_names=None, verbose=False):
         Parameters:
             parsers (list) : list of checkerboard video parser results
             camera_names (list, optional) : list of camera names
+            fisheye (boolean, optional) : set true to enable a fisheye camear
+            versbose (boolean, optional) : set true to produce more outputs
+            **kwargs : option arguments that can be passed into aniposelib.bundle_adjust_iter
+                (e.g. n_samp_full=200, n_samp_iter=100)
 
         Returns:
             reprojection error
@@ -245,6 +249,8 @@ def calibrate_bundle(parsers, camera_names=None, verbose=False):
 
     from aniposelib.cameras import CameraGroup
     from aniposelib.boards import Checkerboard
+    from aniposelib.utils import get_initial_extrinsics, make_M, get_rtvec, get_connections
+    from aniposelib.boards import merge_rows, extract_points, extract_rtvecs
 
     if camera_names is None:
         camera_names = list(range(len(parsers)))
@@ -254,7 +260,7 @@ def calibrate_bundle(parsers, camera_names=None, verbose=False):
     cols = p.cols
     rows = p.rows
 
-    cgroup = CameraGroup.from_names(camera_names, fisheye=True)
+    cgroup = CameraGroup.from_names(camera_names, fisheye=fisheye)
     board = Checkerboard(cols, rows, square_length=square_length)
 
     for cam, p in zip(cgroup.cameras, parsers):
@@ -266,10 +272,49 @@ def calibrate_bundle(parsers, camera_names=None, verbose=False):
     for p in parsers:
         rows = []
         for frame_num, corner in zip(p.frames, p.corners):
-            rows.append({"framenum": frame_num, "corners": corner, "ids": None})
+            row = {"framenum": frame_num, "corners": corner, "ids": None}
+            row['filled'] = board.fill_points(row['corners'], row['ids'])
+            rows.append(row)
         all_rows.append(rows)
 
-    error = cgroup.calibrate_rows(all_rows, board, verbose=verbose)
+    if True:
+        ### from here down is largely the same as calling
+        ###     error = cgroup.calibrate_rows(all_rows, board, verbose=verbose)
+        ### except it replaces the camera calibration a bit
+        for rows, camera, parser in zip(all_rows, cgroup.cameras, parsers):
+            size = camera.get_size()
+
+            assert size is not None, \
+                "Camera with name {} has no specified frame size".format(camera.get_name())
+
+            if fisheye:
+                objp, imgp = board.get_all_calibration_points(rows)
+                mixed = [(o, i) for (o, i) in zip(objp, imgp) if len(o) >= 7]
+                objp, imgp = zip(*mixed)
+                matrix = cv2.initCameraMatrix2D(objp, imgp, tuple(size))
+                camera.set_camera_matrix(matrix)
+            else:
+                cal = parser.calibrate_camera()
+                camera.set_camera_matrix(cal['mtx'])
+                # camera.set_distortions(cal['dist'][0])  # system only expects one distortion parameters
+
+        for i, (row, cam) in enumerate(zip(all_rows, cgroup.cameras)):
+            all_rows[i] = board.estimate_pose_rows(cam, row)
+
+        merged = merge_rows(all_rows)
+        imgp, extra = extract_points(merged, board, min_cameras=2)
+
+        rtvecs = extract_rtvecs(merged)
+        rvecs, tvecs = get_initial_extrinsics(rtvecs, cgroup.get_names())
+        cgroup.set_rotations(rvecs)
+        cgroup.set_translations(tvecs)
+
+        if verbose:
+            print(cgroup.get_dicts())
+
+        error = cgroup.bundle_adjust_iter(imgp, extra, verbose=verbose, **kwargs)
+    else:
+        error = cgroup.calibrate_rows(all_rows, board, verbose=verbose)
 
     return error, cgroup.get_dicts()
 
@@ -299,19 +344,18 @@ def run_calibration(vid_base, vid_path="."):
         base, ext = os.path.splitext(v)
         if ext == ".mp4" and len(base.split('.')) == 2 and base.split(".")[0] == vid_base:
             vids.append(os.path.join(vid_path, v))
+    vids.sort()
 
     cam_names = [os.path.split(v)[1].split(".")[1] for v in vids]
     camera_hash = hash_names(cam_names)
     print(f'Cam names: {cam_names} camera hash: {camera_hash}')
 
     print(f"Found {len(vids)} videos. Now detecting checkerboards.")
-    parsers = get_checkerboards(
-        vids, max_frames=5000, skip=20, save_images=True, downsample=2, multithread=True, checkerboard_size=11.0
-    )
-
+    parsers = get_checkerboards(vids, max_frames=5000, skip=10, save_images=True,
+                                downsample=2, multithread=True, checkerboard_size=11.0)
 
     print("Now running calibration")
-    error, camera_params = calibrate_bundle(parsers, cam_names, verbose=False)
+    error, camera_params = calibrate_bundle(parsers, cam_names, verbose=True)
     timestamp = vid_base.split("calibration_")[1]
     timestamp = datetime.strptime(timestamp, "%Y%m%d_%H%M%S")
 
