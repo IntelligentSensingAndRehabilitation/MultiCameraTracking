@@ -1,5 +1,6 @@
 
 def reconstruct(recording_key, calibration_key, top_down_method=0):
+    import numpy as np
     from pose_pipeline import TopDownPerson
     from aniposelib.cameras import CameraGroup
     from .calibrate_cameras import Calibration

@@ -1,4 +1,5 @@
 import numpy as np
+import numpy as np
 
 
 def triangulate_with_occlusion(p : np.array, cgroup, threshold=0.25) -> np.array:
@@ -39,8 +40,16 @@ def reconstruct(points2d, cgroup, threshold=0.25):
     '''
 
     from einops import rearrange
-    points2d_flat = rearrange(points2d, 'n c j i -> (n j) c i')
-    points3d_flat = np.array([triangulate_with_occlusion(p, cgroup, threshold) for p in points2d_flat])
+
+    occluded = points2d[:, :, :, -1] < threshold
+    points2d_masked = np.ma.masked_array(points2d[..., :2], mask=np.stack([occluded]*2, axis=-1))
+    points2d_masked = points2d_masked.filled(np.nan)
+
+    points2d_flat = rearrange(points2d_masked, 'n c j i -> c (n j) i')
+    #points3d_flat = np.array([triangulate_with_occlusion(p, cgroup, threshold) for p in points2d_flat])
+    points3d_flat = cgroup.triangulate(points2d_flat, progress=True)
+
+    #points3d_flat, _, _, _ = cgroup.triangulate_ransac(points2d_flat, progress=True, min_cams=4)
     points3d = rearrange(points3d_flat, '(n j) i -> n j i', j=points2d.shape[2])
 
     return points3d
