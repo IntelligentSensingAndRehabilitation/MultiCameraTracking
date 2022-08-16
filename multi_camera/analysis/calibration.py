@@ -227,7 +227,36 @@ def calibrate_pair(
     return cal
 
 
-def calibrate_bundle(parsers, camera_names=None, fisheye=False, verbose=False, **kwargs):
+def extract_origin(cgroup, imgp):
+    cal3d = cgroup.triangulate(imgp[:, :24])
+
+    x0 = cal3d[0]
+    x = cal3d[5] - x0
+    z = cal3d[18] - x0
+
+    x = x / np.linalg.norm(x)
+    z = -z / np.linalg.norm(z)
+    y = -np.cross(x, z)
+
+    board_rotation = np.stack([x, y, z])
+    return x0, board_rotation
+
+
+def shift_calibration(cgroup, offset, rotation=np.eye(3), zoffset=None):
+    cgroup = cgroup.copy()
+
+    for cam in cgroup.cameras:
+        camera_offset = cv2.Rodrigues(cam.rvec)[0] @ offset
+        cam.tvec = cam.tvec + camera_offset
+        cam.rvec = cv2.Rodrigues(cv2.Rodrigues(cam.rvec)[0] @ rotation.transpose())[0]
+
+    if zoffset:
+        cgroup = shift_calibration(cgroup, np.array([0, 0, zoffset]))
+
+    return cgroup
+
+
+def calibrate_bundle(parsers, camera_names=None, fisheye=False, verbose=True, zero_origin=False, **kwargs):
     """
     Calibrate multiple cameras using bundle adjustment
 
@@ -277,44 +306,42 @@ def calibrate_bundle(parsers, camera_names=None, fisheye=False, verbose=False, *
             rows.append(row)
         all_rows.append(rows)
 
-    if True:
-        ### from here down is largely the same as calling
-        ###     error = cgroup.calibrate_rows(all_rows, board, verbose=verbose)
-        ### except it replaces the camera calibration a bit
-        for rows, camera, parser in zip(all_rows, cgroup.cameras, parsers):
-            size = camera.get_size()
+    for rows, camera, parser in zip(all_rows, cgroup.cameras, parsers):
+        size = camera.get_size()
 
-            assert size is not None, \
-                "Camera with name {} has no specified frame size".format(camera.get_name())
+        assert size is not None, \
+            "Camera with name {} has no specified frame size".format(camera.get_name())
 
-            if fisheye:
-                objp, imgp = board.get_all_calibration_points(rows)
-                mixed = [(o, i) for (o, i) in zip(objp, imgp) if len(o) >= 7]
-                objp, imgp = zip(*mixed)
-                matrix = cv2.initCameraMatrix2D(objp, imgp, tuple(size))
-                camera.set_camera_matrix(matrix)
-            else:
-                cal = parser.calibrate_camera()
-                camera.set_camera_matrix(cal['mtx'])
-                # camera.set_distortions(cal['dist'][0])  # system only expects one distortion parameters
+        if fisheye:
+            objp, imgp = board.get_all_calibration_points(rows)
+            mixed = [(o, i) for (o, i) in zip(objp, imgp) if len(o) >= 7]
+            objp, imgp = zip(*mixed)
+            matrix = cv2.initCameraMatrix2D(objp, imgp, tuple(size))
+            camera.set_camera_matrix(matrix)
+        else:
+            cal = parser.calibrate_camera()
+            camera.set_camera_matrix(cal['mtx'])
+            # camera.set_distortions(cal['dist'][0])  # system only expects one distortion parameters
 
-        for i, (row, cam) in enumerate(zip(all_rows, cgroup.cameras)):
-            all_rows[i] = board.estimate_pose_rows(cam, row)
+    for i, (row, cam) in enumerate(zip(all_rows, cgroup.cameras)):
+        all_rows[i] = board.estimate_pose_rows(cam, row)
 
-        merged = merge_rows(all_rows)
-        imgp, extra = extract_points(merged, board, min_cameras=2)
+    merged = merge_rows(all_rows)
+    imgp, extra = extract_points(merged, board, min_cameras=2)
 
-        rtvecs = extract_rtvecs(merged)
-        rvecs, tvecs = get_initial_extrinsics(rtvecs, cgroup.get_names())
-        cgroup.set_rotations(rvecs)
-        cgroup.set_translations(tvecs)
+    rtvecs = extract_rtvecs(merged)
+    rvecs, tvecs = get_initial_extrinsics(rtvecs, cgroup.get_names())
+    cgroup.set_rotations(rvecs)
+    cgroup.set_translations(tvecs)
 
-        if verbose:
-            print(cgroup.get_dicts())
+    if verbose:
+        print(cgroup.get_dicts())
 
-        error = cgroup.bundle_adjust_iter(imgp, extra, verbose=verbose, **kwargs)
-    else:
-        error = cgroup.calibrate_rows(all_rows, board, verbose=verbose)
+    error = cgroup.bundle_adjust_iter(imgp, extra, verbose=verbose, **kwargs)
+
+    if zero_origin:
+        x0, board_rotation = extract_origin(cgroup, imgp)
+        cgroup = shift_calibration(cgroup, x0, board_rotation, 80)
 
     return error, cgroup.get_dicts()
 
@@ -355,7 +382,7 @@ def run_calibration(vid_base, vid_path="."):
                                 downsample=2, multithread=True, checkerboard_size=11.0)
 
     print("Now running calibration")
-    error, camera_params = calibrate_bundle(parsers, cam_names, verbose=True)
+    error, camera_params = calibrate_bundle(parsers, cam_names, verbose=True, zero_origin=True)
     timestamp = vid_base.split("calibration_")[1]
     timestamp = datetime.strptime(timestamp, "%Y%m%d_%H%M%S")
 
