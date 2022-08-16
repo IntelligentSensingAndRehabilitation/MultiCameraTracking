@@ -130,7 +130,7 @@ def import_recording(vid_base, vid_path='.', video_project='MULTICAMERA_TEST', l
     timestamp = datetime.strptime(timestamp, '%Y%m%d_%H%M%S')
 
     parent = {'recording_timestamps': timestamp, 'camera_config_hash': camera_hash, 'video_project': video_project,
-              'video_base_filename': vid_base, 'camera_names': camera_names}
+              'video_base_filename': vid_base}
 
     timestamps = json.load(open(os.path.join(vid_path, vid_base + '.json'), 'r'))
     frame_timestamps = np.array(timestamps['timestamps'])
