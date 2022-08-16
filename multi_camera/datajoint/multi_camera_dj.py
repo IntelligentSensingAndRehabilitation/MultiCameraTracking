@@ -1,6 +1,6 @@
 import datajoint as dj
 from .calibrate_cameras import Calibration
-from pose_pipeline import VideoInfo, TopDownPerson
+from pose_pipeline import VideoInfo, TopDownPerson, TopDownMethodLookup
 
 schema = dj.schema("multicamera_tracking")
 
@@ -39,21 +39,22 @@ class CalibratedRecording(dj.Manual):
 
 
 @schema
-class PersonKeypointReconstruction(dj.Computed):
+class PersonKeypointReconstructionMethod(dj.Manual):
     definition = '''
     # Use the TopDownKeypoints to reconstruct the 3D joint locations
     -> CalibratedRecording
     top_down_method     :  int
+    '''
+
+
+@schema
+class PersonKeypointReconstruction(dj.Computed):
+    definition = '''
+    # Use the TopDownKeypoints to reconstruct the 3D joint locations
+    -> PersonKeypointReconstructionMethod
     ---
     keypoints3d         : longblob
     '''
-
-    top_down_method = 0
-
-    def __init__(self, top_down_method=None):
-        super().__init__()
-        if top_down_method is not None:
-            self.top_down_method = top_down_method
 
     def make(self, key):
 
@@ -62,13 +63,8 @@ class PersonKeypointReconstruction(dj.Computed):
         calibration_key = (Calibration & key).fetch1('KEY')
         recording_key = (MultiCameraRecording & key).fetch1('KEY')
 
-        key['keypoints3d'] = reconstruct(recording_key, calibration_key, top_down_method=self.top_down_method)
-        key['top_down_method'] = self.top_down_method
-        self.insert1(key)
-
-    @property
-    def key_source(self):
-        return CalibratedRecording - (SingleCameraVideo - TopDownPerson & {'top_down_method': self.top_down_method})
+        key['keypoints3d'] = reconstruct(recording_key, calibration_key, top_down_method=key['top_down_method'])
+        self.insert1(key, allow_direct_insert=True)
 
 
 @schema
@@ -86,6 +82,7 @@ class PersonKeypointReconstructionVideo(dj.Computed):
         import numpy as np
         from ..utils.visualization import skeleton_video
 
+        method_name = (TopDownMethodLookup & key).fetch1('top_down_method_name')
         fd, out_file_name = tempfile.mkstemp(suffix=".mp4")
         os.close(fd)
 
@@ -93,7 +90,7 @@ class PersonKeypointReconstructionVideo(dj.Computed):
         #fps = np.round(fps)[0]
 
         keypoints3d = (PersonKeypointReconstruction & key).fetch1('keypoints3d')
-        skeleton_video(keypoints3d, out_file_name, fps=fps)
+        skeleton_video(keypoints3d, out_file_name, method_name, fps=fps)
 
         key["output_video"] = out_file_name
         self.insert1(key)

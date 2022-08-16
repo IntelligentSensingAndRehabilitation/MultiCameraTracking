@@ -1,58 +1,77 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
-from pose_pipeline import TopDownPerson
+from pose_pipeline import OpenPosePerson, TopDownPerson
 
 
-def center_skeleton(keypoints3d):
-    joints = TopDownPerson.joint_names()
+def center_skeleton(keypoints3d, joints):
     pelvis = np.mean(keypoints3d[:, np.array([joints.index('Left Hip'), joints.index('Right Hip')])], axis=1, keepdims=True)
     centered = keypoints3d - pelvis
 
-    # TODO: this rotation should be removed later
-    from scipy.spatial.transform import Rotation as R
-    K = R.from_euler('XYZ', np.array([30, 120, 0]), degrees=True).as_matrix()
-
-    return centered @ K
+    return centered
 
 
-def skeleton_video(keypoints3d, filename, fps=30.0):
+def skeleton_video(keypoints3d, filename, method, fps=30.0):
 
-    keypoints3d = center_skeleton(keypoints3d)
+    if method == 'OpenPose':
+        joints = OpenPosePerson.joint_names()
+        left = ['Left Little Toe', 'Left Ankle', 'Left Big Toe', 'Left Ankle', 'Left Heel', 'Left Ankle', 'Left Knee', 'Left Hip', 'Pelvis', 'Sternum', 'Left Shoulder', 'Left Elbow', 'Left Wrist']
+        right = ['Right Little Toe', 'Right Ankle', 'Right Big Toe', 'Right Ankle', 'Right Heel', 'Right Ankle', 'Right Knee', 'Right Hip', 'Pelvis', 'Sternum', 'Right Shoulder', 'Right Elbow', 'Right Wrist']
+    elif method == 'MMPose':
+        joints = TopDownPerson.joint_names('MMPoseCoco')
+        left = ['Left Ankle', 'Left Knee', 'Left Hip', 'Left Shoulder', 'Left Elbow', 'Left Wrist']
+        right = [ 'Right Ankle', 'Right Knee', 'Right Hip', 'Right Shoulder', 'Right Elbow', 'Right Wrist']
+    elif method == 'MMPoseWholebody':
+        joints = TopDownPerson.joint_names('MMPoseWholebody')
+        left = ['Left Little Toe', 'Left Ankle', 'Left Big Toe', 'Left Ankle', 'Left Heel', 'Left Ankle', 'Left Knee', 'Left Hip', 'Pelvis', 'Sternum', 'Left Shoulder', 'Left Elbow', 'Left Wrist']
+        right = ['Right Little Toe', 'Right Ankle', 'Right Big Toe', 'Right Ankle', 'Right Heel', 'Right Ankle', 'Right Knee', 'Right Hip', 'Pelvis', 'Sternum', 'Right Shoulder', 'Right Elbow', 'Right Wrist']
+    elif method == 'MMPoseHalpe':
+        joints = TopDownPerson.joint_names('MMPoseHalpe')
+        left = ['Left Ankle', 'Left Little Toe',  'Left Big Toe', 'Left Ankle', 'Left Heel', 'Left Ankle', 'Left Knee', 'Left Hip', 'Pelvis', 'Neck', 'Head', 'Neck', 'Left Shoulder', 'Left Elbow', 'Left Wrist']
+        right = ['Right Ankle', 'Right Little Toe', 'Right Big Toe', 'Right Ankle', 'Right Heel', 'Right Ankle', 'Right Knee', 'Right Hip', 'Pelvis', 'Neck', 'Head', 'Neck', 'Right Shoulder', 'Right Elbow', 'Right Wrist']
+    else:
+        raise Exception(f'Unknown method: {method}')
+
+    centered = center_skeleton(keypoints3d, joints)
+
+    left = np.array([joints.index(l) for l in left])
+    right = np.array([joints.index(l) for l in right])
+    num_main_joints = len(joints)
 
     fig = plt.figure()
     ax = fig.add_subplot(projection='3d')
-
-    joints = TopDownPerson.joint_names()
-    left = ['Left Ankle', 'Left Knee', 'Left Hip', 'Left Shoulder', 'Left Elbow', 'Left Wrist']
-    left = np.array([joints.index(l) for l in left])
-    right = ['Right Ankle', 'Right Knee', 'Right Hip', 'Right Shoulder', 'Right Elbow', 'Right Wrist']
-    right = np.array([joints.index(l) for l in right])
 
     def initialize():
         frame_idx = keypoints3d.shape[0] // 2
         lines = []
 
-        lines.append(plt.plot(keypoints3d[frame_idx, :, 0], keypoints3d[frame_idx, :, 2], -keypoints3d[frame_idx, :, 1], '.'))
-        lines.append(plt.plot(keypoints3d[frame_idx, left, 0], keypoints3d[frame_idx, left, 2], -keypoints3d[frame_idx, left, 1], 'b'))
-        lines.append(plt.plot(keypoints3d[frame_idx, right, 0], keypoints3d[frame_idx, right, 2], -keypoints3d[frame_idx, right, 1], 'r'))
+        lines.append(plt.plot(centered[frame_idx, :num_main_joints, 0], centered[frame_idx, :num_main_joints, 1], centered[frame_idx, :num_main_joints, 2], '.'))
+        lines.append(plt.plot(centered[frame_idx, num_main_joints:, 0], centered[frame_idx, num_main_joints:, 1], centered[frame_idx, num_main_joints:, 2], '.', markersize=1))
+        lines.append(plt.plot(centered[frame_idx, left, 0], centered[frame_idx, left, 1], centered[frame_idx, left, 2], 'b'))
+        lines.append(plt.plot(centered[frame_idx, right, 0], centered[frame_idx, right, 1], centered[frame_idx, right, 2], 'r'))
 
         return lines
 
     def update_video(frame_idx, lines):
         lines = lines.copy()
 
-        lines[0][0].set_xdata(keypoints3d[frame_idx, :, 0])
-        lines[0][0].set_ydata(keypoints3d[frame_idx, :, 2])
-        lines[0][0].set_3d_properties(-keypoints3d[frame_idx, :, 1], zdir='z')
+        lines[0][0].set_xdata(centered[frame_idx, :num_main_joints, 0])
+        lines[0][0].set_ydata(centered[frame_idx, :num_main_joints, 1])
+        lines[0][0].set_3d_properties(centered[frame_idx, :num_main_joints, 2], zdir='z')
 
-        lines[1][0].set_xdata(keypoints3d[frame_idx, left, 0])
-        lines[1][0].set_ydata(keypoints3d[frame_idx, left, 2])
-        lines[1][0].set_3d_properties(-keypoints3d[frame_idx, left, 1], zdir='z')
+        lines[1][0].set_xdata(centered[frame_idx, num_main_joints:, 0])
+        lines[1][0].set_ydata(centered[frame_idx, num_main_joints:, 1])
+        lines[1][0].set_3d_properties(centered[frame_idx, num_main_joints:, 2], zdir='z')
 
-        lines[2][0].set_xdata(keypoints3d[frame_idx, right, 0])
-        lines[2][0].set_ydata(keypoints3d[frame_idx, right, 2])
-        lines[2][0].set_3d_properties(-keypoints3d[frame_idx, right, 1], zdir='z')
+        lines[2][0].set_xdata(centered[frame_idx, left, 0])
+        lines[2][0].set_ydata(centered[frame_idx, left, 1])
+        lines[2][0].set_3d_properties(centered[frame_idx, left, 2], zdir='z')
+
+        lines[3][0].set_xdata(centered[frame_idx, right, 0])
+        lines[3][0].set_ydata(centered[frame_idx, right, 1])
+        lines[3][0].set_3d_properties(centered[frame_idx, right, 2], zdir='z')
+
+        ax.view_init(elev=10., azim=-frame_idx/30*np.pi*2)
 
     lines = initialize()
 
