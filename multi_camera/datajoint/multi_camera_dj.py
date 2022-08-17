@@ -1,4 +1,6 @@
 import datajoint as dj
+import numpy as np
+
 from .calibrate_cameras import Calibration
 from pose_pipeline import VideoInfo, TopDownPerson, TopDownMethodLookup
 
@@ -94,6 +96,74 @@ class PersonKeypointReconstructionVideo(dj.Computed):
 
         key["output_video"] = out_file_name
         self.insert1(key)
+
+
+@schema
+class SMPLReconstruction(dj.Computed):
+    definition = '''
+    # Use the TopDownKeypoints to reconstruct the 3D joint locations
+    -> PersonKeypointReconstruction
+    ---
+    poses               : longblob
+    shape               : longblob
+    orientation         : longblob
+    translation         : longblob
+    joints3d            : longblob
+    '''
+
+    def make(self, key):
+        from ..analysis.easymocap import easymocap_fit_smpl_3d, get_joint_openpose
+        from easymocap.dataset import CONFIG as config
+
+        # get triangulated points and convert to meters
+        points3d = (PersonKeypointReconstruction & key).fetch1('keypoints3d') / 100.0
+
+        if key['top_down_method'] == 2:
+            # Convert the HALPE coordinate order to the expected order
+
+            def joint_renamer(j):
+                j = j.replace('Sternum', 'Neck')
+                j = j.replace('Right ', 'R')
+                j = j.replace('Left ', 'L')
+                j = j.replace('Little', 'Small')
+                j = j.replace('Pelvis', 'MidHip')
+                j = j.replace(' ', '')
+                return j
+
+            def normalize_marker_names(joints):
+                """ Convert joint names to those expected by OpenSim model """
+                return [joint_renamer(j) for j in joints]
+
+            joint_names = normalize_marker_names(TopDownPerson.joint_names('MMPoseHalpe'))
+            joint_reorder = np.array([joint_names.index(j) for j in config['body15']['joint_names']])
+            points3d = points3d[:, joint_reorder]
+
+        elif key['top_down_method'] == 4:
+            # for OpenPose the keypoint order can be preserved
+            pass
+
+        else:
+            raise NotImplementedError(f'Top down method {key["top_down_method"]} not supported.')
+
+        res = easymocap_fit_smpl_3d(points3d, verbose=True)
+        key['poses'] = res['poses']
+        key['shape'] = res['shapes']
+        key['orientation'] = res['Rh']
+        key['translation'] = res['Th']
+        key['joints3d'] = get_joint_openpose(res)
+        self.insert1(key)
+
+    def export_trc(self, filename, z_offset=0):
+        from pose_pipeline import TopDownPerson, VideoInfo
+        from multi_camera.analysis.opensim import normalize_marker_names, points3d_to_trc
+
+        joint_names = TopDownPerson.joint_names('OpenPose')
+        joints3d = self.fetch1('joints3d')
+        fps = np.unique((VideoInfo * SingleCameraVideo * MultiCameraRecording & self).fetch('fps'))
+
+
+        points3d_to_trc(joints3d + np.array([[[0, z_offset, 0]]]), filename,
+                        normalize_marker_names(joint_names), fps=fps)
 
 
 def import_recording(vid_base, vid_path='.', video_project='MULTICAMERA_TEST', legacy_flip=None):
