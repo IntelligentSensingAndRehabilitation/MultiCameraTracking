@@ -65,3 +65,15 @@ def get_joint_openpose(res, model_path=model_path):
 
     body_model = load_model(model_path=model_path)
     return body_model(return_verts=False, return_joints=True, return_tensor=False, **res)
+
+
+def get_vertices(res, model_path=model_path):
+    from easymocap.smplmodel.body_param import load_model
+
+    body_model = load_model(model_path=model_path)
+    return body_model(return_verts=True, return_tensor=False, **res)
+
+def get_faces():
+    from easymocap.smplmodel.body_param import load_model
+    body_model = load_model(model_path=model_path)
+    return body_model.faces

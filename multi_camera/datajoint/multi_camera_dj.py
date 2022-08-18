@@ -2,7 +2,7 @@ import datajoint as dj
 import numpy as np
 
 from .calibrate_cameras import Calibration
-from pose_pipeline import VideoInfo, TopDownPerson, TopDownMethodLookup
+from pose_pipeline import Video, VideoInfo, TopDownPerson, TopDownMethodLookup, BestDetectedFrames
 
 schema = dj.schema("multicamera_tracking")
 
@@ -109,10 +109,12 @@ class SMPLReconstruction(dj.Computed):
     orientation         : longblob
     translation         : longblob
     joints3d            : longblob
+    vertices            : longblob
+    faces               : longblob
     '''
 
     def make(self, key):
-        from ..analysis.easymocap import easymocap_fit_smpl_3d, get_joint_openpose
+        from ..analysis.easymocap import easymocap_fit_smpl_3d, get_joint_openpose, get_vertices, get_faces
         from easymocap.dataset import CONFIG as config
 
         # get triangulated points and convert to meters
@@ -151,7 +153,13 @@ class SMPLReconstruction(dj.Computed):
         key['orientation'] = res['Rh']
         key['translation'] = res['Th']
         key['joints3d'] = get_joint_openpose(res)
+        key['vertices'] = get_vertices(res)
+        key['faces'] = get_faces()
         self.insert1(key)
+
+    def get_result(self):
+        poses, shapes, Rh, Th = self.fetch1('poses', 'shape', 'orientation', 'translation')
+        return {'poses': poses, 'shapes': shapes, 'Rh': Rh, 'Th': Th}
 
     def export_trc(self, filename, z_offset=0):
         from pose_pipeline import TopDownPerson, VideoInfo
@@ -164,6 +172,83 @@ class SMPLReconstruction(dj.Computed):
 
         points3d_to_trc(joints3d + np.array([[[0, z_offset, 0]]]), filename,
                         normalize_marker_names(joint_names), fps=fps)
+
+
+@schema
+class SMPLReconstructionVideos(dj.Computed):
+    definition = '''
+    # Videos of SMPL reconstruction from multiview
+    -> SMPLReconstruction
+    ---
+    '''
+
+    class Video(dj.Part):
+        definition = '''
+        -> SMPLReconstructionVideos
+        -> SingleCameraVideo
+        ---
+        output_video      : attach@localattach    # datajoint managed video file
+        '''
+
+    def make(self, key):
+        import cv2
+        import os
+        import tempfile
+        from pose_pipeline.utils.visualization import video_overlay, draw_keypoints
+        from easymocap.visualize.renderer import Renderer
+
+        self.insert1(key)
+
+        videos = Video * TopDownPerson * MultiCameraRecording * PersonKeypointReconstruction * SingleCameraVideo & BestDetectedFrames & key
+        video_keys, camera_names, keypoints2d = videos.fetch('KEY', 'camera_name', 'keypoints')
+        camera_params = (Calibration & key).fetch1('camera_calibration')
+
+        # get video parameters
+        width = np.unique((VideoInfo & video_keys).fetch('width'))[0]
+        height = np.unique((VideoInfo & video_keys).fetch('height'))[0]
+        fps = np.unique((VideoInfo & video_keys).fetch('fps'))[0]
+
+        # get vertices, in world coordintes
+        faces, vertices = (SMPLReconstruction & key).fetch1('faces', 'vertices')
+
+        render = Renderer(height=height, width=width, down_scale=2, bg_color=[0, 0, 0, 0.0])
+
+        for i, (video_key, camera) in enumerate(zip(video_keys, camera_names)):
+
+            camera_param = [c for c in camera_params if c['name'] == camera][0]
+
+            # get camera parameters
+            K = np.array(camera_param['matrix'])
+            R = cv2.Rodrigues(np.array(camera_param['rotation']))[0]
+            T = np.array(camera_param['translation']).reshape([-1, 1]) / 100.0  # convert to m
+            cameras = {'K': [K], 'R': [R], 'T': [T]}
+
+            def render_overlay(frame, idx, vertices=vertices, faces=faces, cameras=cameras):
+
+                if idx >= vertices.shape[0]:
+                    return frame
+
+                render_data = {3: {'vertices': vertices[idx], 'faces': faces, 'name': 'human'}}
+
+                frame = render.render(render_data, cameras, [frame], add_back=True)[0].copy()
+                frame = draw_keypoints(frame, keypoints2d[i][idx] / render.down_scale, radius=6, color=(125, 125, 255))
+
+                return frame
+
+            fd, out_file_name = tempfile.mkstemp(suffix=".mp4")
+            os.close(fd)
+
+            video = (Video & video_key).fetch1('video')
+            video_overlay(video, out_file_name, render_overlay, max_frames=None, downsample=2, compress=True)
+
+            single_video_key = (SingleCameraVideo * SMPLReconstruction & key & video_key).fetch1('KEY')
+            single_video_key['output_video'] = out_file_name
+
+            SMPLReconstructionVideos.Video.insert1(single_video_key)
+
+            os.remove(video)
+            os.remove(out_file_name)
+
 
 
 def import_recording(vid_base, vid_path='.', video_project='MULTICAMERA_TEST', legacy_flip=None):
