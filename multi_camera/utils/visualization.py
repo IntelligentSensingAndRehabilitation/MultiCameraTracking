@@ -46,9 +46,9 @@ def skeleton_video(keypoints3d, filename, method, fps=30.0):
         lines = []
 
         lines.append(plt.plot(centered[frame_idx, :num_main_joints, 0], centered[frame_idx, :num_main_joints, 1], centered[frame_idx, :num_main_joints, 2], '.'))
-        lines.append(plt.plot(centered[frame_idx, num_main_joints:, 0], centered[frame_idx, num_main_joints:, 1], centered[frame_idx, num_main_joints:, 2], '.', markersize=1))
         lines.append(plt.plot(centered[frame_idx, left, 0], centered[frame_idx, left, 1], centered[frame_idx, left, 2], 'b'))
         lines.append(plt.plot(centered[frame_idx, right, 0], centered[frame_idx, right, 1], centered[frame_idx, right, 2], 'r'))
+        lines.append(plt.plot(centered[frame_idx, num_main_joints:, 0], centered[frame_idx, num_main_joints:, 1], centered[frame_idx, num_main_joints:, 2], '.', markersize=1))
 
         return lines
 
@@ -59,17 +59,18 @@ def skeleton_video(keypoints3d, filename, method, fps=30.0):
         lines[0][0].set_ydata(centered[frame_idx, :num_main_joints, 1])
         lines[0][0].set_3d_properties(centered[frame_idx, :num_main_joints, 2], zdir='z')
 
-        lines[1][0].set_xdata(centered[frame_idx, num_main_joints:, 0])
-        lines[1][0].set_ydata(centered[frame_idx, num_main_joints:, 1])
-        lines[1][0].set_3d_properties(centered[frame_idx, num_main_joints:, 2], zdir='z')
+        lines[1][0].set_xdata(centered[frame_idx, left, 0])
+        lines[1][0].set_ydata(centered[frame_idx, left, 1])
+        lines[1][0].set_3d_properties(centered[frame_idx, left, 2], zdir='z')
 
-        lines[2][0].set_xdata(centered[frame_idx, left, 0])
-        lines[2][0].set_ydata(centered[frame_idx, left, 1])
-        lines[2][0].set_3d_properties(centered[frame_idx, left, 2], zdir='z')
+        lines[2][0].set_xdata(centered[frame_idx, right, 0])
+        lines[2][0].set_ydata(centered[frame_idx, right, 1])
+        lines[2][0].set_3d_properties(centered[frame_idx, right, 2], zdir='z')
 
-        lines[3][0].set_xdata(centered[frame_idx, right, 0])
-        lines[3][0].set_ydata(centered[frame_idx, right, 1])
-        lines[3][0].set_3d_properties(centered[frame_idx, right, 2], zdir='z')
+        lines[3][0].set_xdata(centered[frame_idx, num_main_joints:, 0])
+        lines[3][0].set_ydata(centered[frame_idx, num_main_joints:, 1])
+        lines[3][0].set_3d_properties(centered[frame_idx, num_main_joints:, 2], zdir='z')
+
 
         ax.view_init(elev=10., azim=-frame_idx/30*np.pi*2)
 

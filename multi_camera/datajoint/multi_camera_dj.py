@@ -118,7 +118,7 @@ class SMPLReconstruction(dj.Computed):
         from easymocap.dataset import CONFIG as config
 
         # get triangulated points and convert to meters
-        points3d = (PersonKeypointReconstruction & key).fetch1('keypoints3d') / 100.0
+        points3d = (PersonKeypointReconstruction & key).fetch1('keypoints3d') / 1000.0
 
         if key['top_down_method'] == 2:
             # Convert the HALPE coordinate order to the expected order
@@ -169,7 +169,6 @@ class SMPLReconstruction(dj.Computed):
         joints3d = self.fetch1('joints3d')
         fps = np.unique((VideoInfo * SingleCameraVideo * MultiCameraRecording & self).fetch('fps'))
 
-
         points3d_to_trc(joints3d + np.array([[[0, z_offset, 0]]]), filename,
                         normalize_marker_names(joint_names), fps=fps)
 
@@ -194,6 +193,8 @@ class SMPLReconstructionVideos(dj.Computed):
         import cv2
         import os
         import tempfile
+        from einops import rearrange
+        from aniposelib.cameras import CameraGroup
         from pose_pipeline.utils.visualization import video_overlay, draw_keypoints
         from easymocap.visualize.renderer import Renderer
 
@@ -209,18 +210,30 @@ class SMPLReconstructionVideos(dj.Computed):
         fps = np.unique((VideoInfo & video_keys).fetch('fps'))[0]
 
         # get vertices, in world coordintes
-        faces, vertices = (SMPLReconstruction & key).fetch1('faces', 'vertices')
+        faces, vertices, joints3d = (SMPLReconstruction & key).fetch1('faces', 'vertices', 'joints3d')
+
+        # convert from meter to the mm that the camera model expects
+        joints3d = joints3d * 1000.0
+
+        # compute keypoints from reprojection of SMPL fit
+        cgroup = CameraGroup.from_dicts(camera_params)
+        joints3d_flat = rearrange(joints3d, 't j k -> (t j) k')
+        #points2d_proj = cgroup.project(joints3d_flat)
+        #points2d_distor = np.array([c.distort_points(p) for c, p in zip(cgroup.cameras, points2d_proj)])
+        points2d_distor = np.array([cv2.projectPoints(joints3d_flat.reshape(-1, 1, 3), c.rvec, c.tvec, c.matrix, c.dist)[0].reshape(-1, 2)
+                                    for c in cgroup.cameras])
+        keypoints2d = rearrange(points2d_distor, 'c (t j) k -> c t j k', t=joints3d.shape[0])
 
         render = Renderer(height=height, width=width, down_scale=2, bg_color=[0, 0, 0, 0.0])
 
-        for i, (video_key, camera) in enumerate(zip(video_keys, camera_names)):
+        for i, (video_key, camera) in enumerate(zip(video_keys, camera_names[:2])):
 
             camera_param = [c for c in camera_params if c['name'] == camera][0]
 
             # get camera parameters
             K = np.array(camera_param['matrix'])
             R = cv2.Rodrigues(np.array(camera_param['rotation']))[0]
-            T = np.array(camera_param['translation']).reshape([-1, 1]) / 100.0  # convert to m
+            T = np.array(camera_param['translation']).reshape([-1, 1]) / 1000.0 # convert to meters
             cameras = {'K': [K], 'R': [R], 'T': [T]}
 
             def render_overlay(frame, idx, vertices=vertices, faces=faces, cameras=cameras):
