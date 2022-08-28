@@ -132,7 +132,8 @@ def get_checkerboards(filenames, max_frames=None, skip=1, multithread=False, **k
                 progress_fn = range
 
             for i in progress_fn(0, frames, skip):
-                cap.set(cv2.CAP_PROP_POS_FRAMES, i)
+                if skip != 1:
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, i)
                 ret, img = cap.read()
                 if not ret or img is None:
                     break
@@ -251,12 +252,13 @@ def shift_calibration(cgroup, offset, rotation=np.eye(3), zoffset=None):
         cam.rvec = cv2.Rodrigues(cv2.Rodrigues(cam.rvec)[0] @ rotation.transpose())[0]
 
     if zoffset:
-        cgroup = shift_calibration(cgroup, np.array([0, 0, zoffset]))
+        cgroup = shift_calibration(cgroup, np.array([0, 0, -zoffset]))
 
     return cgroup
 
 
-def calibrate_bundle(parsers, camera_names=None, fisheye=False, verbose=True, zero_origin=False, **kwargs):
+def calibrate_bundle(parsers, camera_names=None, fisheye=False, verbose=True, zero_origin=False,
+                    extra_dist=False, both_focal=True, bundle_adjust=True, **kwargs):
     """
     Calibrate multiple cameras using bundle adjustment
 
@@ -292,6 +294,12 @@ def calibrate_bundle(parsers, camera_names=None, fisheye=False, verbose=True, ze
     cgroup = CameraGroup.from_names(camera_names, fisheye=fisheye)
     board = Checkerboard(cols, rows, square_length=square_length)
 
+    for c in cgroup.cameras:
+        c.extra_dist = extra_dist
+        c.both_focal = both_focal
+
+    print(f'Extra: {cgroup.cameras[0].extra_dist}. Both: {cgroup.cameras[0].both_focal}')
+
     for cam, p in zip(cgroup.cameras, parsers):
         h, w, _ = p.last_image.shape
         cam.set_size((w, h))
@@ -312,7 +320,7 @@ def calibrate_bundle(parsers, camera_names=None, fisheye=False, verbose=True, ze
         assert size is not None, \
             "Camera with name {} has no specified frame size".format(camera.get_name())
 
-        if fisheye:
+        if not extra_dist or fisheye:
             objp, imgp = board.get_all_calibration_points(rows)
             mixed = [(o, i) for (o, i) in zip(objp, imgp) if len(o) >= 7]
             objp, imgp = zip(*mixed)
@@ -321,7 +329,7 @@ def calibrate_bundle(parsers, camera_names=None, fisheye=False, verbose=True, ze
         else:
             cal = parser.calibrate_camera()
             camera.set_camera_matrix(cal['mtx'])
-            # camera.set_distortions(cal['dist'][0])  # system only expects one distortion parameters
+            camera.set_distortions(cal['dist'])  # system only expects one distortion parameters
 
     for i, (row, cam) in enumerate(zip(all_rows, cgroup.cameras)):
         all_rows[i] = board.estimate_pose_rows(cam, row)
@@ -337,16 +345,19 @@ def calibrate_bundle(parsers, camera_names=None, fisheye=False, verbose=True, ze
     if verbose:
         print(cgroup.get_dicts())
 
-    error = cgroup.bundle_adjust_iter(imgp, extra, verbose=verbose, **kwargs)
+    if bundle_adjust:
+        error = cgroup.bundle_adjust_iter(imgp, extra, verbose=verbose, **kwargs)
 
     if zero_origin:
         x0, board_rotation = extract_origin(cgroup, imgp)
-        cgroup = shift_calibration(cgroup, x0, board_rotation, 80)
+
+        # distance from my checkerboard top corner to ground
+        cgroup = shift_calibration(cgroup, x0, board_rotation, 1245)
 
     return error, cgroup.get_dicts()
 
 
-def run_calibration(vid_base, vid_path="."):
+def run_calibration(vid_base, vid_path=".", return_parsers=False, frame_skip=5, **kwargs):
     """
     Run the calibration routine on a video recording session
 
@@ -354,9 +365,9 @@ def run_calibration(vid_base, vid_path="."):
     files have a calibration_ prefix.
 
         Parameters:
-            vid_base (str): filter to match (e.g. calibration_20220802_110011)
-            vid_path (str, optional): bath to files, otherwise assumes PWD
-
+            vid_base (str) : filter to match (e.g. calibration_20220802_110011)
+            vid_path (str, optional) : bath to files, otherwise assumes PWD
+            return_parsers (boolean, option) : set true to get back checkboard coordinates
         Returns:
             calibration dictionary
     """
@@ -378,11 +389,11 @@ def run_calibration(vid_base, vid_path="."):
     print(f'Cam names: {cam_names} camera hash: {camera_hash}')
 
     print(f"Found {len(vids)} videos. Now detecting checkerboards.")
-    parsers = get_checkerboards(vids, max_frames=5000, skip=10, save_images=True,
-                                downsample=2, multithread=True, checkerboard_size=11.0)
+    parsers = get_checkerboards(vids, max_frames=5000, skip=frame_skip, save_images=True,
+                                downsample=2, multithread=True, checkerboard_size=110.0)
 
     print("Now running calibration")
-    error, camera_params = calibrate_bundle(parsers, cam_names, verbose=True, zero_origin=True)
+    error, camera_params = calibrate_bundle(parsers, cam_names, verbose=True, zero_origin=True, **kwargs)
     timestamp = vid_base.split("calibration_")[1]
     timestamp = datetime.strptime(timestamp, "%Y%m%d_%H%M%S")
 
@@ -394,5 +405,8 @@ def run_calibration(vid_base, vid_path="."):
         "camera_calibration": camera_params,
         "reprojection_error": error,
     }
+
+    if return_parsers:
+        return entry, parsers
 
     return entry
