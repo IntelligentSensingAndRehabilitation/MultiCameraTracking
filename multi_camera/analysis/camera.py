@@ -4,6 +4,7 @@ Tools for a camera model implementation in Jax
 
 from lib2to3 import pytree
 import numpy as np
+import jax
 from jax import numpy as jnp
 from jax import vmap, jit
 from jaxlie import SO3, SE3
@@ -71,8 +72,7 @@ def project_distortion(camera_params, i, points):
     return proj[..., :-1] / proj[..., -1:]
 
 
-# Based on https://github.com/opencv/opencv/blob/master/modules/calib3d/src/undistort.dispatch.cpp#L384
-# and https://kornia.readthedocs.io/en/latest/_modules/kornia/geometry/calibration/undistort.html#undistort_points
+@jit
 def undistort_points(points: jnp.array, K: jnp.array, dist: jnp.array, num_iters: int = 5) -> jnp.array:
     r"""Compensate for lens distortion a set of 2D image points.
 
@@ -99,6 +99,11 @@ def undistort_points(points: jnp.array, K: jnp.array, dist: jnp.array, num_iters
                  [ 0.0711,  0.1100],
                  [-0.0697,  0.0228],
                  [-0.1843, -0.1606]]])
+
+    Refs:
+        Based on https://github.com/opencv/opencv/blob/master/modules/calib3d/src/undistort.dispatch.cpp#L384
+        and https://kornia.readthedocs.io/en/latest/_modules/kornia/geometry/calibration/undistort.html#undistort_points
+
     """
 
     # Adding zeros to obtain vector with 14 coeffs.
@@ -160,6 +165,7 @@ def undistort_points(points: jnp.array, K: jnp.array, dist: jnp.array, num_iters
     return jnp.stack([x, y], -1)
 
 
+@jit
 def triangulate_point(camera_params, points2d):
     r"""Triangulate multiple 2D observations in 3D
 
@@ -230,8 +236,10 @@ def reprojection_error(camera_params, points2d, points3d):
     return points2d - projected_points
 
 
-def reconstruction_error(camera_params, points2d, points3d):
+def reconstruction_error(camera_params, points2d, points3d, stop_grad=False):
     est_points3d = triangulate_point(camera_params, points2d)
+    if stop_grad:
+        est_points3d = jax.lax.stop_gradient(est_points3d)
     return est_points3d - points3d
 
 

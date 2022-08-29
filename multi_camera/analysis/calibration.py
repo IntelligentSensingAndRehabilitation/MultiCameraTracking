@@ -1,6 +1,13 @@
 import cv2
 import numpy as np
+import jax
+import jaxopt
+from jax import vmap, jit
+from jax import numpy as jnp
 from tqdm import trange
+from functools import partial
+
+from multi_camera.analysis.camera import triangulate_point, reprojection_error, reconstruction_error, get_checkboard_3d
 
 
 def hash_names(x):
@@ -66,14 +73,17 @@ class CheckerboardAccumulator:
 
         return ret
 
-    def calibrate_camera(self):
+    def calibrate_camera(self, flags=None):
         N = len(self.frames)
         objpoints = [self.objp] * N
         imgpoints = self.corners
 
         h, w, _ = self.shape
 
-        ret, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(objpoints, imgpoints, (h, w), cv2.CALIB_RATIONAL_MODEL, None)
+        if flags is None:
+            flags = cv2.CALIB_ZERO_DISPARITY | cv2.CALIB_FIX_K1 | cv2.CALIB_FIX_K2| cv2.CALIB_FIX_K3 | cv2.CALIB_FIX_K4 | cv2.CALIB_FIX_K5 | cv2.CALIB_ZERO_TANGENT_DIST
+
+        _, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(objpoints, imgpoints, (h, w), None, np.zeros((5,)), flags=flags)
         newcameramtx, roi = cv2.getOptimalNewCameraMatrix(mtx, dist, (w, h), 1, (w, h))
 
         return {"mtx": mtx, "dist": dist, "rvecs": rvecs, "tvecs": tvecs, "newcameramtx": newcameramtx, "roi": roi}
@@ -119,7 +129,6 @@ def get_checkerboards(filenames, max_frames=None, skip=1, multithread=False, **k
                 p.process_frame(i, img)
 
     else:
-        import multiprocessing
         from multiprocessing.dummy import Pool as ThreadPool
 
         pool = ThreadPool(num_views)
@@ -228,8 +237,8 @@ def calibrate_pair(
     return cal
 
 
-def extract_origin(cgroup, imgp):
-    cal3d = cgroup.triangulate(imgp[:, :24])
+def extract_origin(camera_params, checkerboard_points):
+    cal3d = triangulate_point(camera_params, checkerboard_points[:, 0])
 
     x0 = cal3d[0]
     x = cal3d[5] - x0
@@ -243,118 +252,192 @@ def extract_origin(cgroup, imgp):
     return x0, board_rotation
 
 
-def shift_calibration(cgroup, offset, rotation=np.eye(3), zoffset=None):
-    cgroup = cgroup.copy()
+def shift_calibration(camera_params, offset, rotation=np.eye(3), zoffset=None):
+    from jaxlie import SO3
 
-    for cam in cgroup.cameras:
-        camera_offset = cv2.Rodrigues(cam.rvec)[0] @ offset
-        cam.tvec = cam.tvec + camera_offset
-        cam.rvec = cv2.Rodrigues(cv2.Rodrigues(cam.rvec)[0] @ rotation.transpose())[0]
+    camera_params = camera_params.copy()
+    offset = offset / 1000.0
+
+    camera_rotations = vmap(lambda x: SO3.exp(x).as_matrix())(camera_params['rvec'])
+    tvec = camera_params['tvec'] + camera_rotations @ offset.reshape((3,))
+    rvec = vmap(lambda x: (SO3.exp(x) @ SO3.from_matrix(rotation.T)).log())(camera_params['rvec'])
+
+    camera_params['rvec'] = rvec
+    camera_params['tvec'] = tvec
 
     if zoffset:
-        cgroup = shift_calibration(cgroup, np.array([0, 0, -zoffset]))
+        camera_params = shift_calibration(camera_params, np.array([0, 0, -zoffset]))
 
-    return cgroup
+    return camera_params
 
 
-def calibrate_bundle(parsers, camera_names=None, fisheye=False, verbose=True, zero_origin=False,
-                    extra_dist=False, both_focal=True, bundle_adjust=True, **kwargs):
+def initialize_group_calibration(parsers):
     """
-    Calibrate multiple cameras using bundle adjustment
+    Use detected checkerboards to initialize calibration parameters
 
-    This uses the bundle adjustment implemented in aniposelib to perform
-    the calibration.
+    Parameters:
+        parsers (List[CheckerboardAccumulator]) : detection of checkerboards
 
-        Parameters:
-            parsers (list) : list of checkerboard video parser results
-            camera_names (list, optional) : list of camera names
-            fisheye (boolean, optional) : set true to enable a fisheye camear
-            versbose (boolean, optional) : set true to produce more outputs
-            **kwargs : option arguments that can be passed into aniposelib.bundle_adjust_iter
-                (e.g. n_samp_full=200, n_samp_iter=100)
-
-        Returns:
-            reprojection error
-            dictionary of configurations
+    Returns:
+        calibration dictionary - contains intrinsic and extrinsic parameters and distortion
+        checkerboard_params - initial location and rotations of checkerboards
+        checkerboard_points - matrix of 2D corners (cameras X points X 2)
     """
 
-    from aniposelib.cameras import CameraGroup
-    from aniposelib.boards import Checkerboard
-    from aniposelib.utils import get_initial_extrinsics, make_M, get_rtvec, get_connections
-    from aniposelib.boards import merge_rows, extract_points, extract_rtvecs
+    from jax import jit, vmap
+    from jax import numpy as jnp
+    from jaxlie import SO3, SE3
 
-    if camera_names is None:
-        camera_names = list(range(len(parsers)))
+    frames = np.sort(np.unique(np.concatenate([p.frames for p in parsers])))
+    N = parsers[0].objp.shape[0]  # number of coordinates in pattern
 
-    p = parsers[0]
-    square_length = p.objp[1, 0] - p.objp[0, 0]
-    cols = p.cols
-    rows = p.rows
+    checkerboard_points = np.zeros((len(parsers), len(frames), N, 2)) * np.nan
+    rvecs = np.zeros((len(parsers), len(frames), 3)) * np.nan
+    tvecs = np.zeros((len(parsers), len(frames), 3)) * np.nan
+    cals = [p.calibrate_camera(flags=0) for p in parsers]
 
-    cgroup = CameraGroup.from_names(camera_names, fisheye=fisheye)
-    board = Checkerboard(cols, rows, square_length=square_length)
+    # convert format from the parser to a matrix of observations with nan for missing
+    for i, p in enumerate(parsers):
+        for j, f in enumerate(frames):
+            idx = np.where(p.frames == f)[0]
+            if len(idx) == 1:
+                checkerboard_points[i,j, :, :] = p.corners[idx[0]][:, 0, :]
+                rvecs[i,j] = cals[i]['rvecs'][idx[0]][:,0]
+                tvecs[i,j] = cals[i]['tvecs'][idx[0]][:,0]
 
-    for c in cgroup.cameras:
-        c.extra_dist = extra_dist
-        c.both_focal = both_focal
+    N, frames, _, _ = checkerboard_points.shape
 
-    print(f'Extra: {cgroup.cameras[0].extra_dist}. Both: {cgroup.cameras[0].both_focal}')
+    camera_rvecs = np.ones((N, 3)) * np.nan
+    camera_tvecs = np.ones((N, 3)) * np.nan
 
-    for cam, p in zip(cgroup.cameras, parsers):
-        h, w, _ = p.last_image.shape
-        cam.set_size((w, h))
+    checkerboard_rvecs = np.empty((frames, 3))
+    checkerboard_tvecs = np.empty((frames, 3))
 
-    # convert parser results to the "rows" used by aniposelib
-    all_rows = []
-    for p in parsers:
-        rows = []
-        for frame_num, corner in zip(p.frames, p.corners):
-            row = {"framenum": frame_num, "corners": corner, "ids": None}
-            row['filled'] = board.fill_points(row['corners'], row['ids'])
-            rows.append(row)
-        all_rows.append(rows)
+    def make_M(rvec, tvec):
+        return SE3.from_rotation_and_translation(SO3.exp(jnp.array(rvec)), jnp.array(tvec))
 
-    for rows, camera, parser in zip(all_rows, cgroup.cameras, parsers):
-        size = camera.get_size()
+    for i in range(frames):
 
-        assert size is not None, \
-            "Camera with name {} has no specified frame size".format(camera.get_name())
-
-        if not extra_dist or fisheye:
-            objp, imgp = board.get_all_calibration_points(rows)
-            mixed = [(o, i) for (o, i) in zip(objp, imgp) if len(o) >= 7]
-            objp, imgp = zip(*mixed)
-            matrix = cv2.initCameraMatrix2D(objp, imgp, tuple(size))
-            camera.set_camera_matrix(matrix)
+        if i == 0:
+            checkerboard_rvecs[i, :] = 0
+            checkerboard_tvecs[i, :] = 0
         else:
-            cal = parser.calibrate_camera()
-            camera.set_camera_matrix(cal['mtx'])
-            camera.set_distortions(cal['dist'])  # system only expects one distortion parameters
+            for j in range(N):
+                if ~np.isnan(camera_rvecs[j,0]) and ~np.isnan(rvecs[j, i, 0]):
+                    T = (make_M(rvecs[j,i], tvecs[j,i]).inverse() @ make_M(camera_rvecs[j], camera_tvecs[j])).inverse()
 
-    for i, (row, cam) in enumerate(zip(all_rows, cgroup.cameras)):
-        all_rows[i] = board.estimate_pose_rows(cam, row)
+                    checkerboard_rvecs[i] = T.rotation().log()
+                    checkerboard_tvecs[i] = T.translation()
+                    break
+            pass
 
-    merged = merge_rows(all_rows)
-    imgp, extra = extract_points(merged, board, min_cameras=2)
+        checkerboardT = make_M(checkerboard_rvecs[i, :], checkerboard_tvecs[i, :])
 
-    rtvecs = extract_rtvecs(merged)
-    rvecs, tvecs = get_initial_extrinsics(rtvecs, cgroup.get_names())
-    cgroup.set_rotations(rvecs)
-    cgroup.set_translations(tvecs)
+        for j in range(N):
+            if np.isnan(camera_rvecs[j,0]) and ~np.isnan(rvecs[j, i, 0]):
+                camT = make_M(rvecs[j, i], tvecs[j, i])
+                T = camT @ checkerboardT.inverse()
 
-    if verbose:
-        print(cgroup.get_dicts())
+                camera_rvecs[j, :] = T.rotation().log()
+                camera_tvecs[j, :] = T.translation()
 
-    if bundle_adjust:
-        error = cgroup.bundle_adjust_iter(imgp, extra, verbose=verbose, **kwargs)
+    # Initialize params from my code
+    camera_params = {'mtx': np.array([[c['mtx'][0,0], c['mtx'][1,1], c['mtx'][0,2], c['mtx'][1, 2]] for c in cals]) / 1000.0,
+                     'dist': np.array([c['dist'].reshape((-1)) for c in cals]),
+                     'rvec': camera_rvecs,
+                     'tvec': camera_tvecs / 1000.0,
+                    }
 
-    if zero_origin:
-        x0, board_rotation = extract_origin(cgroup, imgp)
+    checkerboard_params = {'rvecs': checkerboard_rvecs, 'tvecs': checkerboard_tvecs / 1000.0}
 
-        # distance from my checkerboard top corner to ground
-        cgroup = shift_calibration(cgroup, x0, board_rotation, 1245)
+    return camera_params, checkerboard_params, checkerboard_points
 
-    return error, cgroup.get_dicts()
+
+def checkerboard_reprojection_loss(camera_params, checkerboard_params, checkerboard_points, objp):
+    checkerboard_rvecs = checkerboard_params['rvecs']
+    checkerboard_tvecs = checkerboard_params['tvecs']
+
+    estimated_3d_points = vmap(lambda a, b: get_checkboard_3d(a, b, objp))(checkerboard_rvecs, checkerboard_tvecs)
+    err = reprojection_error(camera_params, checkerboard_points, estimated_3d_points)
+
+    norm=False
+    if norm:
+        #err = jnp.linalg.norm(err, axis=-1) ** 2
+        return jnp.nanmean(err ** 2)
+    else:
+        return jnp.nanmean(jnp.abs(err))
+
+
+def checkerboard_reconstruction_loss(camera_params, checkerboard_params, checkerboard_points, objp):
+    checkerboard_rvecs = checkerboard_params['rvecs']
+    checkerboard_tvecs = checkerboard_params['tvecs']
+
+    estimated_3d_points = vmap(lambda a, b: get_checkboard_3d(a, b, objp))(checkerboard_rvecs, checkerboard_tvecs)
+    err = reconstruction_error(camera_params, checkerboard_points, estimated_3d_points, stop_grad=True)
+
+    norm = False
+    if norm:
+        #err = jnp.linalg.norm(err, axis=-1) ** 2
+        return jnp.nanmean(err ** 2)
+    else:
+        return jnp.nanmean(jnp.abs(err))
+
+@jit
+def checkerboard_loss(checkerboard_params, camera_params, checkerboard_points, objp):
+    #return checkerboard_reconstruction_loss(camera_params, checkerboard_params, checkerboard_points, objp)
+    return checkerboard_reprojection_loss(camera_params, checkerboard_params, checkerboard_points, objp)
+
+@jit
+def camera_loss(camera_params, checkerboard_params, checkerboard_points, objp):
+    #return checkerboard_reconstruction_loss(camera_params, checkerboard_params, checkerboard_points, False)
+    return checkerboard_reprojection_loss(camera_params, checkerboard_params, checkerboard_points, objp)
+
+@jit
+def cycle_loss(camera_params, checkerboard_points):
+    est_checkerboard_3d = triangulate_point(camera_params, checkerboard_points)
+    # backpropgating through SVD takes a huge amount of time
+    est_checkerboard_3d = jax.lax.stop_gradient(est_checkerboard_3d)
+    err = reprojection_error(camera_params, checkerboard_points, est_checkerboard_3d)
+    return jnp.nanmean(jnp.abs(err))
+
+@jit
+def update_checkerboard(checkerboard_params, camera_params, checkerboard_points, objp, iterations=10):
+    checkerboard_solver = jaxopt.GradientDescent(fun=checkerboard_loss, maxiter=iterations, verbose=False)
+    return checkerboard_solver.run(checkerboard_params, camera_params=camera_params, checkerboard_points=checkerboard_points, objp=objp)[0]
+
+@jit
+def update_camera(checkerboard_params, camera_params, checkerboard_points, objp, iterations=10):
+    camera_solver = jaxopt.GradientDescent(fun=camera_loss, maxiter=iterations, verbose=False)
+    return camera_solver.run(camera_params, checkerboard_params=checkerboard_params, checkerboard_points=checkerboard_points, objp=objp)[0]
+
+#@jit
+#def update_camera_checkerboard
+@jit
+def update_camera_cycle(camera_params, checkerboard_points, iterations=10, stepsize=0.0):
+    cycle_solver = jaxopt.GradientDescent(fun=cycle_loss, maxiter=iterations, verbose=False, stepsize=stepsize)
+    return cycle_solver.run(camera_params, checkerboard_points=checkerboard_points)[0]
+
+
+def refine_calibration(camera_params, checkerboard_params, checkerboard_points, objp, iterations=20,
+                       inner_iterations=10, verbose=True, cycle_consistency=True):
+
+    for _ in range(iterations):
+
+        checkerboard_params = update_checkerboard(checkerboard_params, camera_params, checkerboard_points,
+                                                  objp, iterations=inner_iterations)
+        camera_params = update_camera(checkerboard_params, camera_params, checkerboard_points,
+                                      objp, iterations=inner_iterations)
+
+        if cycle_consistency:
+            camera_params = update_camera_cycle(camera_params, checkerboard_points, iterations=inner_iterations)
+
+        if verbose:
+            e1 = checkerboard_reprojection_loss(camera_params, checkerboard_params, checkerboard_points, objp)
+            e2 = checkerboard_reconstruction_loss(camera_params, checkerboard_params, checkerboard_points, objp)
+            e3 = cycle_loss(camera_params, checkerboard_points)
+            print(f'Reprojection error {e1:.2f} pixels. Modeled reconstruction error {e2:.2f} mm. Cycle reprojection error {e3:0.2f} pixels.')
+
+    return camera_params, checkerboard_params
 
 
 def run_calibration(vid_base, vid_path=".", return_parsers=False, frame_skip=5, **kwargs):
@@ -391,9 +474,22 @@ def run_calibration(vid_base, vid_path=".", return_parsers=False, frame_skip=5, 
     print(f"Found {len(vids)} videos. Now detecting checkerboards.")
     parsers = get_checkerboards(vids, max_frames=5000, skip=frame_skip, save_images=True,
                                 downsample=2, multithread=True, checkerboard_size=110.0)
+    objp = parsers[0].objp
 
     print("Now running calibration")
-    error, camera_params = calibrate_bundle(parsers, cam_names, verbose=True, zero_origin=True, **kwargs)
+    init_camera_params, init_checkerboard_params, checkerboard_points = initialize_group_calibration(parsers)
+    camera_params, checkerboard_params = refine_calibration(init_camera_params, init_checkerboard_params, checkerboard_points,
+                                                            objp, inner_iterations=5, iterations=150, cycle_consistency=True)
+    error = float(checkerboard_loss(checkerboard_params, camera_params, checkerboard_points, objp))
+
+    print("Zeroing coordinates")
+    x0, board_rotation = extract_origin(camera_params, checkerboard_points[:, 5:])
+    camera_params_zeroed = shift_calibration(camera_params, x0, board_rotation, zoffset=1245)
+
+    # prepare for saving to database
+    params_dict = jax.tree_map(np.array, camera_params_zeroed)
+    params_dict['camera_names'] = cam_names
+
     timestamp = vid_base.split("calibration_")[1]
     timestamp = datetime.strptime(timestamp, "%Y%m%d_%H%M%S")
 
@@ -402,7 +498,7 @@ def run_calibration(vid_base, vid_path=".", return_parsers=False, frame_skip=5, 
         "camera_config_hash": camera_hash,
         "num_cameras": len(cam_names),
         "camera_names": cam_names,
-        "camera_calibration": camera_params,
+        "camera_calibration": params_dict,
         "reprojection_error": error,
     }
 
