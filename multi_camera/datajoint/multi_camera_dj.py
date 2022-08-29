@@ -68,7 +68,6 @@ class PersonKeypointReconstruction(dj.Computed):
         top_down_method = key['top_down_method']
 
         camera_calibration, camera_names = (Calibration & calibration_key).fetch1('camera_calibration', 'camera_names')
-        camera_calibration.pop('camera_names')
         keypoints, camera_name = (TopDownPerson * SingleCameraVideo * MultiCameraRecording &
                                 recording_key & {'top_down_method': top_down_method}).fetch('keypoints', 'camera_name')
 
@@ -212,7 +211,7 @@ class SMPLReconstructionVideos(dj.Computed):
         import os
         import tempfile
         from einops import rearrange
-        from aniposelib.cameras import CameraGroup
+        from ..analysis.camera import project_distortion, get_intrinsic, get_extrinsic
         from pose_pipeline.utils.visualization import video_overlay, draw_keypoints
         from easymocap.visualize.renderer import Renderer
 
@@ -234,24 +233,16 @@ class SMPLReconstructionVideos(dj.Computed):
         joints3d = joints3d * 1000.0
 
         # compute keypoints from reprojection of SMPL fit
-        cgroup = CameraGroup.from_dicts(camera_params)
-        joints3d_flat = rearrange(joints3d, 't j k -> (t j) k')
-        #points2d_proj = cgroup.project(joints3d_flat)
-        #points2d_distor = np.array([c.distort_points(p) for c, p in zip(cgroup.cameras, points2d_proj)])
-        points2d_distor = np.array([cv2.projectPoints(joints3d_flat.reshape(-1, 1, 3), c.rvec, c.tvec, c.matrix, c.dist)[0].reshape(-1, 2)
-                                    for c in cgroup.cameras])
-        keypoints2d = rearrange(points2d_distor, 'c (t j) k -> c t j k', t=joints3d.shape[0])
+        keypoints2d = np.array([project_distortion(camera_params, i, joints3d) for i in range(camera_params['mtx'].shape[0])])
 
         render = Renderer(height=height, width=width, down_scale=2, bg_color=[0, 0, 0, 0.0])
 
         for i, (video_key, camera) in enumerate(zip(video_keys, camera_names[:2])):
 
-            camera_param = [c for c in camera_params if c['name'] == camera][0]
-
             # get camera parameters
-            K = np.array(camera_param['matrix'])
-            R = cv2.Rodrigues(np.array(camera_param['rotation']))[0]
-            T = np.array(camera_param['translation']).reshape([-1, 1]) / 1000.0 # convert to meters
+            K = np.array(get_intrinsic(camera_params, i))
+            R = np.array(get_extrinsic(camera_params, i)[:3, :3])
+            T = np.array(get_extrinsic(camera_params, i)[:3, 4] / 1000.0) # convert to meters
             cameras = {'K': [K], 'R': [R], 'T': [T]}
 
             def render_overlay(frame, idx, vertices=vertices, faces=faces, cameras=cameras):

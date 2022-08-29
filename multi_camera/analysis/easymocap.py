@@ -41,7 +41,7 @@ def easymocap_fit_smpl_3d(joints3d, model_path=model_path, verbose=True, smooth3
     class EasymocapArgs:
         model = 'smpl'
         gender = 'neutral'
-        opts = {'smooth_poses': 1e-3, 'reg_poses': 1e-5, 'smooth_body': 5e-2}
+        opts = {'smooth_poses': 1e-4, 'reg_poses': 1e-5, 'smooth_body': 5e-3}
 
     args = EasymocapArgs
     args.verbose = verbose
