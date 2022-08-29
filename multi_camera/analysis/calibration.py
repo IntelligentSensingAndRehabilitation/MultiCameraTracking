@@ -479,16 +479,13 @@ def run_calibration(vid_base, vid_path=".", return_parsers=False, frame_skip=5, 
     print("Now running calibration")
     init_camera_params, init_checkerboard_params, checkerboard_points = initialize_group_calibration(parsers)
     camera_params, checkerboard_params = refine_calibration(init_camera_params, init_checkerboard_params, checkerboard_points,
-                                                            objp, inner_iterations=5, iterations=150, cycle_consistency=True)
+                                                            objp, **kwargs)
     error = float(checkerboard_loss(checkerboard_params, camera_params, checkerboard_points, objp))
 
     print("Zeroing coordinates")
     x0, board_rotation = extract_origin(camera_params, checkerboard_points[:, 5:])
     camera_params_zeroed = shift_calibration(camera_params, x0, board_rotation, zoffset=1245)
-
-    # prepare for saving to database
     params_dict = jax.tree_map(np.array, camera_params_zeroed)
-    params_dict['camera_names'] = cam_names
 
     timestamp = vid_base.split("calibration_")[1]
     timestamp = datetime.strptime(timestamp, "%Y%m%d_%H%M%S")

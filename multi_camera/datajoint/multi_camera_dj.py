@@ -60,12 +60,30 @@ class PersonKeypointReconstruction(dj.Computed):
 
     def make(self, key):
 
-        from .triangulate import reconstruct
+        import numpy as np
+        from ..analysis.camera import triangulate_point
 
         calibration_key = (Calibration & key).fetch1('KEY')
         recording_key = (MultiCameraRecording & key).fetch1('KEY')
+        top_down_method = key['top_down_method']
 
-        key['keypoints3d'] = reconstruct(recording_key, calibration_key, top_down_method=key['top_down_method'])
+        camera_calibration, camera_names = (Calibration & calibration_key).fetch1('camera_calibration', 'camera_names')
+        camera_calibration.pop('camera_names')
+        keypoints, camera_name = (TopDownPerson * SingleCameraVideo * MultiCameraRecording &
+                                recording_key & {'top_down_method': top_down_method}).fetch('keypoints', 'camera_name')
+
+        # if one video has one less frames then crop it
+        N = min([k.shape[0] for k in keypoints])
+        assert all([k.shape[0] - N < 2 for k in keypoints])
+        keypoints = [k[:N] for k in keypoints]
+
+        # work out the order that matches the calibration (should normally match)
+        order = [list(camera_name).index(c) for c in camera_names]
+        points2d = np.stack([keypoints[o][:, :, :] for o in order], axis=0)
+
+        points3d = triangulate_point(camera_calibration, points2d)
+        key['keypoints3d'] = np.array(points3d)
+
         self.insert1(key, allow_direct_insert=True)
 
 
