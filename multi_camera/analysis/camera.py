@@ -109,7 +109,7 @@ def undistort_points(points: jnp.array, K: jnp.array, dist: jnp.array, num_iters
     # Adding zeros to obtain vector with 14 coeffs.
     if dist.shape[-1] < 14:
         pad_dist = jnp.zeros((*dist.shape[:-1], 14))
-        pad_dist.at[..., :dist.shape[-1]].set(dist)
+        pad_dist = pad_dist.at[..., :dist.shape[-1]].set(dist)
         dist = pad_dist
 
     # Convert 2D points from pixels to normalized camera coordinates
