@@ -71,14 +71,18 @@ class PersonKeypointReconstruction(dj.Computed):
         keypoints, camera_name = (TopDownPerson * SingleCameraVideo * MultiCameraRecording &
                                 recording_key & {'top_down_method': top_down_method}).fetch('keypoints', 'camera_name')
 
-        # if one video has one less frames then crop it
-        N = min([k.shape[0] for k in keypoints])
-        assert all([k.shape[0] - N < 2 for k in keypoints])
-        keypoints = [k[:N] for k in keypoints]
+        # need to add zeros to missing frames since they occurr at the beginning of videos
+        N = max([len(k) for k in keypoints])
+        keypoints = np.stack([np.concatenate([np.zeros([N-k.shape[0], *k.shape[1:]]), k], axis=0) for k in keypoints], axis=0)
 
         # work out the order that matches the calibration (should normally match)
         order = [list(camera_name).index(c) for c in camera_names]
         points2d = np.stack([keypoints[o][:, :, :] for o in order], axis=0)
+
+        # threshold the weights at 0.5
+        weights = points2d[..., 2]
+        weights[weights < 0.75] = 0
+        points2d[..., 2] = weights
 
         points3d = triangulate_point(camera_calibration, points2d)
         key['keypoints3d'] = np.array(points3d)
@@ -113,6 +117,76 @@ class PersonKeypointReconstructionVideo(dj.Computed):
 
         key["output_video"] = out_file_name
         self.insert1(key)
+
+
+@schema
+class PersonKeypointReprojectionVideos(dj.Computed):
+    definition = '''
+    # Videos of reconstruction preprojections
+    -> PersonKeypointReconstruction
+    ---
+    '''
+
+    class Video(dj.Part):
+        definition = '''
+        -> PersonKeypointReprojectionVideos
+        -> SingleCameraVideo
+        ---
+        output_video      : attach@localattach    # datajoint managed video file
+        '''
+
+    def make(self, key):
+        import cv2
+        import os
+        import tempfile
+        from ..analysis.camera import project_distortion
+        from pose_pipeline.utils.visualization import video_overlay, draw_keypoints
+
+        self.insert1(key)
+
+        videos = Video * TopDownPerson * MultiCameraRecording * PersonKeypointReconstruction * SingleCameraVideo & BestDetectedFrames & key
+        video_keys = videos.fetch('KEY')
+        keypoints3d = (PersonKeypointReconstruction & key).fetch1('keypoints3d')
+        camera_params = (Calibration & key).fetch1('camera_calibration')
+
+        # get video parameters
+        width = np.unique((VideoInfo & video_keys).fetch('width'))[0]
+        height = np.unique((VideoInfo & video_keys).fetch('height'))[0]
+        fps = np.unique((VideoInfo & video_keys).fetch('fps'))[0]
+
+        # compute keypoints from reprojection of SMPL fit
+        keypoints2d = np.array([project_distortion(camera_params, i, keypoints3d) for i in range(camera_params['mtx'].shape[0])])
+
+        print(f'Height: {height}. Width: {width}. FPS: {fps}')
+
+        # handle any bad projections
+        keypoints2d[..., 0] = np.clip(keypoints2d[..., 0], 0, width)
+        keypoints2d[..., 1] = np.clip(keypoints2d[..., 1], 0, height)
+
+        for i, video_key in enumerate(video_keys):
+
+            def render_overlay(frame, idx):
+
+                if idx >= keypoints2d.shape[1]:
+                    return frame
+
+                frame = draw_keypoints(frame, keypoints2d[i, idx], radius=6, color=(125, 125, 255), threshold=0.75)
+
+                return frame
+
+            fd, out_file_name = tempfile.mkstemp(suffix=".mp4")
+            os.close(fd)
+
+            video = (Video & video_key).fetch1('video')
+            video_overlay(video, out_file_name, render_overlay, max_frames=None, downsample=2, compress=True)
+
+            single_video_key = (SingleCameraVideo * PersonKeypointReconstruction & key & video_key).fetch1('KEY')
+            single_video_key['output_video'] = out_file_name
+
+            PersonKeypointReprojectionVideos.Video.insert1(single_video_key)
+
+            os.remove(video)
+            os.remove(out_file_name)
 
 
 @schema
