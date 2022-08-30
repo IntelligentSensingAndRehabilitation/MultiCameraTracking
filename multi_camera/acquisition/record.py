@@ -92,8 +92,12 @@ def record_dual(vid_file, max_frames=100, num_cams=4, frame_pause=0, preview=Tru
 
     def acquire():
 
-        for c in cams:
-            c.start()
+        def start_cam(i):
+            cams[i].start()
+
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(cams)) as executor:
+            l = list(executor.map(start_cam, range(len(cams))))
 
         try:
             for _ in tqdm(range(max_frames)):
