@@ -7,6 +7,7 @@ import numpy as np
 from tqdm import tqdm
 from datetime import datetime
 from queue import Queue
+import concurrent.futures
 import threading
 import curses
 import json
@@ -37,7 +38,7 @@ def record_dual(vid_file, max_frames=100, num_cams=4, frame_pause=0, preview=Tru
 
     cams = [Camera(i, lock=True) for i in range(num_cams)]
 
-    for c in cams:
+    def init_camera(c):
         c.init()
 
         c.PixelFormat = "BayerRG8"  # BGR8 Mono8
@@ -74,12 +75,15 @@ def record_dual(vid_file, max_frames=100, num_cams=4, frame_pause=0, preview=Tru
             c.BinningVertical,
         )
 
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(cams)) as executor:
+        l = list(executor.map(init_camera, cams))
+
     cams.sort(key=lambda x: x.DeviceSerialNumber)
 
     # print(cams[0].get_info('PixelFormat'))
     pixel_format = cams[0].PixelFormat
 
-    if not all([c.GevIEEE1588]):
+    if not all([c.GevIEEE1588 for c in cams]):
         print("Cameras not synchronized. Enabling IEEE1588 (takes 10 seconds)")
         for c in cams:
             c.GevIEEE1588 = True
@@ -95,7 +99,6 @@ def record_dual(vid_file, max_frames=100, num_cams=4, frame_pause=0, preview=Tru
         def start_cam(i):
             cams[i].start()
 
-        import concurrent.futures
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(cams)) as executor:
             l = list(executor.map(start_cam, range(len(cams))))
 
@@ -338,6 +341,14 @@ def record_dual(vid_file, max_frames=100, num_cams=4, frame_pause=0, preview=Tru
 
     # writing the json file for the current recording session
     json.dump(output_json, open(json_file, "w"))
+
+    ts = np.array(output_json["timestamps"])
+    dt = (ts - ts[0,0]) / 1e9
+    spread = np.max(dt, axis=1) - np.min(dt, axis=1)
+    if np.all(spread < 4e-3):
+        print('Timestamps well aligned and clean')
+    else:
+        print(f'Timestamps showed a maximum spread of {np.max(spread) * 1000} ms')
 
     return
 
