@@ -166,6 +166,52 @@ def undistort_points(points: jnp.array, K: jnp.array, dist: jnp.array, num_iters
 
 
 @jit
+def distort_3d(camera_params, i, points):
+    '''
+    Transform points into camera frame and distort them by camera model.
+
+    Typically points are distorted and projected, but instead this works out
+    the 3D coordinates that would project with an ideal pinhole camera to
+    the same coordinates ultimate image coordinates. These points don't
+    correspond to anything true in the world, but are useful for rendering
+    3D models overlaid on the true camera model (e.g. SMPL models). Since
+    equivalent 3D points exist along a ray, this (arbitrarily) preserves
+    the Z coordinate.
+
+    Args:
+        camera_params: dictionary of calibrated camera parameters
+        i: which camera to use
+        points: (*, N, 3) points in 3D world coordinates
+
+    Returns:
+        (*, N, 3) distorted points in camera coordinates
+    '''
+
+    extri = get_extrinsic(camera_params, i)
+
+    # make sure to use homogeneous coordinates
+    if points.shape[-1] == 3:
+        points = jnp.concatenate([points, np.ones((*points.shape[:-1], 1))], axis=-1)
+
+    # transform the points into the camera perspective
+    # last dimension ensures broadcasting works
+    transformed = (extri @ points[..., None])[..., 0]
+
+    z = transformed[..., 2]
+    xp = transformed[..., 0] / z
+    yp = transformed[..., 1] / z
+    r2 = xp ** 2 + yp ** 2
+
+    dist = camera_params['dist'][i]
+    gamma = 1.0 + dist[0] * r2 + dist[1] * r2**2 + dist[4] * r2**3
+
+    xpp = gamma * xp + 2*dist[2]*xp*yp + dist[3] * (r2 + 2 * xp**2)
+    ypp = gamma * yp + dist[2]*(r2 + 2*yp**2) + 2*dist[3]*xp*yp
+
+    return jnp.stack([xpp * z, ypp * z, z], axis=-1)
+
+
+@jit
 def triangulate_point(camera_params, points2d):
     r"""Triangulate multiple 2D observations in 3D
 

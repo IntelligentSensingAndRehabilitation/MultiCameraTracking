@@ -211,7 +211,7 @@ class SMPLReconstructionVideos(dj.Computed):
         import os
         import tempfile
         from einops import rearrange
-        from ..analysis.camera import project_distortion, get_intrinsic, get_extrinsic
+        from ..analysis.camera import project_distortion, get_intrinsic, get_extrinsic, distort_3d
         from pose_pipeline.utils.visualization import video_overlay, draw_keypoints
         from easymocap.visualize.renderer import Renderer
 
@@ -237,15 +237,22 @@ class SMPLReconstructionVideos(dj.Computed):
 
         render = Renderer(height=height, width=width, down_scale=2, bg_color=[0, 0, 0, 0.0])
 
-        for i, (video_key, camera) in enumerate(zip(video_keys, camera_names[:2])):
+        for i, video_key in enumerate(video_keys[:1]):
 
             # get camera parameters
             K = np.array(get_intrinsic(camera_params, i))
-            R = np.array(get_extrinsic(camera_params, i)[:3, :3])
-            T = np.array(get_extrinsic(camera_params, i)[:3, 4] / 1000.0) # convert to meters
+
+            # don't use real extrinsic since we apply distortion which does this
+            R = np.eye(3)
+            T = np.zeros((3,))
             cameras = {'K': [K], 'R': [R], 'T': [T]}
 
-            def render_overlay(frame, idx, vertices=vertices, faces=faces, cameras=cameras):
+            # account for camera distortion. convert vertices to mm first.
+            vertices_distorted = np.array(distort_3d(camera_params, i, vertices * 1000.0))
+            # then back to meters
+            vertices_distorted = vertices_distorted / 1000.0
+
+            def render_overlay(frame, idx, vertices=vertices_distorted, faces=faces, cameras=cameras):
 
                 if idx >= vertices.shape[0]:
                     return frame
