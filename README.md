@@ -69,9 +69,8 @@ And to export a TRC file that can be loaded into OpenSim
 - Code from [Pose2Sim](https://github.com/perfanalytics/pose2sim) is used for exporting to OpenSim and models from this repository are used for performing Inverse Kinematics on the extracted keypoints.
 
 # TODO
-
 - [ ] Add code to determine the robustness of calibration to camera occlusions and possibly include additional distortion terms.
 - [ ] Compare SMPL fitting that also includes 2D projections in [Easy Mocap](https://github.com/zju3dv/EasyMocap/blob/master/easymocap/pipeline/basic.py#L55)
-- [ ] Work on OpenSim model with more surface markers and then export them from the SMPL model, e.g. [Humor Mocap Markers for AMASS](https://github.com/davrempe/humor/blob/main/humor/body_model/utils.py#L17) although these don't perfectly match onto those in [OpenSim Rajagopal model](https://github.com/opensim-org/opensim-models/blob/master/Models/RajagopalModel/Rajagopal2015.osim#L13811). Might make sense to implement as a standalone SMPL<->OpenSim library.
+- [ ] Work on OpenSim model with more surface markers and then export them from the SMPL model, e.g. [Humor Mocap Markers for AMASS](https://github.com/davrempe/humor/blob/main/humor/body_model/utils.py#L17) although these don't perfectly match onto those in [OpenSim Rajagopal model](https://github.com/opensim-org/opensim-models/blob/master/Models/RajagopalModel/Rajagopal2015.osim#L13811) or [here](https://github.com/opensim-org/opensim-models/blob/master/Pipelines/Rajagopal/Markerset.xml). Might make sense to implement as a standalone SMPL<->OpenSim library.
 - [ ] Script the OpenSim fitting so it can run within the pipeline.
 - [ ] Add HuMoR optimization
