@@ -410,26 +410,35 @@ def update_camera(checkerboard_params, camera_params, checkerboard_points, objp,
     camera_solver = jaxopt.GradientDescent(fun=camera_loss, maxiter=iterations, verbose=False)
     return camera_solver.run(camera_params, checkerboard_params=checkerboard_params, checkerboard_points=checkerboard_points, objp=objp)[0]
 
-#@jit
-#def update_camera_checkerboard
 @jit
 def update_camera_cycle(camera_params, checkerboard_points, iterations=10, stepsize=0.0):
     cycle_solver = jaxopt.GradientDescent(fun=cycle_loss, maxiter=iterations, verbose=False, stepsize=stepsize)
     return cycle_solver.run(camera_params, checkerboard_points=checkerboard_points)[0]
 
 
-def refine_calibration(camera_params, checkerboard_params, checkerboard_points, objp, iterations=20,
-                       inner_iterations=10, verbose=True, cycle_consistency=True):
+def refine_calibration(camera_params, checkerboard_params, checkerboard_points, objp, iterations=500,
+                       inner_iterations=10, verbose=True, cycle_consistency=False):
 
-    for _ in range(iterations):
+    height, width = 1536, 2048
+
+    for i in range(iterations):
 
         checkerboard_params = update_checkerboard(checkerboard_params, camera_params, checkerboard_points,
-                                                  objp, iterations=inner_iterations)
+                                                  objp, iterations=1 if i < 50 else 100)
         camera_params = update_camera(checkerboard_params, camera_params, checkerboard_points,
-                                      objp, iterations=inner_iterations)
+                                      objp, iterations=1 if i < 50 else inner_iterations)
 
         if cycle_consistency:
-            camera_params = update_camera_cycle(camera_params, checkerboard_points, iterations=inner_iterations)
+            camera_params = update_camera_cycle(camera_params, checkerboard_points, iterations=1 if i < 50 else inner_iterations)
+
+        # apply some regularization to principal point and distortion
+        decay = 0.9
+        if i < 300:
+            camera_params['dist'] = camera_params['dist'] * decay
+        else:
+            camera_params['dist'].at[:,1:].set(camera_params['dist'][:,1:] * decay)
+        new_principal = camera_params['mtx'][:, 2:] + (np.array([[height/2, width/2]]) / 1000.0 - camera_params['mtx'][:, 2:]) * (1-decay)
+        camera_params['mtx'] = camera_params['mtx'].at[:, 2:].set(new_principal)
 
         if verbose:
             e1 = checkerboard_reprojection_loss(camera_params, checkerboard_params, checkerboard_points, objp)
@@ -497,6 +506,8 @@ def run_calibration(vid_base, vid_path=".", return_parsers=False, frame_skip=5, 
         "camera_names": cam_names,
         "camera_calibration": params_dict,
         "reprojection_error": error,
+        "calibration_points": checkerboard_points,
+        "calibration_shape": objp
     }
 
     if return_parsers:

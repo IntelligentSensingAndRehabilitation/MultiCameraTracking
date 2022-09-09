@@ -20,6 +20,8 @@ class Calibration(dj.Manual):
     camera_names         : longblob   # list of camera names
     camera_calibration   : longblob   # calibration results
     reprojection_error   : float
+    calibration_points   : longblob
+    calibration_shape    : longblob
     """
 
 
