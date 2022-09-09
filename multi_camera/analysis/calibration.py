@@ -463,6 +463,106 @@ def filter_calibration(checkerboard_points, checkerboard_params, min_visible=2):
     return checkerboard_points, checkerboard_params
 
 
+def calibrate_bundle(parsers, camera_names=None, fisheye=False, verbose=True, zero_origin=False,
+                    extra_dist=False, both_focal=True, bundle_adjust=True, **kwargs):
+    """
+    Calibrate multiple cameras using bundle adjustment
+
+    This uses the bundle adjustment implemented in aniposelib to perform
+    the calibration.
+
+        Parameters:
+            parsers (list) : list of checkerboard video parser results
+            camera_names (list, optional) : list of camera names
+            fisheye (boolean, optional) : set true to enable a fisheye camear
+            versbose (boolean, optional) : set true to produce more outputs
+            **kwargs : option arguments that can be passed into aniposelib.bundle_adjust_iter
+                (e.g. n_samp_full=200, n_samp_iter=100)
+
+        Returns:
+            reprojection error
+            dictionary of configurations
+    """
+
+    from aniposelib.cameras import CameraGroup
+    from aniposelib.boards import Checkerboard
+    from aniposelib.utils import get_initial_extrinsics, make_M, get_rtvec, get_connections
+    from aniposelib.boards import merge_rows, extract_points, extract_rtvecs
+
+    if camera_names is None:
+        camera_names = list(range(len(parsers)))
+
+    p = parsers[0]
+    square_length = p.objp[1, 0] - p.objp[0, 0]
+    cols = p.cols
+    rows = p.rows
+
+    cgroup = CameraGroup.from_names(camera_names, fisheye=fisheye)
+    board = Checkerboard(cols, rows, square_length=square_length)
+
+    for c in cgroup.cameras:
+        c.extra_dist = extra_dist
+        c.both_focal = both_focal
+
+    print(f'Extra: {cgroup.cameras[0].extra_dist}. Both: {cgroup.cameras[0].both_focal}')
+
+    for cam, p in zip(cgroup.cameras, parsers):
+        h, w, _ = p.shape
+        cam.set_size((w, h))
+
+    # convert parser results to the "rows" used by aniposelib
+    all_rows = []
+    for p in parsers:
+        rows = []
+        for frame_num, corner in zip(p.frames, p.corners):
+            row = {"framenum": frame_num, "corners": corner, "ids": None}
+            row['filled'] = board.fill_points(row['corners'], row['ids'])
+            rows.append(row)
+        all_rows.append(rows)
+
+    for rows, camera, parser in zip(all_rows, cgroup.cameras, parsers):
+        size = camera.get_size()
+
+        assert size is not None, \
+            "Camera with name {} has no specified frame size".format(camera.get_name())
+
+        if not extra_dist or fisheye:
+            objp, imgp = board.get_all_calibration_points(rows)
+            mixed = [(o, i) for (o, i) in zip(objp, imgp) if len(o) >= 7]
+            objp, imgp = zip(*mixed)
+            matrix = cv2.initCameraMatrix2D(objp, imgp, tuple(size))
+            camera.set_camera_matrix(matrix)
+        else:
+            cal = parser.calibrate_camera()
+            camera.set_camera_matrix(cal['mtx'])
+            camera.set_distortions(cal['dist'])  # system only expects one distortion parameters
+
+    for i, (row, cam) in enumerate(zip(all_rows, cgroup.cameras)):
+        all_rows[i] = board.estimate_pose_rows(cam, row)
+
+    merged = merge_rows(all_rows)
+    imgp, extra = extract_points(merged, board, min_cameras=2)
+
+    rtvecs = extract_rtvecs(merged)
+    rvecs, tvecs = get_initial_extrinsics(rtvecs, cgroup.get_names())
+    cgroup.set_rotations(rvecs)
+    cgroup.set_translations(tvecs)
+
+    if verbose:
+        print(cgroup.get_dicts())
+
+    if bundle_adjust:
+        error = cgroup.bundle_adjust_iter(imgp, extra, verbose=verbose, **kwargs)
+
+    if zero_origin:
+        x0, board_rotation = extract_origin(cgroup, imgp)
+
+        # distance from my checkerboard top corner to ground
+        cgroup = shift_calibration(cgroup, x0, board_rotation, 1245)
+
+    return error, cgroup.get_dicts()
+
+
 def run_calibration(vid_base, vid_path=".", return_parsers=False, frame_skip=5, **kwargs):
     """
     Run the calibration routine on a video recording session
@@ -502,13 +602,23 @@ def run_calibration(vid_base, vid_path=".", return_parsers=False, frame_skip=5, 
     print("Now running calibration")
     init_camera_params, init_checkerboard_params, checkerboard_points = initialize_group_calibration(parsers)
 
+    if False:
     # only process frames where checkerboard is seen by multiple cameras
-    checkerboard_points, init_checkerboard_params = filter_calibration(checkerboard_points, init_checkerboard_params)
+        checkerboard_points, init_checkerboard_params = filter_calibration(checkerboard_points, init_checkerboard_params)
 
-    camera_params, checkerboard_params = refine_calibration(init_camera_params, init_checkerboard_params, checkerboard_points,
-                                                            objp, **kwargs)
-    error = float(checkerboard_loss(checkerboard_params, camera_params, checkerboard_points, objp))
+        camera_params, checkerboard_params = refine_calibration(init_camera_params, init_checkerboard_params, checkerboard_points,
+                                                                objp, **kwargs)
+        error = float(checkerboard_loss(checkerboard_params, camera_params, checkerboard_points, objp))
 
+    else:
+        error, cgroup = calibrate_bundle(parsers, n_samp_iter=500, n_samp_full=5000)
+
+        camera_params = {'mtx': np.array([[c['matrix'][0][0], c['matrix'][1][1], c['matrix'][0][2], c['matrix'][1][2]] for c in cgroup]) / 1000.0,
+                 'dist': np.array([c['distortions'] for c in cgroup]),
+                 'rvec': np.array([c['rotation'] for c in cgroup]),
+                 'tvec': np.array([c['translation'] for c in cgroup]) / 1000.0,
+                }
+                
     print("Zeroing coordinates")
     x0, board_rotation = extract_origin(camera_params, checkerboard_points[:, 5:])
     camera_params_zeroed = shift_calibration(camera_params, x0, board_rotation, zoffset=1245)
