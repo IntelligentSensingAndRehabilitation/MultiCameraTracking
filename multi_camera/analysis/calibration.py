@@ -449,6 +449,20 @@ def refine_calibration(camera_params, checkerboard_params, checkerboard_points, 
     return camera_params, checkerboard_params
 
 
+def filter_calibration(checkerboard_points, checkerboard_params, min_visible=2):
+    """
+    Only keep the times where checkerboard is visible from multiple perspectives
+    """ 
+
+    visible = np.sum(~np.isnan(checkerboard_points[:, :, 0, 0]), axis=0)
+    checkerboard_params = checkerboard_params.copy()
+    checkerboard_params['rvecs'] = checkerboard_params['rvecs'][visible>=min_visible]
+    checkerboard_params['tvecs'] = checkerboard_params['tvecs'][visible>=min_visible]
+    checkerboard_points = checkerboard_points[:, visible>=min_visible]
+
+    return checkerboard_points, checkerboard_params
+
+
 def run_calibration(vid_base, vid_path=".", return_parsers=False, frame_skip=5, **kwargs):
     """
     Run the calibration routine on a video recording session
@@ -487,6 +501,10 @@ def run_calibration(vid_base, vid_path=".", return_parsers=False, frame_skip=5, 
 
     print("Now running calibration")
     init_camera_params, init_checkerboard_params, checkerboard_points = initialize_group_calibration(parsers)
+
+    # only process frames where checkerboard is seen by multiple cameras
+    checkerboard_points, init_checkerboard_params = filter_calibration(checkerboard_points, init_checkerboard_params)
+
     camera_params, checkerboard_params = refine_calibration(init_camera_params, init_checkerboard_params, checkerboard_points,
                                                             objp, **kwargs)
     error = float(checkerboard_loss(checkerboard_params, camera_params, checkerboard_points, objp))
