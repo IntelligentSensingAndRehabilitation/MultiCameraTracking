@@ -1,6 +1,7 @@
 import copy
 
 import PySpin
+import simple_pyspin
 from simple_pyspin import Camera
 from PIL import Image
 import numpy as np
@@ -15,6 +16,7 @@ import time
 import cv2
 import os
 import _thread
+import yaml
 
 # Defining window size based on number
 # of cameras(key)
@@ -30,16 +32,44 @@ window_sizes = {
 }
 
 
-def record_dual(vid_file, max_frames=100, num_cams=4, frame_pause=0, preview=True, resize=0.5):
+def record_dual(vid_file, max_frames=100, num_cams=4, frame_pause=0, preview=True, resize=0.5, config=""):
     # Initializing dict to hold each image queue (from each camera)
     image_queue_dict = {}
     if preview:
         visualization_queue = Queue(1)
 
-    cams = [Camera(i, lock=True) for i in range(num_cams)]
+    # Get the number of available cameras
+    # Set num_cams to the # of available cameras
+    # if input arg is larger (num_cams = min(num_cams,len(camera_list))
+    camera_list = simple_pyspin.list_cameras()
+
+    # if len(camera_list) < num_cams:
+    #     num_cams = len(camera_list)
+    #     print("Input number of cameras larger than available cameras.")
+
+    # cams = []
+    # Check if a config file has been provided
+    if config != "":
+        with open(config, 'r') as file:
+            camera_config = yaml.safe_load(file)
+    #
+    #     for i in range(camera_list.GetSize()):
+
+    print(camera_config)
+    print(camera_config['camera-ids'])
+    print(type(camera_config['camera-ids'][0]))
+    # First create list of all available cameras
+    cams = [Camera(i, lock=True) for i in range(camera_list.GetSize())]
 
     def init_camera(c):
+        # Initialize each available camera
         c.init()
+
+        # check if the current camera is in the list defined by config
+        if config != "":
+            if int(c.DeviceSerialNumber) not in camera_config['camera-ids']:
+                print(f'{c.DeviceSerialNumber} not listed in config file.')
+                return
 
         c.PixelFormat = "BayerRG8"  # BGR8 Mono8
         # c.BinningHorizontal = 1
@@ -75,9 +105,13 @@ def record_dual(vid_file, max_frames=100, num_cams=4, frame_pause=0, preview=Tru
             c.BinningVertical,
         )
 
+        return c
+
+    print("BEFORE MAP")
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(cams)) as executor:
         l = list(executor.map(init_camera, cams))
-
+    print("AFTER MAP")
+    print(l)
     cams.sort(key=lambda x: x.DeviceSerialNumber)
 
     # print(cams[0].get_info('PixelFormat'))
@@ -371,6 +405,7 @@ if __name__ == "__main__":
         default=0.5,
         help="Ratio to use for scaling the real-time visualization output (should be a float between 0 and 1)",
     )
+    parser.add_argument("-c", "--config", type=str, help="Path to a config.yaml file")
     args = parser.parse_args()
 
     record_dual(
@@ -380,4 +415,5 @@ if __name__ == "__main__":
         frame_pause=args.frame_pause,
         preview=args.preview,
         resize=args.scaling,
+        config=args.config,
     )
