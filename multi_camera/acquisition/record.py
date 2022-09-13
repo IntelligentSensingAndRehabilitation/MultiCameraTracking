@@ -112,6 +112,8 @@ def record_dual(vid_file, max_frames=100, num_cams=4, frame_pause=0, preview=Tru
         l = list(executor.map(init_camera, cams))
     print("AFTER MAP")
     print(l)
+    cams = [cam for cam in l if cam != None]
+    print(cams)
     cams.sort(key=lambda x: x.DeviceSerialNumber)
 
     # print(cams[0].get_info('PixelFormat'))
