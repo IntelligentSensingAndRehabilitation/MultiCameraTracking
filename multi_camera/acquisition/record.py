@@ -369,6 +369,9 @@ def record_dual(vid_file, max_frames=100, num_cams=4, frame_pause=0, preview=Tru
     output_json["timestamps"] = [list(t) for t in zip(*all_timestamps)]
     output_json["real_times"] = real_times
 
+    if config != "":
+        output_json["meta_info"] = camera_config['meta-info']
+
     # writing the json file for the current recording session
     json.dump(output_json, open(json_file, "w"))
 
