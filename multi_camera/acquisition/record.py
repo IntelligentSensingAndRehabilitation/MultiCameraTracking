@@ -52,14 +52,14 @@ def record_dual(vid_file, max_frames=100, num_cams=4, frame_pause=0, preview=Tru
     if config != "":
         with open(config, 'r') as file:
             camera_config = yaml.safe_load(file)
-    #
-    #     for i in range(camera_list.GetSize()):
+        print(f'Selecting cameras defined in {config}.')
+        # First create list of all available cameras
+        cams = [Camera(i, lock=True) for i in range(camera_list.GetSize())]
 
-    print(camera_config)
-    print(camera_config['camera-ids'])
-    print(type(camera_config['camera-ids'][0]))
-    # First create list of all available cameras
-    cams = [Camera(i, lock=True) for i in range(camera_list.GetSize())]
+    else:
+        print(f'No config file passed. Selecting the first {num_cams} cameras in the list.')
+        # First create list of first n cameras in camera_list where n=num_cams
+        cams = [Camera(i, lock=True) for i in range(num_cams)]
 
     def init_camera(c):
         # Initialize each available camera
@@ -107,13 +107,12 @@ def record_dual(vid_file, max_frames=100, num_cams=4, frame_pause=0, preview=Tru
 
         return c
 
-    print("BEFORE MAP")
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(cams)) as executor:
         l = list(executor.map(init_camera, cams))
-    print("AFTER MAP")
-    print(l)
+
+    # Creating a list of only cameras present in the config file
     cams = [cam for cam in l if cam != None]
-    print(cams)
+
     cams.sort(key=lambda x: x.DeviceSerialNumber)
 
     # print(cams[0].get_info('PixelFormat'))
@@ -407,7 +406,7 @@ if __name__ == "__main__":
         default=0.5,
         help="Ratio to use for scaling the real-time visualization output (should be a float between 0 and 1)",
     )
-    parser.add_argument("-c", "--config", type=str, help="Path to a config.yaml file")
+    parser.add_argument("-c", "--config", default="", type=str, help="Path to a config.yaml file")
     args = parser.parse_args()
 
     record_dual(
