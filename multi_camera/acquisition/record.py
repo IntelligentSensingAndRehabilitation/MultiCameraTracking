@@ -32,7 +32,7 @@ window_sizes = {
 }
 
 
-def record_dual(vid_file, max_frames=100, num_cams=4, frame_pause=0, preview=True, resize=0.5, config=""):
+def record_dual(vid_file, max_frames=100, num_cams=4, preview=True, resize=0.5, config=""):
     # Initializing dict to hold each image queue (from each camera)
     image_queue_dict = {}
     if preview:
@@ -134,9 +134,6 @@ def record_dual(vid_file, max_frames=100, num_cams=4, frame_pause=0, preview=Tru
 
         try:
             for _ in tqdm(range(max_frames)):
-
-                if frame_pause > 0:
-                    time.sleep(frame_pause)
 
                 # get the image raw data
                 # for each camera, get the current frame and assign it to
@@ -393,7 +390,6 @@ if __name__ == "__main__":
     parser.add_argument("vid_file", help="Video file to write")
     parser.add_argument("-m", "--max_frames", type=int, default=10000, help="Maximum frames to record")
     parser.add_argument("-n", "--num_cams", type=int, default=4, help="Number of input cameras")
-    parser.add_argument("-f", "--frame_pause", type=int, default=0, help="Time to pause between frames of video")
     parser.add_argument(
         "-p", "--preview", default=False, action="store_true", help="Allow real-time visualization of video"
     )
@@ -411,7 +407,6 @@ if __name__ == "__main__":
         vid_file=args.vid_file,
         max_frames=args.max_frames,
         num_cams=args.num_cams,
-        frame_pause=args.frame_pause,
         preview=args.preview,
         resize=args.scaling,
         config=args.config,
