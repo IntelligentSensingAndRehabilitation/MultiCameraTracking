@@ -7,7 +7,7 @@ Modules:
 - `multi_camera.acquisition` - the recording software
 - `multi_camera.analysis` - core analysis code
 - `multi_camera.datajoint` - data management and bridges between recording software and analysis code
-- `multi_camera.utils` - miscellaneous utiliies.
+- `multi_camera.utils` - miscellaneous utilities.
 
 
 Acquisition is designed to perform simple multi-camera video acquisition with FLIR cameras. These use network synchronization and are tested on BFS-PGE-31S4C. Requires recent firmware to support IEEE1394 synchronization.
@@ -21,7 +21,7 @@ Acquisition is designed to perform simple multi-camera video acquisition with FL
 
 ## Recording:
 
-    python -m multi_camera.acquisition.record [-h] [-m MAX_FRAMES] [-n NUM_CAMS] [--preview] [-s SCALING] vid_fil
+    python -m multi_camera.acquisition.record [-h] [-m MAX_FRAMES] [-n NUM_CAMS] [--preview] [-s SCALING] [-c CONFIG] vid_filename
 
 One can either pass a number of frames or hit "Ctrl-C" to stop recording
 
