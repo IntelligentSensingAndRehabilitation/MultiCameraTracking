@@ -43,11 +43,6 @@ def record_dual(vid_file, max_frames=100, num_cams=4, frame_pause=0, preview=Tru
     # if input arg is larger (num_cams = min(num_cams,len(camera_list))
     camera_list = simple_pyspin.list_cameras()
 
-    # if len(camera_list) < num_cams:
-    #     num_cams = len(camera_list)
-    #     print("Input number of cameras larger than available cameras.")
-
-    # cams = []
     # Check if a config file has been provided
     if config != "":
         with open(config, 'r') as file:
