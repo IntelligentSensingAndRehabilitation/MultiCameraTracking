@@ -45,14 +45,14 @@ def record_dual(vid_file, max_frames=100, num_cams=4, preview=True, resize=0.5, 
 
     # Check if a config file has been provided
     if config != "":
-        with open(config, 'r') as file:
+        with open(config, "r") as file:
             camera_config = yaml.safe_load(file)
-        print(f'Selecting cameras defined in {config}.')
+        print(f"Selecting cameras defined in {config}.")
         # First create list of all available cameras
         cams = [Camera(i, lock=True) for i in range(camera_list.GetSize())]
 
     else:
-        print(f'No config file passed. Selecting the first {num_cams} cameras in the list.')
+        print(f"No config file passed. Selecting the first {num_cams} cameras in the list.")
         # First create list of first n cameras in camera_list where n=num_cams
         cams = [Camera(i, lock=True) for i in range(num_cams)]
 
@@ -62,8 +62,8 @@ def record_dual(vid_file, max_frames=100, num_cams=4, preview=True, resize=0.5, 
 
         # check if the current camera is in the list defined by config
         if config != "":
-            if int(c.DeviceSerialNumber) not in camera_config['camera-ids']:
-                print(f'{c.DeviceSerialNumber} not listed in config file.')
+            if int(c.DeviceSerialNumber) not in camera_config["camera-ids"]:
+                print(f"{c.DeviceSerialNumber} not listed in config file.")
                 return
 
         c.PixelFormat = "BayerRG8"  # BGR8 Mono8
@@ -125,7 +125,6 @@ def record_dual(vid_file, max_frames=100, num_cams=4, preview=True, resize=0.5, 
         print(c.GevIEEE1588StatusLatched, c.GevIEEE1588OffsetFromMasterLatched)
 
     def acquire():
-
         def start_cam(i):
             cams[i].start()
 
@@ -367,18 +366,18 @@ def record_dual(vid_file, max_frames=100, num_cams=4, preview=True, resize=0.5, 
     output_json["real_times"] = real_times
 
     if config != "":
-        output_json["meta_info"] = camera_config['meta-info']
+        output_json["meta_info"] = camera_config["meta-info"]
 
     # writing the json file for the current recording session
     json.dump(output_json, open(json_file, "w"))
 
     ts = np.array(output_json["timestamps"])
-    dt = (ts - ts[0,0]) / 1e9
+    dt = (ts - ts[0, 0]) / 1e9
     spread = np.max(dt, axis=1) - np.min(dt, axis=1)
     if np.all(spread < 4e-3):
-        print('Timestamps well aligned and clean')
+        print("Timestamps well aligned and clean")
     else:
-        print(f'Timestamps showed a maximum spread of {np.max(spread) * 1000} ms')
+        print(f"Timestamps showed a maximum spread of {np.max(spread) * 1000} ms")
 
     return
 
