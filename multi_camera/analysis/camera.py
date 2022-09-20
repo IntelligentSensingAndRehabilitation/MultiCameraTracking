@@ -225,7 +225,8 @@ def triangulate_point(camera_params, points2d):
         - https://amytabb.com/tips/tutorials/2021/10/31/triangulation-DLT-2-3/
     """
 
-    projections = jnp.array([get_projection(camera_params, i) for i in range(8)])
+    N = camera_params['mtx'].shape[0]
+    projections = jnp.array([get_projection(camera_params, i) for i in range(N)])
 
     assert points2d.shape[0] == projections.shape[0]
 
@@ -235,7 +236,7 @@ def triangulate_point(camera_params, points2d):
     else:
         weight = np.ones((*points2d.shape[:-1], 1))
 
-    points2d = jnp.array([undistort_points(points2d[i], get_intrinsic(camera_params, i), camera_params['dist'][i]) for i in range(8)])
+    points2d = jnp.array([undistort_points(points2d[i], get_intrinsic(camera_params, i), camera_params['dist'][i]) for i in range(N)])
 
     # use broadcasting to build a DLT matrix. this will have a shape
     # number of cameras X 2 x (point dimensions) x 4 and then gets reshaped

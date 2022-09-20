@@ -1,0 +1,119 @@
+import pims
+import numpy as np
+import datajoint as dj
+from easymocap.dataset.base import MVBase
+from easymocap.dataset import CONFIG
+from easymocap.mytools.file_utils import get_bbox_from_pose
+
+from pose_pipeline import Video, VideoInfo, OpenPose
+from .multi_camera_dj import schema, MultiCameraRecording, SingleCameraVideo, Calibration, CalibratedRecording
+
+def _build_camera(params, index=0):
+    from multi_camera.analysis.camera import get_intrinsic, get_extrinsic, get_projection
+    cam = {}
+    #cam['K'] = np.array(params[index]['matrix'])
+    cam['K'] = np.array(get_intrinsic(params, index))
+    cam['RT'] = np.array(get_extrinsic(params, index)[:3])
+    cam['P'] = np.array(get_projection(params, index))
+
+    cam['RT'][:, :3] = cam['RT'][:, :3] / 1000.0 # distance back to meters
+
+    cam['invK'] = np.linalg.inv(cam['K'])
+    cam['Rvec'] = params['rvec'][index, :, None]
+    cam['T'] = cam['RT'][:3, -1, None]
+    cam['R'] = cam['RT'][:, :3]
+    cam['center'] = - params['rvec'][index].T @  cam['T']
+    cam['dist'] = params['dist'][index]
+    return cam
+
+
+class MCTDataset(MVBase):
+    """
+    Provides an EasyMocap compatible interface to MultiCamera / PosePipe
+    """
+
+    def __init__(self, key, filter2d=None):
+
+        # TODO: should support general bottom up class and thus other types of keypoints
+        self.videos, self.keypoints, self.cams = (Video * OpenPose * SingleCameraVideo & key).fetch('video', 'keypoints', 'camera_name')
+        self.calibration, calibration_cameras = (Calibration & key).fetch1('camera_calibration', 'camera_names')
+
+        calibration_idx = np.array([calibration_cameras.index(c) for c in self.cams])
+        if len(calibration_idx) != len(self.cams):
+            print(f'Keeping cameras: {calibration_idx}')
+        for k in self.calibration.keys():
+            self.calibration[k] = self.calibration[k][calibration_idx]
+        calibration_cameras = self.cams
+
+        #self.caps = [cv2.VideoCapture(v) for v in self.videos]
+        self.caps = [pims.Video(v) for v in self.videos]
+        self.frames = np.unique((VideoInfo * SingleCameraVideo & key).fetch('num_frames'))
+        #assert len(self.frames) == 1
+        self.frames = np.min(self.frames)
+
+        # set some default values. these fields are expected and would be created by
+        # calling the parent class constructor, if it wouldn't break for us
+        self.kpts_type = 'body25' # openpose
+        self.config = CONFIG[self.kpts_type]
+        self.ret_crop = False
+        self.undis = True
+        self.nViews = len(self.videos)
+
+        # set up cameras
+        self.cameras = {c: _build_camera(self.calibration, i) for i, c in enumerate(calibration_cameras)}
+        self.cameras['basenames'] = calibration_cameras
+        self.Pall = np.stack([self.cameras[cam]['K'] @ np.hstack((self.cameras[cam]['R'], self.cameras[cam]['T'])) for cam in self.cams])
+
+        # some additional variables normally set in parent to reproduce complete behavior
+        self.filter2d = filter2d
+        if filter2d is not None:
+            self.filter2d = make_filter(filter2d)
+
+
+    def __len__(self) -> int:
+        return self.frames
+
+    def __getitem__(self, index: int):
+        images = [np.array(c[index]) for c in self.caps]
+
+        def _parse_people(keypoints):
+            # split into dictionary format needed downstream
+            return [{'keypoints': k.copy(), 'bbox': get_bbox_from_pose(k)} for k in keypoints] # iterate over first axis
+
+        # reformat all the multi
+        annots = [_parse_people(k[index]) for k in self.keypoints]
+
+        if self.undis:
+            images = self.undistort(images)
+            annots = self.undis_det(annots)
+
+        return images, annots
+
+
+@schema
+class EasymocapTracking(dj.Computed):
+    definition = '''
+    # Use EasyMocap to track and associate people in the view
+    -> CalibratedRecording
+    ---
+    tracking_results     : longblob
+    num_tracks           : int
+    '''
+
+    def make(self, key):
+        from multi_camera.analysis.easymocap import mvmp_association_and_tracking
+
+        assert len((SingleCameraVideo & key) - OpenPose) == 0, f"Missing OpenPose computations for {key}"
+
+        dataset = MCTDataset(key)
+        results = mvmp_association_and_tracking(dataset)
+
+        key['tracking_results'] = results
+        key['num_tracks'] = len(np.unique([k['id'] for r in results for k in r]))
+
+        self.insert1(key)
+
+    @property
+    def key_source(self):
+        # awkward double negative is to ensure all OpenPose views were computed
+        return CalibratedRecording & MultiCameraRecording - (SingleCameraVideo - OpenPose).proj()
