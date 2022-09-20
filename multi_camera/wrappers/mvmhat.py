@@ -8,9 +8,21 @@ from torch.cuda.amp import autocast as autocast
 from pose_pipeline.env import add_path
 from pose_pipeline.utils.bounding_box import crop_image_bbox
 
-checkpoint_path = '/home/jcotton/projects/pose/MvMHAT/models/model_20220905_080000.pth'
+checkpoint_path = '/home/jcotton/projects/pose/MvMHAT/models/model_20220917_154500.pth'
+yolov7_pretrained = '/home/jcotton/projects/pose/MultiCameraTracking/notebooks/wrappers/yolov7-w6.pt'
 
-def mvmhat(video, tracks, return_extra=False):
+
+def convert_to_posepipe(view_results, total_frames):
+    results = []
+
+    for i in range(total_frames):
+        frame_detections = [{'track_id': v[1], 'tlhw': v[2:], 'tlbr': [v[2], v[3], v[2]+v[4], v[3]+v[5]]}
+                            for v in view_results if v[0] == i]
+        results.append(frame_detections)
+    return results
+
+
+def mvmhat(videos, return_extra=False, max_frames=None, conf_thres=0.5):
     '''
     Run MvMHAT on a list of videos with a set of bounding box tracks
 
@@ -23,80 +35,102 @@ def mvmhat(video, tracks, return_extra=False):
         view.
     '''
 
+    with add_path(os.environ["YOLOV7_PATH"]):
+        from models.yolo import Model
+        from utils.general import non_max_suppression
+
+        #yolov7 = attempt_load(yolov7_pretrained, map_location='cuda')
+        model = torch.load(yolov7_pretrained)
+        if isinstance(model, dict):
+            model = model['ema' if model.get('ema') else 'model']
+
+        yolov7 = Model(model.yaml).to(next(model.parameters()).device)  # create
+        yolov7.load_state_dict(model.float().state_dict())  # load state_dict
+        yolov7.names = model.names  # class names
+        #if autoshape:
+        #    hub_model = hub_model.autoshape()  # for file/URI/PIL/cv2/np inputs and NMS
+        yolov7.to('cuda')
+        yolov7.eval()
+        print('YOLOv7 loaded')
+
     with add_path(os.environ["MVMHAT_PATH"]):
         from deep_sort.update import Update
         from deep_sort.mvtracker import MVTracker
 
-        model = models.resnet50(pretrained=False)
+        model = models.resnet50()
         model = model.cuda()
         ckp = torch.load(checkpoint_path)['model']
         model.load_state_dict(ckp)
         model.eval()
+        print('MvMHAT ReID loaded')
 
-        def process_video(video, tracks):
-            ''' Compute ReID for each of the bounding boxes in tracks '''
+    def tlbr_to_tlhw (x):
+        return [x[0], x[1], x[2]-x[0], x[3]-x[1]]
 
-            cap = cv2.VideoCapture(video)
-            frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    def process_video(video):
+        cap = cv2.VideoCapture(video)
+        frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
-            #frames = 100
-            #tracks = tracks[:frames]
+        if max_frames:
+            frames = max_frames
 
-            tracks_out = tracks.copy()
+        dets = []
 
-            for i in trange(frames):
-                ret, frame = cap.read()
-                frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        for i in trange(frames):
+            ret, frame = cap.read()
+            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
 
-                for b in range(len(tracks[i])):
-                    cropped = crop_image_bbox(frame, tracks[i][b]['tlhw'])[0]
+            with torch.no_grad():
+                img = torch.Tensor(frame.transpose([2, 0, 1])).to('cuda').unsqueeze(0) / 255.0
+                pred, _ = yolov7(img)
 
-                    with torch.no_grad():
-                        img = torch.Tensor(cropped.transpose([2, 0, 1])[None, ...]).cuda()
-                        with autocast():
-                            features = model(img).detach().cpu().numpy().tolist()
+            pred = non_max_suppression(pred, classes=0, conf_thres=conf_thres)[0].detach().cpu().numpy()
 
-                    tracks_out[i][b]['features'] = features[0]
+            for j, p in enumerate(pred):
+                tlhw = tlbr_to_tlhw(p)
 
-            cap.release()
+                # my library code nicely keeps a square aspect ratio. not what the model is trained on.
+                # cropped = crop_image_bbox(frame, np.array(tlhw), target_size=(224, 224), dilate=1.0)[0]
 
-            return tracks_out
+                bbox = np.array(tlhw).astype(int)
+                cropped = frame[bbox[1]:bbox[3] + bbox[1], bbox[0]:bbox[2] + bbox[0], :]
+                if cropped.shape[0] == 0 or cropped.shape[1] == 0:
+                    continue
 
-        def tracks_to_mvmhat(tracks_out):
-            '''Convert tracks to format for MvMHAT'''
+                cropped = cv2.resize(cropped, (224, 224))
 
-            # convert data to the format used by their library
-            seq_dict = {}
-            for view_idx in range(len(tracks_out)):
+                with torch.no_grad():
+                    img = torch.Tensor(cropped.transpose([2, 0, 1])[None, ...]).cuda()
+                    features = model(img).detach().cpu().numpy().tolist()[0]
 
-                det = []
-                for frame_idx in range(len(tracks_out[view_idx])):
-                    for bbox_idx in range(len(tracks_out[view_idx][frame_idx])):
-                        track =  tracks_out[view_idx][frame_idx][bbox_idx]
-                        det.append([frame_idx] + [bbox_idx] + track['tlhw'].tolist() + [1] + [0, 0, 0] + track['features'])
+                dets.append([i] + [j] + tlhw + [p[4]] + [0, 0, 0] + features)
 
-                seq_dict[view_idx] = {
-                    "sequence_name": 'test',
-                    "image_filenames": None, #image_filenames[view],
-                    "detections": np.array(det),
-                    "groundtruth": None, #groundtruth,
-                    "image_size": (3, 1520, 2704),
-                    "min_frame_idx": 0, #dataset_info['start'],
-                    "max_frame_idx": frame_idx, #dataset_info['end'] - 1,
-                    "feature_dim": 1000,
-                    "update_ms": 10
-                }
+        cap.release()
 
-            return seq_dict
+        return np.array(dets), frames, frame.shape
 
-        featured_tracks = [process_video(video[i], tracks[i]) for i in range(len(video))]
-        seq_dict = tracks_to_mvmhat(featured_tracks)
+    seq_dict = {}
+    for view_idx, vid in enumerate(videos):
+        dets, frames, shape = process_video(vid)
 
-        mvtracker = MVTracker(list(range(0, len(tracks))))
-        updater = Update(seq=seq_dict, mvtracker=mvtracker, display=False)
-        updater.run()
+        seq_dict[view_idx] = {
+            "sequence_name": vid,
+            "detections": np.array(dets),
+            "image_size": (shape[2], *shape[:2]),
+            "min_frame_idx": 0,
+            "max_frame_idx": frames,
+            "feature_dim": 1000,
+            "update_ms": 10
+        }
 
-        if return_extra:
-            return updater.result, {'updater': updater, 'mvtracker': mvtracker,
-                                    'tracks': featured_tracks, 'seq_dict': seq_dict}
-        return updater.result
+    mvtracker = MVTracker(list(range(0, len(videos))))
+    updater = Update(seq=seq_dict, mvtracker=mvtracker, display=False)
+    updater.run()
+
+    results = [convert_to_posepipe(r, total_frames=seq_dict[k]['max_frame_idx'])
+               for k, r in updater.result.items()]
+
+    if return_extra:
+        return results, {'updater': updater, 'mvtracker': mvtracker, 'seq_dict': seq_dict}
+
+    return results
