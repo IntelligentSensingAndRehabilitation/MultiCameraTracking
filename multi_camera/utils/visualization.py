@@ -90,15 +90,16 @@ def skeleton_video(keypoints3d, filename, method, fps=30.0):
         z_limits = ax.get_zlim3d()
 
         x_range = abs(x_limits[1] - x_limits[0])
-        x_middle = np.mean(x_limits)
+        x_middle = 0 # np.mean(x_limits)
         y_range = abs(y_limits[1] - y_limits[0])
-        y_middle = np.mean(y_limits)
+        y_middle = 0 # np.mean(y_limits)
         z_range = abs(z_limits[1] - z_limits[0])
-        z_middle = np.mean(z_limits)
+        z_middle = 0 # np.mean(z_limits)
 
         # The plot bounding box is a sphere in the sense of the infinity
         # norm, hence I call half the max range the plot radius.
         plot_radius = 0.5*max([x_range, y_range, z_range])
+        plot_radius = min([plot_radius, 1000])
 
         ax.set_xlim3d([x_middle - plot_radius, x_middle + plot_radius])
         ax.set_ylim3d([y_middle - plot_radius, y_middle + plot_radius])

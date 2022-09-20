@@ -81,8 +81,8 @@ class PersonKeypointReconstruction(dj.Computed):
 
         # threshold the weights at 0.5
         weights = points2d[..., 2]
-        weights[weights < 0.75] = 0
-        points2d[..., 2] = weights
+        # weights[weights < 0.75] = 0
+        points2d[..., 2] = weights ** 2
 
         points3d = triangulate_point(camera_calibration, points2d)
         key['keypoints3d'] = np.array(points3d)
@@ -145,9 +145,10 @@ class PersonKeypointReprojectionVideos(dj.Computed):
         self.insert1(key)
 
         videos = Video * TopDownPerson * MultiCameraRecording * PersonKeypointReconstruction * SingleCameraVideo & BestDetectedFrames & key
-        video_keys = videos.fetch('KEY')
+        video_keys, video_camera_name = (SingleCameraVideo.proj() * videos).fetch('KEY', 'camera_name')
         keypoints3d = (PersonKeypointReconstruction & key).fetch1('keypoints3d')
-        camera_params = (Calibration & key).fetch1('camera_calibration')
+        camera_params, camera_names = (Calibration & key).fetch1('camera_calibration', 'camera_names')
+        assert camera_names == video_camera_name.tolist(), "Videos don't match cameras in calibration"
 
         # get video parameters
         width = np.unique((VideoInfo & video_keys).fetch('width'))[0]
@@ -311,7 +312,7 @@ class SMPLReconstructionVideos(dj.Computed):
 
         render = Renderer(height=height, width=width, down_scale=2, bg_color=[0, 0, 0, 0.0])
 
-        for i, video_key in enumerate(video_keys[:1]):
+        for i, video_key in enumerate(video_keys):
 
             # get camera parameters
             K = np.array(get_intrinsic(camera_params, i))
