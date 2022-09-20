@@ -400,20 +400,51 @@ def cycle_loss(camera_params, checkerboard_points):
     err = reprojection_error(camera_params, checkerboard_points, est_checkerboard_3d)
     return jnp.nanmean(jnp.abs(err))
 
-@jit
-def update_checkerboard(checkerboard_params, camera_params, checkerboard_points, objp, iterations=10):
-    checkerboard_solver = jaxopt.GradientDescent(fun=checkerboard_loss, maxiter=iterations, verbose=False)
+@partial(jit, static_argnums=(4,5,))
+def update_checkerboard(checkerboard_params, camera_params, checkerboard_points, objp, stepsize=0.0, iterations=10):
+    checkerboard_solver = jaxopt.GradientDescent(fun=checkerboard_loss, maxiter=iterations, verbose=False, stepsize=stepsize)
     return checkerboard_solver.run(checkerboard_params, camera_params=camera_params, checkerboard_points=checkerboard_points, objp=objp)[0]
 
-@jit
-def update_camera(checkerboard_params, camera_params, checkerboard_points, objp, iterations=10):
-    camera_solver = jaxopt.GradientDescent(fun=camera_loss, maxiter=iterations, verbose=False)
+@partial(jit, static_argnums=(4,5,))
+def update_camera(checkerboard_params, camera_params, checkerboard_points, objp, stepsize=0.0, iterations=10):
+    camera_solver = jaxopt.GradientDescent(fun=camera_loss, maxiter=iterations, verbose=False, stepsize=stepsize)
     return camera_solver.run(camera_params, checkerboard_params=checkerboard_params, checkerboard_points=checkerboard_points, objp=objp)[0]
 
 @jit
-def update_camera_cycle(camera_params, checkerboard_points, iterations=10, stepsize=0.0):
+def update_camera_cycle(camera_params, checkerboard_points, stepsize=0.0, iterations=10):
     cycle_solver = jaxopt.GradientDescent(fun=cycle_loss, maxiter=iterations, verbose=False, stepsize=stepsize)
     return cycle_solver.run(camera_params, checkerboard_points=checkerboard_points)[0]
+
+#@partial(jit, static_argnums=(5,))
+def update_combined(params, checkerboard_points, objp, stepsize=0.0, iterations=10, cycle=False):
+
+    @jit
+    def regularization(params):
+        matrix_loss = jnp.sum(jax.nn.relu(-params['camera_params']['mtx'])) * 1e5  # non-negative
+        dist_loss = jnp.sum(params['camera_params']['dist'] ** 2) * 1e4
+        return matrix_loss + dist_loss
+
+    @jit
+    def loss(params):
+        camera_params = params['camera_params']
+        checkerboard_params = params['checkerboard_params']
+
+        l = camera_loss(camera_params, checkerboard_params, checkerboard_points, objp)
+        l = l + checkerboard_loss(checkerboard_params, camera_params, checkerboard_points, objp)
+        if cycle:
+            l = l + cycle_loss(camera_params, checkerboard_points)
+
+        l = l + regularization(params)
+        return l
+
+
+
+
+    #solver = jaxopt.ScipyMinimize(fun=loss, maxiter=iterations, verbose=True) #, stepsize=stepsize)
+    solver = jaxopt.GradientDescent(fun=loss, maxiter=iterations, verbose=True, stepsize=stepsize, acceleration=False)
+    #solver = jaxopt.ProximalGradient(fun=loss, prox=regularization, maxiter=iterations, verbose=True, stepsize=stepsize)
+    return solver.run(params)[0]
+
 
 
 def refine_calibration(camera_params, checkerboard_params, checkerboard_points, objp, iterations=500,
@@ -563,7 +594,7 @@ def calibrate_bundle(parsers, camera_names=None, fisheye=False, verbose=True, ze
     return error, cgroup.get_dicts()
 
 
-def run_calibration(vid_base, vid_path=".", return_parsers=False, frame_skip=5, **kwargs):
+def run_calibration(vid_base, vid_path=".", return_parsers=False, frame_skip=5, jax_cal=False, **kwargs):
     """
     Run the calibration routine on a video recording session
 
@@ -602,7 +633,7 @@ def run_calibration(vid_base, vid_path=".", return_parsers=False, frame_skip=5, 
     print("Now running calibration")
     init_camera_params, init_checkerboard_params, checkerboard_points = initialize_group_calibration(parsers)
 
-    if False:
+    if jax_cal:
     # only process frames where checkerboard is seen by multiple cameras
         checkerboard_points, init_checkerboard_params = filter_calibration(checkerboard_points, init_checkerboard_params)
 
@@ -618,7 +649,7 @@ def run_calibration(vid_base, vid_path=".", return_parsers=False, frame_skip=5, 
                  'rvec': np.array([c['rotation'] for c in cgroup]),
                  'tvec': np.array([c['translation'] for c in cgroup]) / 1000.0,
                 }
-                
+
     print("Zeroing coordinates")
     x0, board_rotation = extract_origin(camera_params, checkerboard_points[:, 5:])
     camera_params_zeroed = shift_calibration(camera_params, x0, board_rotation, zoffset=1245)
