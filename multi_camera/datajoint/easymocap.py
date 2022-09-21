@@ -11,12 +11,14 @@ from .multi_camera_dj import schema, MultiCameraRecording, SingleCameraVideo, Ca
 def _build_camera(params, index=0):
     from multi_camera.analysis.camera import get_intrinsic, get_extrinsic, get_projection
     cam = {}
+
+    params = params.copy()
+    params['tvec'] = params['tvec']  / 1000.0 # have the final matrices end up in meters
+
     #cam['K'] = np.array(params[index]['matrix'])
     cam['K'] = np.array(get_intrinsic(params, index))
     cam['RT'] = np.array(get_extrinsic(params, index)[:3])
     cam['P'] = np.array(get_projection(params, index))
-
-    cam['RT'][:, :3] = cam['RT'][:, :3] / 1000.0 # distance back to meters
 
     cam['invK'] = np.linalg.inv(cam['K'])
     cam['Rvec'] = params['rvec'][index, :, None]

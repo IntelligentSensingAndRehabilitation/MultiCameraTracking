@@ -35,7 +35,7 @@ def mvmp_association_and_tracking(dataset, keypoints='body25'):
     from easymocap.assignment.track import Track3D
     # currently need to remove some of the additional criteria for association. likely
     # related to scale or keypoint ordering that makes them appear un-anatomic.
-    cfg = Config.load('/home/jcotton/projects/pose/EasyMocap/config/exp/mvmp1f_me.yml')
+    cfg = Config.load('/home/jcotton/projects/pose/EasyMocap/config/exp/mvmp1f.yml')
 
     affinity_model = ComposedAffinity(cameras=dataset.cameras, basenames=dataset.cams, cfg=cfg.affinity)
     group = PeopleGroup(Pall=dataset.Pall, cfg=cfg.group)
