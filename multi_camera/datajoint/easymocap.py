@@ -34,10 +34,12 @@ class MCTDataset(MVBase):
     Provides an EasyMocap compatible interface to MultiCamera / PosePipe
     """
 
-    def __init__(self, key, filter2d=None):
+    def __init__(self, key, filter2d=None, images=False):
+
+        self.images = images
 
         # TODO: should support general bottom up class and thus other types of keypoints
-        self.videos, self.keypoints, self.cams = (Video * OpenPose * SingleCameraVideo & key).fetch('video', 'keypoints', 'camera_name')
+        self.keypoints, self.cams = (OpenPose * SingleCameraVideo & key).fetch('keypoints', 'camera_name')
         self.calibration, calibration_cameras = (Calibration & key).fetch1('camera_calibration', 'camera_names')
 
         calibration_idx = np.array([calibration_cameras.index(c) for c in self.cams])
@@ -47,8 +49,10 @@ class MCTDataset(MVBase):
             self.calibration[k] = self.calibration[k][calibration_idx]
         calibration_cameras = self.cams
 
-        #self.caps = [cv2.VideoCapture(v) for v in self.videos]
-        self.caps = [pims.Video(v) for v in self.videos]
+        if self.images:
+            videos = (Video * OpenPose * SingleCameraVideo & key).fetch('video')
+            self.caps = [pims.Video(v) for v in videos]
+
         self.frames = np.unique((VideoInfo * SingleCameraVideo & key).fetch('num_frames'))
         #assert len(self.frames) == 1
         self.frames = np.min(self.frames)
@@ -59,7 +63,7 @@ class MCTDataset(MVBase):
         self.config = CONFIG[self.kpts_type]
         self.ret_crop = False
         self.undis = True
-        self.nViews = len(self.videos)
+        self.nViews = len(self.cams)
 
         # set up cameras
         self.cameras = {c: _build_camera(self.calibration, i) for i, c in enumerate(calibration_cameras)}
@@ -76,7 +80,10 @@ class MCTDataset(MVBase):
         return self.frames
 
     def __getitem__(self, index: int):
-        images = [np.array(c[index]) for c in self.caps]
+        if self.images:
+            images = [np.array(c[index]) for c in self.caps]
+        else:
+            images = []
 
         def _parse_people(keypoints):
             # split into dictionary format needed downstream
@@ -86,7 +93,8 @@ class MCTDataset(MVBase):
         annots = [_parse_people(k[index]) for k in self.keypoints]
 
         if self.undis:
-            images = self.undistort(images)
+            if self.images:
+                images = self.undistort(images)
             annots = self.undis_det(annots)
 
         return images, annots
