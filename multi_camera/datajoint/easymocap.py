@@ -87,6 +87,8 @@ class MCTDataset(MVBase):
 
         def _parse_people(keypoints):
             # split into dictionary format needed downstream
+            if keypoints is None:
+                return []
             return [{'keypoints': k.copy(), 'bbox': get_bbox_from_pose(k)} for k in keypoints] # iterate over first axis
 
         # reformat all the multi

@@ -48,7 +48,9 @@ def mvmp_association_and_tracking(dataset, keypoints='body25'):
         affinity, dimGroups = affinity_model(annots, images=images)
         group = simple_associate(annots, affinity, dimGroups, dataset.Pall, group, cfg=cfg.associate)
 
-        results.append([{'id': k, 'keypoints3d': v.keypoints3d, 'bbox': v.bbox, 'height': v.height} for k, v in group.items()])
+        # note we assign them all an ID of -1 here because the code below will
+        # assign a stable ID through time
+        results.append([{'id': -1, 'keypoints3d': v.keypoints3d, 'bbox': v.bbox, 'height': v.height} for k, v in group.items()])
 
     edges = tracker.compute_dist(results)
     results = tracker.associate(results, edges)
