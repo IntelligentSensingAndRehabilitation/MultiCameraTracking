@@ -114,6 +114,73 @@ def easymocap_fit_smpl_3d(joints3d, model_path=model_path, verbose=True, smooth3
     return res
 
 
+def fit_multiple_smpl(results):
+
+    from tqdm import trange
+    from easymocap.dataset import CONFIG
+    from easymocap.smplmodel.body_param import load_model
+    from easymocap.pipeline import smpl_from_keypoints3d
+    from easymocap.pipeline.weight import load_weight_pose, load_weight_shape
+
+    config = CONFIG['body25']
+    body_model = load_model(model_path=model_path)
+
+    @dataclass
+    class EasymocapArgs:
+        model = 'smpl'
+        gender = 'neutral'
+        opts = {'smooth_poses': 1e-4, 'reg_poses': 1e-5, 'smooth_body': 5e-3}
+        verbose = True
+        robust3d = False
+        smooth3d = False
+        model = 'smpl'
+
+    args = EasymocapArgs
+
+    weight_shape = load_weight_shape(args.model, args.opts)
+    weight_pose = load_weight_pose(args.model, args.opts)
+
+    # run fits for all of the people, ensuring that we track the
+    # frames they are found
+    body_params = {}
+    body_frames = {}
+    ids = np.unique([k['id'] for r in results for k in r])
+    for pid in ids:
+
+        def get_keypoints(frame, pid):
+            k = [k['keypoints3d'] for k in frame if k['id'] == pid]
+            if len(k) == 0:
+                return np.zeros((25,4))
+            return k[0]
+
+        keypoints3d = np.stack([k['keypoints3d'] for frame in results for k in frame if k['id'] == pid], axis=0)
+        frames = np.array([i for i, frame in enumerate(results) for k in frame if k['id'] == pid])
+
+        body_params[pid] = smpl_from_keypoints3d(body_model, keypoints3d, config, args, weight_shape=weight_shape, weight_pose=weight_pose)
+        body_frames[pid] = frames.tolist()
+
+
+    smpl_results = []
+    for i in trange(len(results)):
+        smpl_results.append([])
+        for pid in body_params.keys():
+            if i not in body_frames[pid]:
+                continue
+
+            j = body_frames[pid].index(i)
+
+            smpl_results[i].append({})
+            smpl_results[i][-1]['id'] = pid
+
+            for k in ['poses', 'shapes', 'Rh', 'Th']:
+                if k == 'shapes':
+                    smpl_results[i][-1][k] = body_params[pid][k]
+                else:
+                    smpl_results[i][-1][k] = body_params[pid][k][None, j]
+
+    return smpl_results
+
+
 def get_joint_openpose(res, model_path=model_path):
     from easymocap.smplmodel.body_param import load_model
 

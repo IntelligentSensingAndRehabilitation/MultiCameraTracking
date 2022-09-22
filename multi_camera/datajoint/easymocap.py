@@ -129,3 +129,22 @@ class EasymocapTracking(dj.Computed):
     def key_source(self):
         # awkward double negative is to ensure all OpenPose views were computed
         return CalibratedRecording & MultiCameraRecording - (SingleCameraVideo - OpenPose).proj()
+
+
+@schema
+class EasymocapSmpl(dj.Computed):
+    definition = '''
+    # Use EasyMocap to track and associate people in the view
+    -> EasymocapTracking
+    ---
+    smpl_results         : longblob
+    '''
+
+    def make(self, key):
+
+        from ..analysis.easymocap import fit_multiple_smpl
+
+        results = (EasymocapTracking & key).fetch1('tracking_results')
+        key['smpl_results'] = fit_multiple_smpl(results)
+
+        self.insert1(key)
