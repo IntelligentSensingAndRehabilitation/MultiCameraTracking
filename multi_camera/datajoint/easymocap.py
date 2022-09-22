@@ -1,4 +1,3 @@
-import pims
 import numpy as np
 import datajoint as dj
 from easymocap.dataset.base import MVBase
@@ -50,6 +49,7 @@ class MCTDataset(MVBase):
         calibration_cameras = self.cams
 
         if self.images:
+            import pims
             videos = (Video * OpenPose * SingleCameraVideo & key).fetch('video')
             self.caps = [pims.Video(v) for v in videos]
 
