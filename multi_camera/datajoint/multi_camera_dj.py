@@ -2,7 +2,7 @@ import datajoint as dj
 import numpy as np
 
 from .calibrate_cameras import Calibration
-from pose_pipeline import Video, VideoInfo, TopDownPerson, TopDownMethodLookup, BestDetectedFrames
+from pose_pipeline import Video, VideoInfo, TopDownPerson, TopDownMethodLookup, BestDetectedFrames, BlurredVideo
 
 schema = dj.schema("multicamera_tracking")
 
@@ -144,7 +144,7 @@ class PersonKeypointReprojectionVideos(dj.Computed):
 
         self.insert1(key)
 
-        videos = Video * TopDownPerson * MultiCameraRecording * PersonKeypointReconstruction * SingleCameraVideo & BestDetectedFrames & key
+        videos = TopDownPerson * MultiCameraRecording * PersonKeypointReconstruction * SingleCameraVideo & BestDetectedFrames & key
         video_keys, video_camera_name = (SingleCameraVideo.proj() * videos).fetch('KEY', 'camera_name')
         keypoints3d = (PersonKeypointReconstruction & key).fetch1('keypoints3d')
         camera_params, camera_names = (Calibration & key).fetch1('camera_calibration', 'camera_names')
@@ -178,7 +178,7 @@ class PersonKeypointReprojectionVideos(dj.Computed):
             fd, out_file_name = tempfile.mkstemp(suffix=".mp4")
             os.close(fd)
 
-            video = (Video & video_key).fetch1('video')
+            video = (BlurredVideo & video_key).fetch1('output_video')
             video_overlay(video, out_file_name, render_overlay, max_frames=None, downsample=2, compress=True)
 
             single_video_key = (SingleCameraVideo * PersonKeypointReconstruction & key & video_key).fetch1('KEY')
