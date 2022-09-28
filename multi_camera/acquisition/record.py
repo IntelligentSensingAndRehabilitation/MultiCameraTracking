@@ -62,7 +62,7 @@ def record_dual(vid_file, max_frames=100, num_cams=4, preview=True, resize=0.5, 
 
         # check if the current camera is in the list defined by config
         if config != "":
-            if int(c.DeviceSerialNumber) not in camera_config["camera-ids"]:
+            if int(c.DeviceSerialNumber) not in camera_config["camera-info"].keys():
                 print(f"{c.DeviceSerialNumber} not listed in config file.")
                 return
 
@@ -367,6 +367,7 @@ def record_dual(vid_file, max_frames=100, num_cams=4, preview=True, resize=0.5, 
 
     if config != "":
         output_json["meta_info"] = camera_config["meta-info"]
+        output_json["camera_info"] = camera_config["camera-info"]
 
     # writing the json file for the current recording session
     json.dump(output_json, open(json_file, "w"))
