@@ -36,6 +36,17 @@ def record_dual(vid_file, max_frames=100, num_cams=4, frame_pause=0, preview=Tru
     if preview:
         visualization_queue = Queue(1)
 
+    system = PySpin.System.GetInstance()
+    iface_list = system.GetInterfaces()
+
+    # Identify the interface we are going to send a command for synchronous recording
+    iface_idx = [i for i, f in enumerate(iface_list) if len(f.GetCameras()) > 0]
+    assert len(iface_idx) == 1, "Unable to automatically pick interface as cameras found on multiple"
+    iface = iface_list[iface_idx[0]]  # TODO: find this intelligently
+    iface.TLInterface.GevActionDeviceKey.SetValue(0)
+    iface.TLInterface.GevActionGroupKey.SetValue(1)
+    iface.TLInterface.GevActionGroupMask.SetValue(1)
+
     cams = [Camera(i, lock=True) for i in range(num_cams)]
 
     def init_camera(c):
@@ -58,6 +69,17 @@ def record_dual(vid_file, max_frames=100, num_cams=4, frame_pause=0, preview=Tru
             c.DeviceLinkThroughputLimit = 125000000
             c.GevSCPD = 25000
         # c.StreamPacketResendEnable = True
+
+        # set up masks for triggering
+        c.ActionDeviceKey = 0
+        c.ActionGroupKey = 1
+        c.ActionGroupMask = 1
+
+        # set up trigger setting
+        c.TriggerMode = 'Off'
+        c.TriggerSelector = 'AcquisitionStart'   # Need to select AcquisitionStart for real time clock
+        c.TriggerSource = 'Action0'
+        c.TriggerMode = 'On'
 
         # Initializing an image queue for each camera
         image_queue_dict[c.DeviceSerialNumber] = Queue(max_frames)
@@ -92,15 +114,26 @@ def record_dual(vid_file, max_frames=100, num_cams=4, frame_pause=0, preview=Tru
 
     for c in cams:
         c.GevIEEE1588DataSetLatch()
-        print(c.GevIEEE1588StatusLatched, c.GevIEEE1588OffsetFromMasterLatched)
+        print('Primary' if c.GevIEEE1588StatusLatched == 'Master' else 'Secondary', c.GevIEEE1588OffsetFromMasterLatched)
 
     def acquire():
 
         def start_cam(i):
+            # this won't truly start them until command is send below
             cams[i].start()
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(cams)) as executor:
             l = list(executor.map(start_cam, range(len(cams))))
+
+        # schedule a command to start in 250 ms in the future
+        cams[0].TimestampLatch()
+        value = cams[0].TimestampLatchValue
+        latchValue = int(value + 0.250 * 1e9)
+        iface.TLInterface.GevActionTime.SetValue(latchValue)
+        iface.TLInterface.GevActionGroupKey.SetValue(1)   # these group/mask/device numbers should match above
+        iface.TLInterface.GevActionGroupMask.SetValue(1)
+        iface.TLInterface.GevActionDeviceKey.SetValue(0)
+        iface.TLInterface.ActionCommand()
 
         try:
             for _ in tqdm(range(max_frames)):
@@ -345,7 +378,7 @@ def record_dual(vid_file, max_frames=100, num_cams=4, frame_pause=0, preview=Tru
     ts = np.array(output_json["timestamps"])
     dt = (ts - ts[0,0]) / 1e9
     spread = np.max(dt, axis=1) - np.min(dt, axis=1)
-    if np.all(spread < 4e-3):
+    if np.all(spread < 1e-6):
         print('Timestamps well aligned and clean')
     else:
         print(f'Timestamps showed a maximum spread of {np.max(spread) * 1000} ms')
