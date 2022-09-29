@@ -52,7 +52,7 @@ def record_dual(vid_file, max_frames=100, num_cams=4, preview=True, resize=0.5, 
     else:
         # Set num_cams to the # of available cameras
         # if input arg is larger (num_cams = min(num_cams,len(camera_list))
-        num_cams = min(num_cams,len(camera_list))
+        num_cams = min(num_cams, len(camera_list))
         print(f"No config file passed. Selecting the first {num_cams} cameras in the list.")
         # First create list of first n cameras in camera_list where n=num_cams
         cams = [Camera(i, lock=True) for i in range(num_cams)]
