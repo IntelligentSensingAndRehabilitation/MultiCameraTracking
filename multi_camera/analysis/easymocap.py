@@ -26,6 +26,7 @@ def mvmp_association_and_tracking(dataset, keypoints='body25'):
     Returns a list of dictionaries for each frame containing the ids and 3d keypoints
     """
 
+    import os
     from tqdm import trange
     from easymocap.config.mvmp1f import Config
     from easymocap.assignment.group import Person, PeopleGroup
@@ -34,7 +35,9 @@ def mvmp_association_and_tracking(dataset, keypoints='body25'):
     from easymocap.assignment.track import Track3D
     # currently need to remove some of the additional criteria for association. likely
     # related to scale or keypoint ordering that makes them appear un-anatomic.
-    cfg = Config.load('/home/jcotton/projects/pose/EasyMocap/config/exp/mvmp1f.yml')
+
+    config_file = os.path.join(os.path.split(__file__)[0], 'mvmp1f.yml')
+    cfg = Config.load(config_file)
 
     cfg.height = str(dataset.height)
     cfg.width = str(dataset.width)
