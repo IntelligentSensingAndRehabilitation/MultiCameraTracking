@@ -132,6 +132,65 @@ class EasymocapTracking(dj.Computed):
         # awkward double negative is to ensure all OpenPose views were computed
         return CalibratedRecording & MultiCameraRecording - (SingleCameraVideo - OpenPose).proj()
 
+    def create_bounding_boxes(self, subject_ids):
+        """ Create bounding boxes based on Easymocap tracks
+
+            Will insert the entries into TrackingBboxMethod and populates PersonBbox. Using
+            python apps/visualize_easymocap.py filename --filter subject_ids can allow
+            checking for the person of interest.
+
+            Params:
+                self (EasymocapTracking) : should be restricted to a single entry
+                subjects_ids : List[int] : list of subjects
+        """
+
+        from pose_pipeline import TrackingBbox, TrackingBboxMethod, TrackingBboxMethodLookup, PersonBbox, PersonBboxValid
+        results = self.fetch1('tracking_results')
+
+        camera_names = (SingleCameraVideo * MultiCameraRecording & self).fetch('camera_name')
+        camera_names.sort()
+        N = len(SingleCameraVideo & self)
+
+        def parse_frame(r):
+            person = [p for p in r if p['id'] in subject_ids]
+            if len(person) == 0 or 'bbox' not in person[0].keys():
+                return np.zeros((N,5))
+            else:
+                return person[0]['bbox']
+
+        bbox = np.array([parse_frame(r) for r in results])
+
+        output_bboxes = {i: [] for i in range(N)}
+        for i, b in enumerate(bbox):
+            for j in range(N):
+                if b[j,-1]:
+                    t = {'track_id': 1,
+                        'tlbr': b[j, :-1],
+                        'tlhw': np.array([b[j, 0], b[j, 1], b[j, 2] - b[j, 0], b[j, 3] - b[j, 1]])}
+                    output_bboxes[j].append([t])
+                    #print(i,j,len(output_bboxes[j]))
+                else:
+                    output_bboxes[j].append([])
+
+        for i, c in enumerate(camera_names):
+            vid_key = (Video & (SingleCameraVideo * MultiCameraRecording & self & {'camera_name': c})).fetch1('KEY')
+            vid_key['tracking_method'] = 21
+
+            print(vid_key)
+
+            TrackingBboxMethod.insert1(vid_key, skip_duplicates=True)
+
+            track_key = vid_key.copy()
+            track_key['tracks'] = output_bboxes[i]
+            track_key['num_tracks'] = 1
+            TrackingBbox.insert1(track_key, skip_duplicates=True, allow_direct_insert=True)
+
+            valid_key = vid_key.copy()
+            valid_key['keep_tracks'] = [1]
+            valid_key['video_subject_id'] = 0
+            PersonBboxValid.insert1(valid_key, skip_duplicates=True)
+
+            PersonBbox.populate(vid_key)
 
 @schema
 class EasymocapSmpl(dj.Computed):
