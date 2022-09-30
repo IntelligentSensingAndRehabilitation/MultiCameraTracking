@@ -56,6 +56,8 @@ class MCTDataset(MVBase):
         self.frames = np.unique((VideoInfo * SingleCameraVideo & key).fetch('num_frames'))
         #assert len(self.frames) == 1
         self.frames = np.min(self.frames)
+        self.width = np.unique((VideoInfo * SingleCameraVideo & key).fetch('width'))[0]
+        self.height = np.unique((VideoInfo * SingleCameraVideo & key).fetch('height'))[0]
 
         # set some default values. these fields are expected and would be created by
         # calling the parent class constructor, if it wouldn't break for us

@@ -27,9 +27,8 @@ def mvmp_association_and_tracking(dataset, keypoints='body25'):
     """
 
     from tqdm import trange
-    from easymocap.dataset.base import MVBase
     from easymocap.config.mvmp1f import Config
-    from easymocap.assignment.group import PeopleGroup
+    from easymocap.assignment.group import Person, PeopleGroup
     from easymocap.assignment.associate import simple_associate
     from easymocap.affinity.affinity import ComposedAffinity
     from easymocap.assignment.track import Track3D
@@ -37,9 +36,13 @@ def mvmp_association_and_tracking(dataset, keypoints='body25'):
     # related to scale or keypoint ordering that makes them appear un-anatomic.
     cfg = Config.load('/home/jcotton/projects/pose/EasyMocap/config/exp/mvmp1f.yml')
 
+    cfg.height = str(dataset.height)
+    cfg.width = str(dataset.width)
+    Person.width = dataset.width
+    Person.height = dataset.height
+
     affinity_model = ComposedAffinity(cameras=dataset.cameras, basenames=dataset.cams, cfg=cfg.affinity)
     group = PeopleGroup(Pall=dataset.Pall, cfg=cfg.group)
-    tracker = Track3D(with2d=False, WINDOW_SIZE=10, MIN_FRAMES=10, SMOOTH_SIZE=5, out=None, path=None)
 
     results = []
     for i in trange(len(dataset), desc='Associating'):
@@ -50,8 +53,10 @@ def mvmp_association_and_tracking(dataset, keypoints='body25'):
 
         # note we assign them all an ID of -1 here because the code below will
         # assign a stable ID through time
-        results.append([{'id': -1, 'keypoints3d': v.keypoints3d, 'bbox': v.bbox, 'height': v.height} for k, v in group.items()])
+        results.append([{'id': -1, 'keypoints3d': v.keypoints3d, 'bbox': v.bbox, 'Vused': v.Vused,
+                         'num_views': len(v.Vused), 'kptsRepro': v.kptsRepro} for k, v in group.items()])
 
+    tracker = Track3D(with2d=False, WINDOW_SIZE=12, MIN_FRAMES=30, SMOOTH_SIZE=5, out=None, path=None)
     edges = tracker.compute_dist(results)
     results = tracker.associate(results, edges)
     results, occupancy = tracker.reset_id(results)
