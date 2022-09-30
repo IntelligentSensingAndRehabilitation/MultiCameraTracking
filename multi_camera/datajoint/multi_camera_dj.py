@@ -207,8 +207,10 @@ class PersonKeypointReprojectionVideos(dj.Computed):
         print(f'Height: {height}. Width: {width}. FPS: {fps}')
 
         # handle any bad projections
+        clipped_x = np.logical_or.reduce(keypoints2d[..., 0] <= 0, keypoints2d[..., 0] >= width, keypoints2d[..., 1] <= 0, keypoints2d[..., 1] >= height)
         keypoints2d[..., 0] = np.clip(keypoints2d[..., 0], 0, width)
         keypoints2d[..., 1] = np.clip(keypoints2d[..., 1], 0, height)
+        keypoints2d[clipped, 2] = 0
 
         for i, video_key in enumerate(video_keys):
 
