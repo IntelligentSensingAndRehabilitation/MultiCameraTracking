@@ -89,6 +89,52 @@ class PersonKeypointReconstruction(dj.Computed):
 
         self.insert1(key, allow_direct_insert=True)
 
+    def export_trc(self, filename, z_offset=0, start=None, end=None, return_points=False, smooth=False):
+        ''' Export an OpenSim file of marker trajectories
+
+            Params:
+                filename (string) : filename to export to
+                z_offset (float, optional) : optional vertical offset
+                start    (float, optional) : if set, time to start at
+                end      (float, optional) : if set, time to end at
+                return_points (bool, opt)  : if true, return points
+        '''
+
+        from pose_pipeline import TopDownPerson, VideoInfo
+        from multi_camera.analysis.opensim import normalize_marker_names, points3d_to_trc
+
+        method_name = (TopDownMethodLookup & self).fetch1('top_down_method_name')
+        joint_names = TopDownPerson.joint_names(method_name)
+
+        joints3d = self.fetch1('keypoints3d').copy()
+        joints3d = joints3d[:, :len(joint_names)] # discard "unnamed" joints
+        joints3d = joints3d / 1000.0 # convert to m
+        fps = np.unique((VideoInfo * SingleCameraVideo * MultiCameraRecording & self).fetch('fps'))
+
+        if method_name == 'MMPoseHalpe':
+            # Not needed if using tuned skeleton
+            # skeleton model expects this to look like COCO/OpenPose where pelvis and neck are midpoints
+            #joints3d[:, joint_names.index('Pelvis')] = (joints3d[:, joint_names.index('Left Hip')] + joints3d[:, joint_names.index('Right Hip')]) / 2
+            #joints3d[:, joint_names.index('Neck')] = (joints3d[:, joint_names.index('Left Shoulder')] + joints3d[:, joint_names.index('Right Shoulder')]) / 2
+            pass
+
+        if end is not None:
+            joints3d = joints3d[:int(end * fps)]
+        if start is not None:
+            joints3d = joints3d[int(start*fps):]
+
+        if smooth:
+            import scipy
+
+            for i in range(joints3d.shape[1]):
+                for j in range(joints3d.shape[2]):
+                    joints3d[:, i, j] = scipy.signal.medfilt(joints3d[:, i, j], 5)
+
+        points3d_to_trc(joints3d + np.array([[[0, z_offset, 0]]]), filename,
+                        normalize_marker_names(joint_names), fps=fps)
+
+        if return_points:
+            return joints3d
 
 @schema
 class PersonKeypointReconstructionVideo(dj.Computed):
@@ -253,7 +299,17 @@ class SMPLReconstruction(dj.Computed):
         poses, shapes, Rh, Th = self.fetch1('poses', 'shape', 'orientation', 'translation')
         return {'poses': poses, 'shapes': shapes, 'Rh': Rh, 'Th': Th}
 
-    def export_trc(self, filename, z_offset=0):
+    def export_trc(self, filename, z_offset=0, start=None, end=None, return_points=False):
+        ''' Export an OpenSim file of marker trajectories
+
+            Params:
+                filename (string) : filename to export to
+                z_offset (float, optional) : optional vertical offset
+                start    (float, optional) : if set, time to start at
+                end      (float, optional) : if set, time to end at
+                return_points (bool, opt)  : if true, return points
+        '''
+
         from pose_pipeline import TopDownPerson, VideoInfo
         from multi_camera.analysis.opensim import normalize_marker_names, points3d_to_trc
 
@@ -261,8 +317,16 @@ class SMPLReconstruction(dj.Computed):
         joints3d = self.fetch1('joints3d')
         fps = np.unique((VideoInfo * SingleCameraVideo * MultiCameraRecording & self).fetch('fps'))
 
+        if end is not None:
+            joints3d = joints3d[:int(end * fps)]
+        if start is not None:
+            joints3d = joints3d[int(start*fps):]
+
         points3d_to_trc(joints3d + np.array([[[0, z_offset, 0]]]), filename,
                         normalize_marker_names(joint_names), fps=fps)
+
+        if return_points:
+            return joints3d
 
 
 @schema
