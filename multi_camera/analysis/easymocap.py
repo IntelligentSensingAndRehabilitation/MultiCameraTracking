@@ -96,6 +96,7 @@ def easymocap_fit_smpl_3d(joints3d, model_path=model_path, verbose=True, smooth3
     from easymocap.pipeline import smpl_from_keypoints3d
     from easymocap.dataset import CONFIG
     from easymocap.smplmodel.body_param import load_model
+    from easymocap.pipeline.weight import load_weight_pose, load_weight_shape
 
     body_model = load_model(model_path=model_path)
 
@@ -111,14 +112,15 @@ def easymocap_fit_smpl_3d(joints3d, model_path=model_path, verbose=True, smooth3
     args.smooth3d = smooth3d
     config = CONFIG
 
-    def add_dim(p):
-        # not quite sure why this extra dimension is used in. perhaps could be visible flag
-        # https://github.com/zju3dv/EasyMocap/blob/584ba2c1e85c626e90bbcfa6931faf8998c5ba84/easymocap/pyfitting/optimize_simple.py#L33
+    weight_shape = load_weight_shape(args.model, args.opts)
+    weight_pose = load_weight_pose(args.model, args.opts)
 
-        return np.concatenate([p, np.ones((p.shape[0], p.shape[1], 1))], axis=-1)
+    if joints3d.shape[-1] == 3:
+        # if no confidence then fake one
+        joints3d = np.concatenate([joints3d, np.ones((joints3d.shape[0], joints3d.shape[1], 1))], axis=-1)
 
     joints3d = interpolate_points(joints3d)
-    res = smpl_from_keypoints3d(body_model, add_dim(joints3d), config, args)
+    res = smpl_from_keypoints3d(body_model, joints3d, config, args, weight_shape=weight_shape, weight_pose=weight_pose)
     return res
 
 

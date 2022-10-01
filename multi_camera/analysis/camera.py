@@ -343,7 +343,7 @@ def compute_camera_weights(pair_error, permutations, sigma, N):
 
     return weight
 
-def robust_triangulate_points(camera_params, points2d, sigma=20, threshold=0.3, return_weights=False):
+def robust_triangulate_points(camera_params, points2d, sigma=100, threshold=0.1, return_weights=False):
     r""" Triangulate points robustly accounting for agreement
 
         This algorithm is based http://arxiv.org/abs/2203.15865
@@ -366,6 +366,9 @@ def robust_triangulate_points(camera_params, points2d, sigma=20, threshold=0.3, 
 
     N = points2d.shape[0]
     permutations = jnp.array([(i,j) for i in range(1, 8) for j in range(0, i)])
+
+    # convert any numpy array to jax array
+    points2d = jnp.array(points2d)
 
     # work out all the pairiwse triangulated points for each permutation
     _pairwise_triangulate = vmap(pairwise_triangulate, in_axes=(0, None, None, None), out_axes=(0))

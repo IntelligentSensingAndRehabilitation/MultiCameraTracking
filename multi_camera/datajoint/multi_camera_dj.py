@@ -45,6 +45,7 @@ class PersonKeypointReconstructionMethod(dj.Manual):
     definition = '''
     # Use the TopDownKeypoints to reconstruct the 3D joint locations
     -> CalibratedRecording
+    tracking_method     :  int
     top_down_method     :  int
     '''
 
@@ -56,20 +57,23 @@ class PersonKeypointReconstruction(dj.Computed):
     -> PersonKeypointReconstructionMethod
     ---
     keypoints3d         : longblob
+    camera_weights      : longblob
     '''
 
     def make(self, key):
 
         import numpy as np
-        from ..analysis.camera import triangulate_point
+        from ..analysis.camera import robust_triangulate_points
 
         calibration_key = (Calibration & key).fetch1('KEY')
         recording_key = (MultiCameraRecording & key).fetch1('KEY')
         top_down_method = key['top_down_method']
+        tracking_method = key['tracking_method']
 
         camera_calibration, camera_names = (Calibration & calibration_key).fetch1('camera_calibration', 'camera_names')
         keypoints, camera_name = (TopDownPerson * SingleCameraVideo * MultiCameraRecording &
-                                recording_key & {'top_down_method': top_down_method}).fetch('keypoints', 'camera_name')
+                                 {'top_down_method': top_down_method, 'tracking_method': tracking_method} &
+                                 recording_key).fetch('keypoints', 'camera_name')
 
         # need to add zeros to missing frames since they occurr at the beginning of videos
         N = max([len(k) for k in keypoints])
@@ -84,8 +88,9 @@ class PersonKeypointReconstruction(dj.Computed):
         # weights[weights < 0.75] = 0
         points2d[..., 2] = weights ** 2
 
-        points3d = triangulate_point(camera_calibration, points2d)
+        points3d, camera_weights = robust_triangulate_points(camera_calibration, points2d, return_weights=True)
         key['keypoints3d'] = np.array(points3d)
+        key['camera_weights'] = np.array(camera_weights)
 
         self.insert1(key, allow_direct_insert=True)
 
@@ -258,7 +263,8 @@ class SMPLReconstruction(dj.Computed):
         from easymocap.dataset import CONFIG as config
 
         # get triangulated points and convert to meters
-        points3d = (PersonKeypointReconstruction & key).fetch1('keypoints3d') / 1000.0
+        points3d = (PersonKeypointReconstruction & key).fetch1('keypoints3d').copy()
+        points3d[..., :3] = points3d[..., :3] / 1000.0  # convert coordinates to m, but leave confidence untouched
 
         if key['top_down_method'] == 2:
             # Convert the HALPE coordinate order to the expected order
@@ -358,7 +364,7 @@ class SMPLReconstructionVideos(dj.Computed):
 
         self.insert1(key)
 
-        videos = Video * TopDownPerson * MultiCameraRecording * PersonKeypointReconstruction * SingleCameraVideo & BestDetectedFrames & key
+        videos = Video * TopDownPerson * MultiCameraRecording * PersonKeypointReconstruction * SingleCameraVideo & key
         video_keys, camera_names, keypoints2d = videos.fetch('KEY', 'camera_name', 'keypoints')
         camera_params = (Calibration & key).fetch1('camera_calibration')
 
