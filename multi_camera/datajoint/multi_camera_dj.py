@@ -283,7 +283,15 @@ class SMPLReconstruction(dj.Computed):
                 return [joint_renamer(j) for j in joints]
 
             joint_names = normalize_marker_names(TopDownPerson.joint_names('MMPoseHalpe'))
-            joint_reorder = np.array([joint_names.index(j) for j in config['body15']['joint_names']])
+
+            # move these to where COCO would put them (which is what Body25 uses)
+            points3d[:, joint_names.index('Neck')] = (points3d[:, joint_names.index('RShoulder')] + points3d[:, joint_names.index('LShoulder')]) / 2
+            points3d[:, joint_names.index('MidHip')] = (points3d[:, joint_names.index('RHip')] + points3d[:, joint_names.index('LHip')]) / 2
+            # reduce confidence on little toes as it seems to lock onto values from big toe (quick with MMPose model)
+            points3d[:, joint_names.index('RSmallToe'), -1] = points3d[:, joint_names.index('RSmallToe'), -1] * 0.5
+            points3d[:, joint_names.index('LSmallToe'), -1] = points3d[:, joint_names.index('LSmallToe'), -1] * 0.5
+
+            joint_reorder = np.array([joint_names.index(j) for j in config['body25']['joint_names']])
             points3d = points3d[:, joint_reorder]
 
         elif key['top_down_method'] == 4:
