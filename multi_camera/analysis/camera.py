@@ -7,8 +7,9 @@ import numpy as np
 import jax
 from jax import numpy as jnp
 from jax import vmap, jit
+from jax.tree_util import tree_map
 from jaxlie import SO3, SE3
-
+from functools import partial
 
 def get_intrinsic(camera_params, i):
     mtx = jnp.take(camera_params['mtx'], i, axis=0)
@@ -211,8 +212,8 @@ def distort_3d(camera_params, i, points):
     return jnp.stack([xpp * z, ypp * z, z], axis=-1)
 
 
-@jit
-def triangulate_point(camera_params, points2d):
+@partial(jit, static_argnums=(2,))
+def triangulate_point(camera_params, points2d, return_confidence=False):
     r"""Triangulate multiple 2D observations in 3D
 
     Parameters:
@@ -264,16 +265,130 @@ def triangulate_point(camera_params, points2d):
         return p3d
 
     if len(A.shape) == 3:
-        return _triangulate_A(A)
+        p3d = _triangulate_A(A)
 
     elif len(A.shape) == 4:
-        return vmap(_triangulate_A, in_axes=1, out_axes=0)(A)
+        p3d = vmap(_triangulate_A, in_axes=1, out_axes=0)(A)
 
     elif len(A.shape) == 5:
-        return vmap(vmap(_triangulate_A, in_axes=1, out_axes=0), in_axes=2, out_axes=1)(A)
+        p3d = vmap(vmap(_triangulate_A, in_axes=1, out_axes=0), in_axes=2, out_axes=1)(A)
 
     else:
         raise Exception("Unsupported shape")
+
+    if return_confidence:
+        conf3d = jnp.sum(weight ** 2, axis=0) / jnp.sum(weight, axis=0)
+        p3d = jnp.concatenate([p3d, conf3d], axis=-1)
+
+    return p3d
+
+
+@jit
+def pairwise_triangulate(pair, camera_calibration, points2d, threshold=None):
+    """ Perform triangulation using a pair of views
+
+        Params:
+            pair jnp.array([i, j]) : which cameras to select
+            camera_calibration     : full set of cameras
+            points2d               : full set of points (cams x time x joints x 3)
+            threshold (float, opt) : if set, binarizes visibility at this threshold
+
+        Returns: time x joints x 3 set of coordinates, with the last element
+        being the minimum confidence for each keypoint.
+    """
+    idx = jnp.array(pair)
+
+    points2d = jnp.take(points2d, idx, axis=0)
+
+    if points2d.shape[-1] == 2:
+        weight = np.ones((*points2d.shape[:-1], 1))
+        points2d = jnp.concatenate([points2d, weight], axis=-1)
+
+    if threshold is not None:
+        mask = points2d[..., -1] > threshold
+        updated_confidence = jnp.where(mask, 1.0, 0.0)
+        points2d = points2d.at[..., -1].set(updated_confidence)
+
+    cams = tree_map(lambda x: jnp.take(x, idx, axis=0),  camera_calibration)
+    points3d = triangulate_point(cams, points2d)
+    points3d = jnp.concatenate([points3d, jnp.min(points2d[..., -1], axis=0)[..., None]], axis=-1)
+    return points3d
+
+@partial(jit, static_argnums=(3,))
+def compute_camera_weights(pair_error, permutations, sigma, N):
+    r""" Computes the weights to assign each camera
+
+        Params:
+            pair_error (array)    : euclidean distance from cluster median
+            permutations (array)  : pairs of views each entry corresponds to
+            sigma (float)         : hyperparameter determing how quickly weight decays
+            N (int)               : number of cameras
+
+        Returns: weights for each of N cameras to assign for this point
+    """
+
+    err = jnp.zeros((N,N)) * jnp.nan
+
+    # forming full matrix from triangular portion with permutations
+    for i in range(permutations.shape[0]):
+        err = err.at[permutations[i,0], permutations[i,1]].set(pair_error[i])
+        err = err.at[permutations[i,1], permutations[i,0]].set(err[permutations[i,0], permutations[i,1]])
+
+    err = jnp.exp(-err**2 / sigma**2)
+
+    # assign zero weight to views with nan as that indicates their
+    # original confidence from the heatmaps never hit our threshold
+    weight = jnp.nanmedian(err, axis=0)
+    weight = jnp.where(jnp.isnan(weight), 0, weight)
+
+    return weight
+
+def robust_triangulate_points(camera_params, points2d, sigma=20, threshold=0.3, return_weights=False):
+    r""" Triangulate points robustly accounting for agreement
+
+        This algorithm is based http://arxiv.org/abs/2203.15865
+        Roy, Soumava Kumar, Leonardo Citraro, Sina Honari, and Pascal Fua. 2022.
+        “On Triangulation as a Form of Self-Supervision for 3D Human Pose Estimation.”
+
+        Which essentialy uses the euclidean from the median of all pairwise
+        viewpoint triangulations to determine whether to trust a camera and
+        how much. This should be a drop in replacement for triangulate_point.
+
+        Params:
+            camera_params (dict)   : calibrate camera parameters
+            points2d   (array)     : cameras x time x joints x 3 array of observations
+            sigma (opt, float)     : mm radius on error for roll off of weight (default 20mm)
+            threshold (opt, float) : confidence threshold, below which observations are ignored
+            return_weights (opt, bool) : whether to return the weights from consensus vote
+
+        Returns: time x joints x 3 array of keypoints (in mm) and optional weights
+    """
+
+    N = points2d.shape[0]
+    permutations = jnp.array([(i,j) for i in range(1, 8) for j in range(0, i)])
+
+    # work out all the pairiwse triangulated points for each permutation
+    _pairwise_triangulate = vmap(pairwise_triangulate, in_axes=(0, None, None, None), out_axes=(0))
+    point3d_clusters = _pairwise_triangulate(permutations, camera_params, points2d, threshold)
+
+    # mark points below threshold as nan so they are entirely excluded, then work out
+    # distance from cluster median centers
+    point3d_clusters = point3d_clusters.at[point3d_clusters[..., -1] < threshold, :-1].set(jnp.nan)
+    deltas = point3d_clusters - jnp.nanmedian(point3d_clusters, axis=0, keepdims=True)
+    pair_error = np.linalg.norm(deltas[..., :-1], axis=-1)
+
+    # slightly ugly, would be nice to magically broadcast across arbitrary shapes, but
+    # compute weights for each camera based on median distance from cluster center
+    _compute_weights = lambda x: compute_camera_weights(x, permutations, sigma, N)
+    _compute_weights = vmap(vmap(_compute_weights, in_axes=-1, out_axes=1), in_axes=-1, out_axes=2)
+    robust_weights = _compute_weights(pair_error)
+    robust_points = points2d.at[..., -1].set(robust_weights)
+    robust_points3d = triangulate_point(camera_params, robust_points, return_confidence=True)
+
+    if return_weights:
+        return robust_points3d, robust_weights
+
+    return robust_points3d
 
 
 def reprojection_error(camera_params, points2d, points3d):
