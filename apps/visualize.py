@@ -1,6 +1,7 @@
 import os
+from tokenize import Single
 
-from multi_camera.datajoint.multi_camera_dj import MultiCameraRecording, CalibratedRecording, SMPLReconstruction
+from multi_camera.datajoint.multi_camera_dj import MultiCameraRecording, CalibratedRecording, SMPLReconstruction, SingleCameraVideo
 from multi_camera.datajoint.easymocap import EasymocapTracking, EasymocapSmpl
 
 import easymocap
@@ -9,21 +10,25 @@ from easymocap.socket.o3d import VisOpen3DSocket
 from easymocap.config.vis_socket import Config
 
 
-def stream_easymocap_key(key, smpl=False, filter_subjects=None):
+def stream_server(data, streamer, smpl):
 
+    pwd = os.getcwd()
     easymocap_dir = os.path.split(os.path.split(easymocap.__file__)[0])[0]
     if smpl:
         os.chdir(easymocap_dir) # required as it looks for link yml in relative directory
-        cfg = Config.load(os.path.join(easymocap_dir, 'config/vis3d/o3d_scene_smpl.yml'))
-        results = (EasymocapSmpl & key).fetch1('smpl_results')
+        config_file = os.path.join(easymocap_dir, 'config/vis3d/o3d_scene_smpl.yml')
     else:
-        cfg = Config.load(os.path.join(easymocap_dir, 'config/vis3d/o3d_scene.yml'))
-        results = (EasymocapTracking & key).fetch1('tracking_results')
-
-    print(f'Fetched data for {key}. Starting server')
+        config_file = os.path.join(easymocap_dir, 'config/vis3d/o3d_scene.yml')
+    cfg = Config.load(config_file)
 
     cfg['host'] = '127.0.0.1'
     cfg['post'] = '9990'
+    cfg['debug'] = False
+    cfg['block'] = False
+
+    #cfg['out'] = os.path.join(pwd, 'test')
+    #cfg['write'] = True
+    cfg['rotate'] = True
 
     server = VisOpen3DSocket(cfg.host, cfg.port, cfg)
     server.update()
@@ -31,7 +36,24 @@ def stream_easymocap_key(key, smpl=False, filter_subjects=None):
     # 2. set the ip address and port
     client = BaseSocketClient(cfg.host, cfg.port)
 
-    for r in results:
+    for r in data:
+        streamer(client, r)
+        server.update()
+
+    client.close()
+
+    # flag to stop on disconnect
+    server.stop_thread()
+
+
+def stream_easymocap_key(key, smpl=False, filter_subjects=None, annotate=False):
+
+    if smpl:
+        results = (EasymocapSmpl & key).fetch1('smpl_results')
+    else:
+        results = (EasymocapTracking & key).fetch1('tracking_results')
+
+    def streamer(client, r):
         if filter_subjects is not None:
             r = [p for p in r if p['id'] in filter_subjects]
 
@@ -39,21 +61,24 @@ def stream_easymocap_key(key, smpl=False, filter_subjects=None):
             client.send_smpl(r)
         else:
             client.send(r)
-        server.update()
 
-    client.close()
+    stream_server(results, streamer, smpl)
 
-    exit()
+    if annotate:
+        from pose_pipeline import TrackingBbox, TrackingBboxMethodLookup
+        if len(TrackingBbox * SingleCameraVideo * TrackingBboxMethodLookup & key & {'tracking_method_name': 'Easymocap'}) > 0:
+            print('Skipping annotation. Already performed')
+            return
+
+        inp = input('Would you like to store that annotation? [Y/n]')
+        if inp[0].upper() == 'Y':
+            (EasymocapTracking & key).create_bounding_boxes(filter_subjects)
+        else:
+            print('Cancelled')
+
 
 
 def stream_smpl_key(key):
-
-    easymocap_dir = os.path.split(os.path.split(easymocap.__file__)[0])[0]
-    os.chdir(easymocap_dir) # required as it looks for link yml in relative directory
-    cfg = Config.load(os.path.join(easymocap_dir, 'config/vis3d/o3d_scene_smpl.yml'))
-    results = (EasymocapSmpl & key).fetch1('smpl_results')
-
-    results = (SMPLReconstruction & key).fetch('poses', 'shape', 'orientation', 'translation', as_dict=True)[0]
 
     def restructure_frame(results, i):
         res = {'id': 0,
@@ -63,23 +88,13 @@ def stream_smpl_key(key):
             'Th': results['translation'][None, i]}
         return res
 
-    smpl_results = [[restructure_frame(results, i)] for i in range(results['poses'].shape[0])]
-    print(f'Fetched data for {key}. Starting server')
+    results = (SMPLReconstruction & key).fetch('poses', 'shape', 'orientation', 'translation', as_dict=True)[0]
+    results = [[restructure_frame(results, i)] for i in range(results['poses'].shape[0])]
 
-    cfg['host'] = '127.0.0.1'
-    cfg['post'] = '9990'
-
-    server = VisOpen3DSocket(cfg.host, cfg.port, cfg)
-    server.update()
-
-    # 2. set the ip address and port
-    client = BaseSocketClient(cfg.host, cfg.port)
-
-    for r in smpl_results:
+    def streamer(client, r):
         client.send_smpl(r)
-        server.update()
 
-    client.close()
+    stream_server(results, streamer, True)
 
 
 if __name__ == "__main__":
@@ -92,6 +107,7 @@ if __name__ == "__main__":
     parser.add_argument("--top_down", help="Use top down SMPL", action='store_true')
     parser.add_argument("--select_cal", help="Select amongst calibration", default=None)
     parser.add_argument("--filter", help="Filter by subject ID", default=None)
+    parser.add_argument("--annotate", help="Prompt to annotate video", default=False, action='store_true')
     args = parser.parse_args()
 
     if args.filter is not None:
@@ -124,4 +140,4 @@ if __name__ == "__main__":
         else:
             key = key[0]
 
-        stream_easymocap_key(key, args.smpl, filter)
+        stream_easymocap_key(key, args.smpl, filter, args.annotate)
