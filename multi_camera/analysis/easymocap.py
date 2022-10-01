@@ -119,7 +119,12 @@ def easymocap_fit_smpl_3d(joints3d, model_path=model_path, verbose=True, smooth3
         # if no confidence then fake one
         joints3d = np.concatenate([joints3d, np.ones((joints3d.shape[0], joints3d.shape[1], 1))], axis=-1)
 
-    joints3d = interpolate_points(joints3d)
+    joints3d[..., :-1] = interpolate_points(joints3d[..., :-1])
+
+    if joints3d[-1, 0, -1] == 0.0:
+        print('Faking the end')
+        joints3d[-1, 0, -1] = 0.01
+
     res = smpl_from_keypoints3d(body_model, joints3d, config, args, weight_shape=weight_shape, weight_pose=weight_pose)
     return res
 

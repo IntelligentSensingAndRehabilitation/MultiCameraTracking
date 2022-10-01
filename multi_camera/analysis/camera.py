@@ -388,6 +388,10 @@ def robust_triangulate_points(camera_params, points2d, sigma=100, threshold=0.1,
     robust_points = points2d.at[..., -1].set(robust_weights)
     robust_points3d = triangulate_point(camera_params, robust_points, return_confidence=True)
 
+    conf3d = robust_points3d[..., -1]
+    conf3d = jnp.where(jnp.isnan(conf3d), 0, conf3d)
+    robust_points3d = robust_points3d.at[..., -1].set(conf3d)
+
     if return_weights:
         return robust_points3d, robust_weights
 
