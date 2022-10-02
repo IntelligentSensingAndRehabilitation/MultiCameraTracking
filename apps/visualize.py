@@ -1,7 +1,7 @@
 import os
 from tokenize import Single
 
-from multi_camera.datajoint.multi_camera_dj import MultiCameraRecording, CalibratedRecording, SMPLReconstruction, SingleCameraVideo
+from multi_camera.datajoint.multi_camera_dj import MultiCameraRecording, CalibratedRecording, SMPLReconstruction, SMPLXReconstruction, SingleCameraVideo
 from multi_camera.datajoint.easymocap import EasymocapTracking, EasymocapSmpl
 
 import easymocap
@@ -10,13 +10,16 @@ from easymocap.socket.o3d import VisOpen3DSocket
 from easymocap.config.vis_socket import Config
 
 
-def stream_server(data, streamer, smpl):
+def stream_server(data, streamer, smpl, record_file=None):
 
     pwd = os.getcwd()
     easymocap_dir = os.path.split(os.path.split(easymocap.__file__)[0])[0]
-    if smpl:
+    if smpl == 'smpl':
         os.chdir(easymocap_dir) # required as it looks for link yml in relative directory
         config_file = os.path.join(easymocap_dir, 'config/vis3d/o3d_scene_smpl.yml')
+    elif smpl == 'smplx':
+        os.chdir(easymocap_dir) # required as it looks for link yml in relative directory
+        config_file = os.path.join(easymocap_dir, 'config/vis3d/o3d_scene_smplx.yml')
     else:
         config_file = os.path.join(easymocap_dir, 'config/vis3d/o3d_scene.yml')
     cfg = Config.load(config_file)
@@ -26,9 +29,13 @@ def stream_server(data, streamer, smpl):
     cfg['debug'] = False
     cfg['block'] = False
 
-    #cfg['out'] = os.path.join(pwd, 'test')
-    #cfg['write'] = True
+    if record_file is not None:
+        cfg['out'] = os.path.join(pwd, 'recordings', record_file)
+        cfg['write'] = True
+        cfg['block'] = True
     cfg['rotate'] = True
+
+    print(cfg.camera.camera_pose)
 
     server = VisOpen3DSocket(cfg.host, cfg.port, cfg)
     server.update()
@@ -46,7 +53,7 @@ def stream_server(data, streamer, smpl):
     server.stop_thread()
 
 
-def stream_easymocap_key(key, smpl=False, filter_subjects=None, annotate=False):
+def stream_easymocap_key(key, smpl=False, filter_subjects=None, annotate=False, record_file=None):
 
     if smpl:
         results = (EasymocapSmpl & key).fetch1('smpl_results')
@@ -62,9 +69,9 @@ def stream_easymocap_key(key, smpl=False, filter_subjects=None, annotate=False):
         else:
             client.send(r)
 
-    stream_server(results, streamer, smpl)
+    stream_server(results, streamer, 'smpl' if smpl else False, record_file)
 
-    if annotate:
+    if annotate and filter_subjects is not None:
         from pose_pipeline import TrackingBbox, TrackingBboxMethodLookup
         if len(TrackingBbox * SingleCameraVideo * TrackingBboxMethodLookup & key & {'tracking_method_name': 'Easymocap'}) > 0:
             print('Skipping annotation. Already performed')
@@ -78,7 +85,7 @@ def stream_easymocap_key(key, smpl=False, filter_subjects=None, annotate=False):
 
 
 
-def stream_smpl_key(key):
+def stream_smpl_key(key, record_file=None):
 
     def restructure_frame(results, i):
         res = {'id': 0,
@@ -94,8 +101,27 @@ def stream_smpl_key(key):
     def streamer(client, r):
         client.send_smpl(r)
 
-    stream_server(results, streamer, True)
+    stream_server(results, streamer, 'smpl', record_file)
 
+
+def stream_smplx_key(key, record_file=None):
+
+    def restructure_frame(results, i):
+        res = {'id': 0,
+            'poses': results['poses'][None, i],
+            'shapes': results['shape'],
+            'expression': results['expression'][None, i],
+            'Rh': results['orientation'][None, i],
+            'Th': results['translation'][None, i]}
+        return res
+
+    results = (SMPLXReconstruction & key).fetch('poses', 'shape', 'orientation', 'expression', 'translation', as_dict=True)[0]
+    results = [[restructure_frame(results, i)] for i in range(results['poses'].shape[0])]
+
+    def streamer(client, r):
+        client.send_smpl(r)
+
+    stream_server(results, streamer, 'smplx', record_file)
 
 if __name__ == "__main__":
 
@@ -104,10 +130,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Fetch Easymocap data from MultiCamera DJ and visualize")
     parser.add_argument("vid_base", help="Base filenames to use for calibration")
     parser.add_argument("--smpl", help="Use Easymocap SMPL", action='store_true')
+    parser.add_argument("--smplx", help="Use Easymocap SMPL", action='store_true')
     parser.add_argument("--top_down", help="Use top down SMPL", action='store_true')
     parser.add_argument("--select_cal", help="Select amongst calibration", default=None)
     parser.add_argument("--filter", help="Filter by subject ID", default=None)
     parser.add_argument("--annotate", help="Prompt to annotate video", default=False, action='store_true')
+    parser.add_argument("--record", help="Use top down SMPL", action='store_true')
     args = parser.parse_args()
 
     if args.filter is not None:
@@ -115,6 +143,11 @@ if __name__ == "__main__":
         filter = [int(f) for f in filter]
     else:
         filter = None
+
+    if args.record is not None and args.record:
+        record_file = args.vid_base
+    else:
+        record_file = None
 
     if args.top_down and args.smpl:
 
@@ -127,7 +160,20 @@ if __name__ == "__main__":
         else:
             key = key[0]
 
-        stream_smpl_key(key)
+        stream_smpl_key(key, record_file=record_file)
+
+    elif args.top_down and args.smplx:
+
+        key = (SMPLXReconstruction * MultiCameraRecording * CalibratedRecording & f'video_base_filename="{args.vid_base}"').fetch('KEY')
+        if len(key) > 1 and args.select_cal != None:
+            key = key[int(args.select_cal)]
+            print(f'Selected key: {key}')
+        elif len(key) > 1:
+            raise Exception('Multiple calibrations matched this. Please use --select_cal')
+        else:
+            key = key[0]
+
+        stream_smplx_key(key, record_file=record_file)
 
     else:
 
@@ -140,4 +186,4 @@ if __name__ == "__main__":
         else:
             key = key[0]
 
-        stream_easymocap_key(key, args.smpl, filter, args.annotate)
+        stream_easymocap_key(key, args.smpl, filter, args.annotate, record_file=record_file)
