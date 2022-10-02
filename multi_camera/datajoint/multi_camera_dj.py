@@ -489,8 +489,9 @@ class SMPLXReconstruction(dj.Computed):
             # from https://github.com/Fang-Haoshu/Halpe-FullBody
             left_hand = points3d[:, np.arange(94,115)]
             right_hand = points3d[:, np.arange(115,136)]
-            # leave the last 17 points off. doesn't use inner lip
-            face = points3d[:, np.arange(26, 94-17)]
+            # leave the first 17 points off. doesn't use outline. add 2 points at
+            # end that halpe is missing
+            face = points3d[:, np.arange(26+17, 94)]
 
             points3d = np.concatenate([points3d_body25, left_hand, right_hand, face], axis=1)
 
@@ -511,6 +512,95 @@ class SMPLXReconstruction(dj.Computed):
         key['vertices'] = get_vertices(res, body_model='smplx')
         key['faces'] = get_faces(body_model='smplx')
         self.insert1(key)
+
+
+@schema
+class SMPLXReconstructionVideos(dj.Computed):
+    definition = '''
+    # Videos of SMPL reconstruction from multiview
+    -> SMPLXReconstruction
+    ---
+    '''
+
+    class Video(dj.Part):
+        definition = '''
+        -> SMPLXReconstructionVideos
+        -> SingleCameraVideo
+        ---
+        output_video      : attach@localattach    # datajoint managed video file
+        '''
+
+    def make(self, key):
+        import cv2
+        import os
+        import tempfile
+        from einops import rearrange
+        from ..analysis.camera import project_distortion, get_intrinsic, get_extrinsic, distort_3d
+        from pose_pipeline.utils.visualization import video_overlay, draw_keypoints
+        from easymocap.visualize.renderer import Renderer
+
+        self.insert1(key)
+
+        videos = Video * TopDownPerson * MultiCameraRecording * PersonKeypointReconstruction * SingleCameraVideo & key
+        video_keys, camera_names, keypoints2d = videos.fetch('KEY', 'camera_name', 'keypoints')
+        camera_params = (Calibration & key).fetch1('camera_calibration')
+
+        # get video parameters
+        width = np.unique((VideoInfo & video_keys).fetch('width'))[0]
+        height = np.unique((VideoInfo & video_keys).fetch('height'))[0]
+        fps = np.unique((VideoInfo & video_keys).fetch('fps'))[0]
+
+        # get vertices, in world coordintes
+        faces, vertices, joints3d = (SMPLXReconstruction & key).fetch1('faces', 'vertices', 'joints3d')
+
+        # convert from meter to the mm that the camera model expects
+        joints3d = joints3d * 1000.0
+
+        # compute keypoints from reprojection of SMPL fit
+        keypoints2d = np.array([project_distortion(camera_params, i, joints3d) for i in range(camera_params['mtx'].shape[0])])
+
+        render = Renderer(height=height, width=width, down_scale=2, bg_color=[0, 0, 0, 0.0])
+
+        for i, video_key in enumerate(video_keys):
+
+            # get camera parameters
+            K = np.array(get_intrinsic(camera_params, i))
+
+            # don't use real extrinsic since we apply distortion which does this
+            R = np.eye(3)
+            T = np.zeros((3,))
+            cameras = {'K': [K], 'R': [R], 'T': [T]}
+
+            # account for camera distortion. convert vertices to mm first.
+            vertices_distorted = np.array(distort_3d(camera_params, i, vertices * 1000.0))
+            # then back to meters
+            vertices_distorted = vertices_distorted / 1000.0
+
+            def render_overlay(frame, idx, vertices=vertices_distorted, faces=faces, cameras=cameras):
+
+                if idx >= vertices.shape[0]:
+                    return frame
+
+                render_data = {3: {'vertices': vertices[idx], 'faces': faces, 'name': 'human'}}
+
+                frame = render.render(render_data, cameras, [frame], add_back=True)[0].copy()
+                frame = draw_keypoints(frame, keypoints2d[i][idx] / render.down_scale, radius=6, color=(125, 125, 255))
+
+                return frame
+
+            fd, out_file_name = tempfile.mkstemp(suffix=".mp4")
+            os.close(fd)
+
+            video = (Video & video_key).fetch1('video')
+            video_overlay(video, out_file_name, render_overlay, max_frames=None, downsample=2, compress=True)
+
+            single_video_key = (SingleCameraVideo * SMPLReconstruction & key & video_key).fetch1('KEY')
+            single_video_key['output_video'] = out_file_name
+
+            SMPLReconstructionVideos.Video.insert1(single_video_key)
+
+            os.remove(video)
+            os.remove(out_file_name)
 
 
 def import_recording(vid_base, vid_path='.', video_project='MULTICAMERA_TEST', legacy_flip=None):
