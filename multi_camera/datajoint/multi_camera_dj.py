@@ -434,6 +434,84 @@ class SMPLReconstructionVideos(dj.Computed):
             os.remove(out_file_name)
 
 
+@schema
+class SMPLXReconstruction(dj.Computed):
+    definition = '''
+    # Use the TopDownKeypoints to reconstruct the 3D joint locations
+    -> PersonKeypointReconstruction
+    ---
+    poses               : longblob
+    shape               : longblob
+    orientation         : longblob
+    translation         : longblob
+    expression          : longblob
+    joints3d            : longblob
+    vertices            : longblob
+    faces               : longblob
+    '''
+
+    def make(self, key):
+        from ..analysis.easymocap import easymocap_fit_smpl_3d, get_joint_openpose, get_vertices, get_faces
+        from easymocap.dataset import CONFIG as config
+
+        # get triangulated points and convert to meters
+        points3d = (PersonKeypointReconstruction & key).fetch1('keypoints3d').copy()
+        points3d[..., :3] = points3d[..., :3] / 1000.0  # convert coordinates to m, but leave confidence untouched
+
+        if key['top_down_method'] == 2:
+            # Convert the HALPE coordinate order to the expected order
+
+            def joint_renamer(j):
+                j = j.replace('Sternum', 'Neck')
+                j = j.replace('Right ', 'R')
+                j = j.replace('Left ', 'L')
+                j = j.replace('Little', 'Small')
+                j = j.replace('Pelvis', 'MidHip')
+                j = j.replace(' ', '')
+                return j
+
+            def normalize_marker_names(joints):
+                """ Convert joint names to those expected by OpenSim model """
+                return [joint_renamer(j) for j in joints]
+
+            joint_names = normalize_marker_names(TopDownPerson.joint_names('MMPoseHalpe'))
+
+            # move these to where COCO would put them (which is what Body25 uses)
+            points3d[:, joint_names.index('Neck')] = (points3d[:, joint_names.index('RShoulder')] + points3d[:, joint_names.index('LShoulder')]) / 2
+            points3d[:, joint_names.index('MidHip')] = (points3d[:, joint_names.index('RHip')] + points3d[:, joint_names.index('LHip')]) / 2
+            # reduce confidence on little toes as it seems to lock onto values from big toe (quick with MMPose model)
+            points3d[:, joint_names.index('RSmallToe'), -1] = points3d[:, joint_names.index('RSmallToe'), -1] * 0.1
+            points3d[:, joint_names.index('LSmallToe'), -1] = points3d[:, joint_names.index('LSmallToe'), -1] * 0.1
+
+            joint_reorder = np.array([joint_names.index(j) for j in config['body25']['joint_names']])
+            points3d_body25 = points3d[:, joint_reorder]
+
+            # from https://github.com/Fang-Haoshu/Halpe-FullBody
+            left_hand = points3d[:, np.arange(94,115)]
+            right_hand = points3d[:, np.arange(115,136)]
+            # leave the last 17 points off. doesn't use inner lip
+            face = points3d[:, np.arange(26, 94-17)]
+
+            points3d = np.concatenate([points3d_body25, left_hand, right_hand, face], axis=1)
+
+        elif key['top_down_method'] == 4:
+            # for OpenPose the keypoint order can be preserved
+            pass
+
+        else:
+            raise NotImplementedError(f'Top down method {key["top_down_method"]} not supported.')
+
+        res = easymocap_fit_smpl_3d(points3d, verbose=True, body_model='smplx', skel_type='facebodyhand')
+        key['poses'] = res['poses']
+        key['shape'] = res['shapes']
+        key['expression'] = res['expression']
+        key['orientation'] = res['Rh']
+        key['translation'] = res['Th']
+        key['joints3d'] = get_joint_openpose(res, body_model='smplx')
+        key['vertices'] = get_vertices(res, body_model='smplx')
+        key['faces'] = get_faces(body_model='smplx')
+        self.insert1(key)
+
 
 def import_recording(vid_base, vid_path='.', video_project='MULTICAMERA_TEST', legacy_flip=None):
     import os

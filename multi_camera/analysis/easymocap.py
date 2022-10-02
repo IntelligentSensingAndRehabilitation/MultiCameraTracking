@@ -91,20 +91,19 @@ def interpolate_points(points3d, method='cubic'):
     return points3d
 
 
-def easymocap_fit_smpl_3d(joints3d, model_path=model_path, verbose=True, smooth3d=True, robust3d=True):
+def easymocap_fit_smpl_3d(joints3d, model_path=model_path, verbose=True, smooth3d=True, robust3d=True,
+                          body_model='smpl', skel_type='body25'):
 
     from easymocap.pipeline import smpl_from_keypoints3d
     from easymocap.dataset import CONFIG
     from easymocap.smplmodel.body_param import load_model
     from easymocap.pipeline.weight import load_weight_pose, load_weight_shape
 
-    body_model = load_model(model_path=model_path)
-
     @dataclass
     class EasymocapArgs:
-        model = 'smpl'
+        model = body_model
         gender = 'neutral'
-        opts = {'smooth_poses': 1e-4, 'reg_poses': 1e-5, 'smooth_body': 5e-3}
+        opts = {} #'smooth_poses': 1e-4, 'reg_poses': 1e-5, 'smooth_body': 5e-3}
 
     args = EasymocapArgs
     args.verbose = verbose
@@ -112,6 +111,7 @@ def easymocap_fit_smpl_3d(joints3d, model_path=model_path, verbose=True, smooth3
     args.smooth3d = smooth3d
     config = CONFIG
 
+    body_model = load_model(model_path=model_path, model_type=body_model, skel_type=skel_type)
     weight_shape = load_weight_shape(args.model, args.opts)
     weight_pose = load_weight_pose(args.model, args.opts)
 
@@ -196,21 +196,21 @@ def fit_multiple_smpl(results):
     return smpl_results
 
 
-def get_joint_openpose(res, model_path=model_path):
+def get_joint_openpose(res, model_path=model_path, body_model='smpl'):
     from easymocap.smplmodel.body_param import load_model
 
-    body_model = load_model(model_path=model_path)
+    body_model = load_model(model_path=model_path, model_type=body_model)
     return body_model(return_verts=False, return_joints=True, return_tensor=False, **res)
 
 
-def get_vertices(res, model_path=model_path):
+def get_vertices(res, model_path=model_path, body_model='smpl'):
     from easymocap.smplmodel.body_param import load_model
 
-    body_model = load_model(model_path=model_path)
+    body_model = load_model(model_path=model_path, model_type=body_model)
     return body_model(return_verts=True, return_tensor=False, **res)
 
-def get_faces():
+def get_faces(model_path=model_path, body_model='smpl'):
     from easymocap.smplmodel.body_param import load_model
-    body_model = load_model(model_path=model_path)
+    body_model = load_model(model_path=model_path, model_type=body_model)
     return body_model.faces
 
