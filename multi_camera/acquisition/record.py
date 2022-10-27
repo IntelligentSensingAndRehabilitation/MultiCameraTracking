@@ -56,15 +56,17 @@ def record_dual(vid_file, max_frames=100, num_cams=4, preview=True, resize=0.5, 
         interface_cams = interface.GetCameras()
 
         num_interface_cams = interface_cams.GetSize()
-        # print(num_interface_cams)
-        # print(cameras)
+
         if num_interface_cams > 0:
             # If camera list is passed, confirm all SNs are valid
             if isinstance(cameras,list):
                 camera_id_list = [str(c) for c in cameras if interface_cams.GetBySerial(str(c)).IsValid()]
-                # print(camera_id_list)
-                if len(camera_id_list) != len(cameras):
-                    print(f'{len(cameras) - len(camera_id_list)} invalid camera ID(s) found from {config}')
+
+                invalid_ids = [c for c in cameras if str(c) not in camera_id_list]
+
+                if invalid_ids:
+                    # if len(camera_id_list) != len(cameras):
+                    print(f'The following camera ID(s) from {config} are invalid: {invalid_ids}')
 
                 return camera_id_list
             # If num_cams is passed, confirm it is less than size
@@ -90,7 +92,7 @@ def record_dual(vid_file, max_frames=100, num_cams=4, preview=True, resize=0.5, 
             iface_idx.append(i)
             iface = current_iface
             iface_cams = current_iface_cams
-    # print(iface_idx)
+
     # Confirm that cameras were only found on 1 interface
     assert len(iface_idx) == 1, "Unable to automatically pick interface as cameras found on multiple"
     # iface = iface_list[iface_idx[0]]  # TODO: find this intelligently
