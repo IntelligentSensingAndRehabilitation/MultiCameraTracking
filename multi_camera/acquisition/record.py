@@ -143,9 +143,6 @@ def record_dual(vid_file, max_frames=100, num_cams=4, preview=True, resize=0.5, 
         try:
             for _ in tqdm(range(max_frames)):
 
-                if frame_pause > 0:
-                    time.sleep(frame_pause)
-
                 # get the image raw data
                 # for each camera, get the current frame and assign it to
                 # the corresponding camera
