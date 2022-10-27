@@ -1,6 +1,7 @@
 import copy
 
 import PySpin
+import simple_pyspin
 from simple_pyspin import Camera
 from PIL import Image
 import numpy as np
@@ -15,6 +16,7 @@ import time
 import cv2
 import os
 import _thread
+import yaml
 
 # Defining window size based on number
 # of cameras(key)
@@ -30,7 +32,7 @@ window_sizes = {
 }
 
 
-def record_dual(vid_file, max_frames=100, num_cams=4, frame_pause=0, preview=True, resize=0.5):
+def record_dual(vid_file, max_frames=100, num_cams=4, preview=True, resize=0.5, config=""):
     # Initializing dict to hold each image queue (from each camera)
     image_queue_dict = {}
     if preview:
@@ -38,7 +40,10 @@ def record_dual(vid_file, max_frames=100, num_cams=4, frame_pause=0, preview=Tru
 
     system = PySpin.System.GetInstance()
     iface_list = system.GetInterfaces()
-
+    # Check if a config file has been provided
+    if config != "":
+        with open(config, "r") as file:
+            camera_config = yaml.safe_load(file)
     # Identify the interface we are going to send a command for synchronous recording
     iface_idx = [i for i, f in enumerate(iface_list) if len(f.GetCameras()) > 0]
     assert len(iface_idx) == 1, "Unable to automatically pick interface as cameras found on multiple"
@@ -46,10 +51,10 @@ def record_dual(vid_file, max_frames=100, num_cams=4, frame_pause=0, preview=Tru
     iface.TLInterface.GevActionDeviceKey.SetValue(0)
     iface.TLInterface.GevActionGroupKey.SetValue(1)
     iface.TLInterface.GevActionGroupMask.SetValue(1)
-
     cams = [Camera(i, lock=True) for i in range(num_cams)]
 
     def init_camera(c):
+        # Initialize each available camera
         c.init()
 
         c.PixelFormat = "BayerRG8"  # BGR8 Mono8
@@ -372,11 +377,15 @@ def record_dual(vid_file, max_frames=100, num_cams=4, frame_pause=0, preview=Tru
     output_json["timestamps"] = [list(t) for t in zip(*all_timestamps)]
     output_json["real_times"] = real_times
 
+    if config != "":
+        output_json["meta_info"] = camera_config["meta-info"]
+        output_json["camera_info"] = camera_config["camera-info"]
+
     # writing the json file for the current recording session
     json.dump(output_json, open(json_file, "w"))
 
     ts = np.array(output_json["timestamps"])
-    dt = (ts - ts[0,0]) / 1e9
+    dt = (ts - ts[0, 0]) / 1e9
     spread = np.max(dt, axis=1) - np.min(dt, axis=1)
     if np.all(spread < 1e-6):
         print('Timestamps well aligned and clean')
@@ -393,7 +402,6 @@ if __name__ == "__main__":
     parser.add_argument("vid_file", help="Video file to write")
     parser.add_argument("-m", "--max_frames", type=int, default=10000, help="Maximum frames to record")
     parser.add_argument("-n", "--num_cams", type=int, default=4, help="Number of input cameras")
-    parser.add_argument("-f", "--frame_pause", type=int, default=0, help="Time to pause between frames of video")
     parser.add_argument(
         "-p", "--preview", default=False, action="store_true", help="Allow real-time visualization of video"
     )
@@ -404,13 +412,14 @@ if __name__ == "__main__":
         default=0.5,
         help="Ratio to use for scaling the real-time visualization output (should be a float between 0 and 1)",
     )
+    parser.add_argument("-c", "--config", default="", type=str, help="Path to a config.yaml file")
     args = parser.parse_args()
 
     record_dual(
         vid_file=args.vid_file,
         max_frames=args.max_frames,
         num_cams=args.num_cams,
-        frame_pause=args.frame_pause,
         preview=args.preview,
         resize=args.scaling,
+        config=args.config,
     )
