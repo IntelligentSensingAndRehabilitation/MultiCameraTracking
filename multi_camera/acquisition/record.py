@@ -40,18 +40,71 @@ def record_dual(vid_file, max_frames=100, num_cams=4, preview=True, resize=0.5, 
 
     system = PySpin.System.GetInstance()
     iface_list = system.GetInterfaces()
+
     # Check if a config file has been provided
     if config != "":
         with open(config, "r") as file:
             camera_config = yaml.safe_load(file)
+            # Updating interface_cameras if a config file is passed
+            # with the camera IDs passed
+            iface_cameras = list(camera_config["camera-info"].keys())
+    else:
+        iface_cameras = num_cams
+
+    def select_interface(interface,cameras):
+        # Check the current interface to see if it has cameras
+        interface_cams = interface.GetCameras()
+
+        num_interface_cams = interface_cams.GetSize()
+        # print(num_interface_cams)
+        # print(cameras)
+        if num_interface_cams > 0:
+            # If camera list is passed, confirm all SNs are valid
+            if isinstance(cameras,list):
+                camera_id_list = [str(c) for c in cameras if interface_cams.GetBySerial(str(c)).IsValid()]
+                # print(camera_id_list)
+                if len(camera_id_list) != len(cameras):
+                    print(f'{len(cameras) - len(camera_id_list)} invalid camera ID(s) found from {config}')
+
+                return camera_id_list
+            # If num_cams is passed, confirm it is less than size
+            # of interface_cams and return the correct num_cams
+            if isinstance(cameras,int):
+                # Set num_cams to the # of available cameras
+                # if input arg is larger (num_cams = min(num_cams,len(camera_list))
+                num_cams = min(cameras, num_interface_cams)
+                print(f"No config file passed. Selecting the first {num_cams} cameras in the list.")
+
+                return num_cams
+
+        return None
+
     # Identify the interface we are going to send a command for synchronous recording
-    iface_idx = [i for i, f in enumerate(iface_list) if len(f.GetCameras()) > 0]
+    iface_idx = []
+    for i,current_iface in enumerate(iface_list):
+        current_iface_cams = select_interface(current_iface,iface_cameras)
+
+        # If the value returned from select_interface is not None,
+        # select the current interface
+        if current_iface_cams is not None:
+            iface_idx.append(i)
+            iface = current_iface
+            iface_cams = current_iface_cams
+    # print(iface_idx)
+    # Confirm that cameras were only found on 1 interface
     assert len(iface_idx) == 1, "Unable to automatically pick interface as cameras found on multiple"
-    iface = iface_list[iface_idx[0]]  # TODO: find this intelligently
+    # iface = iface_list[iface_idx[0]]  # TODO: find this intelligently
     iface.TLInterface.GevActionDeviceKey.SetValue(0)
     iface.TLInterface.GevActionGroupKey.SetValue(1)
     iface.TLInterface.GevActionGroupMask.SetValue(1)
-    cams = [Camera(i, lock=True) for i in range(num_cams)]
+
+    if config != "":
+        # if config is passed then use the config list
+        # of cameras to select
+        cams = [Camera(i, lock=True) for i in iface_cams]
+    else:
+        # otherwise just select the first num_cams cameras
+        cams = [Camera(i, lock=True) for i in range(iface_cams)]
 
     def init_camera(c):
         # Initialize each available camera
@@ -179,7 +232,7 @@ def record_dual(vid_file, max_frames=100, num_cams=4, preview=True, resize=0.5, 
                         visualization_queue.put({"im": real_time_images}, block=False)
 
         except KeyboardInterrupt:
-            tqdm.write("Crtl-C detected")
+            tqdm.write("Ctrl-C detected")
 
         for c in cams:
             c.stop()
