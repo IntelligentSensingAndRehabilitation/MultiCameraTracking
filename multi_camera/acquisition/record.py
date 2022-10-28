@@ -52,9 +52,14 @@ def record_dual(vid_file, max_frames=100, num_cams=4, preview=True, resize=0.5, 
         iface_cameras = num_cams
 
     def select_interface(interface,cameras):
+        # This method takes in an interface and list of cameras (if a config
+        # file is provided) or number of cameras. It checks if the current
+        # interface has cameras and returns a list of valid camera IDs or
+        # number of cameras
+
         # Check the current interface to see if it has cameras
         interface_cams = interface.GetCameras()
-
+        # Get the number of cameras on the current interface
         num_interface_cams = interface_cams.GetSize()
 
         if num_interface_cams > 0:
@@ -78,7 +83,7 @@ def record_dual(vid_file, max_frames=100, num_cams=4, preview=True, resize=0.5, 
                 print(f"No config file passed. Selecting the first {num_cams} cameras in the list.")
 
                 return num_cams
-
+        # If there are no cameras on the interface, return None
         return None
 
     # Identify the interface we are going to send a command for synchronous recording
@@ -95,7 +100,7 @@ def record_dual(vid_file, max_frames=100, num_cams=4, preview=True, resize=0.5, 
 
     # Confirm that cameras were only found on 1 interface
     assert len(iface_idx) == 1, "Unable to automatically pick interface as cameras found on multiple"
-    # iface = iface_list[iface_idx[0]]  # TODO: find this intelligently
+
     iface.TLInterface.GevActionDeviceKey.SetValue(0)
     iface.TLInterface.GevActionGroupKey.SetValue(1)
     iface.TLInterface.GevActionGroupMask.SetValue(1)
