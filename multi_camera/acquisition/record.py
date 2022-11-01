@@ -67,6 +67,13 @@ def record_dual(vid_file, max_frames=100, num_cams=4, preview=True, resize=0.5, 
             if isinstance(cameras,list):
                 camera_id_list = [str(c) for c in cameras if interface_cams.GetBySerial(str(c)).IsValid()]
 
+                # if the camera_ID_list does not contain any valid cameras
+                # based on the serial numbers present in the config file
+                # return None
+                if len(camera_id_list) == 0:
+                    return None
+
+                # Find any invalid IDs in the config
                 invalid_ids = [c for c in cameras if str(c) not in camera_id_list]
 
                 if invalid_ids:
@@ -74,12 +81,16 @@ def record_dual(vid_file, max_frames=100, num_cams=4, preview=True, resize=0.5, 
                     print(f'The following camera ID(s) from {config} are invalid: {invalid_ids}')
 
                 return camera_id_list
-            # If num_cams is passed, confirm it is less than size
-            # of interface_cams and return the correct num_cams
+            # If num_cams is passed, confirm it is less than or equal to
+            # the size of interface_cams and return the correct num_cams
             if isinstance(cameras,int):
-                # Set num_cams to the # of available cameras
-                # if input arg is larger (num_cams = min(num_cams,len(camera_list))
-                num_cams = min(cameras, num_interface_cams)
+
+                # if num_cams is larger than the # cameras on current interface,
+                # raise an error
+                assert cameras <= num_interface_cams, f"num_cams={cameras} but the current interface only has {num_interface_cams} cameras."
+
+                # Otherwise, set num_cams to the # of available cameras
+                num_cams = cameras
                 print(f"No config file passed. Selecting the first {num_cams} cameras in the list.")
 
                 return num_cams
@@ -87,19 +98,20 @@ def record_dual(vid_file, max_frames=100, num_cams=4, preview=True, resize=0.5, 
         return None
 
     # Identify the interface we are going to send a command for synchronous recording
-    iface_idx = []
-    for i,current_iface in enumerate(iface_list):
+    iface = None
+    for current_iface in iface_list:
         current_iface_cams = select_interface(current_iface,iface_cameras)
 
         # If the value returned from select_interface is not None,
         # select the current interface
         if current_iface_cams is not None:
-            iface_idx.append(i)
             iface = current_iface
             iface_cams = current_iface_cams
+            # Break out of the loop after finding the interface and cameras
+            break
 
-    # Confirm that cameras were only found on 1 interface
-    assert len(iface_idx) == 1, "Unable to automatically pick interface as cameras found on multiple"
+    # Confirm that cameras were found on an interface
+    assert iface is not None, "Unable to find valid interface."
 
     iface.TLInterface.GevActionDeviceKey.SetValue(0)
     iface.TLInterface.GevActionGroupKey.SetValue(1)
