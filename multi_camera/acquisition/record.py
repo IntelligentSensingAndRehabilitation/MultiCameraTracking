@@ -371,7 +371,6 @@ def record_dual(vid_file, max_frames=100, num_cams=4, preview=True, resize=0.5, 
         out_video.release()
 
         # Adding the json info corresponding to the current camera to its own queue
-        # json_queue.put({"serial": serial, "timestamps": timestamps, "real_times": real_times, "time_str": time_str})
         json_queue.put({"serial": serial, "timestamps": timestamps, "real_times": real_times})
 
         # average frame time from ns to s
@@ -434,7 +433,6 @@ def record_dual(vid_file, max_frames=100, num_cams=4, preview=True, resize=0.5, 
     all_json = {}
 
     for j in json_queue:
-        # time_str = json_queue[j].queue[0]["time_str"]
         real_times = json_queue[j].queue[0]["real_times"]
 
         all_json[json_queue[j].queue[0]["serial"]] = json_queue[j].queue[0]
