@@ -100,6 +100,7 @@ def record_dual(vid_file, max_frames=100, num_cams=4, preview=True, resize=0.5, 
     # Identify the interface we are going to send a command for synchronous recording
     iface = None
     for current_iface in iface_list:
+
         current_iface_cams = select_interface(current_iface,iface_cameras)
 
         # If the value returned from select_interface is not None,
@@ -176,6 +177,10 @@ def record_dual(vid_file, max_frames=100, num_cams=4, preview=True, resize=0.5, 
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(cams)) as executor:
         l = list(executor.map(init_camera, cams))
+
+    # Get the timestamp that should be used for the file names
+    now = datetime.now()
+    time_str = now.strftime("%Y%m%d_%H%M%S")
 
     cams.sort(key=lambda x: x.DeviceSerialNumber)
 
@@ -322,8 +327,6 @@ def record_dual(vid_file, max_frames=100, num_cams=4, preview=True, resize=0.5, 
             cv2.waitKey(1)
 
     def write_queue(vid_file, image_queue, json_queue, serial):
-        now = datetime.now()
-        time_str = now.strftime("%Y%m%d_%H%M%S")
         vid_file = os.path.splitext(vid_file)[0] + f"_{time_str}.{serial}.mp4"
 
         print(vid_file)
@@ -368,7 +371,8 @@ def record_dual(vid_file, max_frames=100, num_cams=4, preview=True, resize=0.5, 
         out_video.release()
 
         # Adding the json info corresponding to the current camera to its own queue
-        json_queue.put({"serial": serial, "timestamps": timestamps, "real_times": real_times, "time_str": time_str})
+        # json_queue.put({"serial": serial, "timestamps": timestamps, "real_times": real_times, "time_str": time_str})
+        json_queue.put({"serial": serial, "timestamps": timestamps, "real_times": real_times})
 
         # average frame time from ns to s
         ts = np.asarray(timestamps)
@@ -430,7 +434,7 @@ def record_dual(vid_file, max_frames=100, num_cams=4, preview=True, resize=0.5, 
     all_json = {}
 
     for j in json_queue:
-        time_str = json_queue[j].queue[0]["time_str"]
+        # time_str = json_queue[j].queue[0]["time_str"]
         real_times = json_queue[j].queue[0]["real_times"]
 
         all_json[json_queue[j].queue[0]["serial"]] = json_queue[j].queue[0]
