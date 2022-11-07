@@ -125,6 +125,7 @@ def record_dual(vid_file, max_frames=100, num_cams=4, preview=True, resize=0.5, 
     else:
         # otherwise just select the first num_cams cameras
         cams = [Camera(i, lock=True) for i in range(iface_cams)]
+    num_cams = len(cams)
 
     def init_camera(c):
         # Initialize each available camera
