@@ -29,6 +29,15 @@ window_sizes = {
     6: np.array([2, 3, 1]),
     7: np.array([2, 4, 1]),
     8: np.array([2, 4, 1]),
+    9: np.array([3, 3, 1]),
+    10: np.array([3, 4, 1]),
+    11: np.array([3, 4, 1]),
+    12: np.array([3, 4, 1]),
+    13: np.array([4, 4, 1]),
+    14: np.array([4, 4, 1]),
+    15: np.array([4, 4, 1]),
+    16: np.array([4, 4, 1]),
+
 }
 
 
