@@ -29,6 +29,14 @@ window_sizes = {
     6: np.array([2, 3, 1]),
     7: np.array([2, 4, 1]),
     8: np.array([2, 4, 1]),
+    9: np.array([3, 3, 1]),
+    10: np.array([3, 4, 1]),
+    11: np.array([3, 4, 1]),
+    12: np.array([3, 4, 1]),
+    13: np.array([4, 4, 1]),
+    14: np.array([4, 4, 1]),
+    15: np.array([4, 4, 1]),
+    16: np.array([4, 4, 1]),
 }
 
 
@@ -40,18 +48,94 @@ def record_dual(vid_file, max_frames=100, num_cams=4, preview=True, resize=0.5, 
 
     system = PySpin.System.GetInstance()
     iface_list = system.GetInterfaces()
+
     # Check if a config file has been provided
     if config != "":
         with open(config, "r") as file:
             camera_config = yaml.safe_load(file)
+            # Updating interface_cameras if a config file is passed
+            # with the camera IDs passed
+            iface_cameras = list(camera_config["camera-info"].keys())
+    else:
+        iface_cameras = num_cams
+
+    def select_interface(interface, cameras):
+        # This method takes in an interface and list of cameras (if a config
+        # file is provided) or number of cameras. It checks if the current
+        # interface has cameras and returns a list of valid camera IDs or
+        # number of cameras
+
+        # Check the current interface to see if it has cameras
+        interface_cams = interface.GetCameras()
+        # Get the number of cameras on the current interface
+        num_interface_cams = interface_cams.GetSize()
+
+        if num_interface_cams > 0:
+            # If camera list is passed, confirm all SNs are valid
+            if isinstance(cameras, list):
+                camera_id_list = [str(c) for c in cameras if interface_cams.GetBySerial(str(c)).IsValid()]
+
+                # if the camera_ID_list does not contain any valid cameras
+                # based on the serial numbers present in the config file
+                # return None
+                if len(camera_id_list) == 0:
+                    return None
+
+                # Find any invalid IDs in the config
+                invalid_ids = [c for c in cameras if str(c) not in camera_id_list]
+
+                if invalid_ids:
+                    # if len(camera_id_list) != len(cameras):
+                    print(f"The following camera ID(s) from {config} are invalid: {invalid_ids}")
+
+                return camera_id_list
+            # If num_cams is passed, confirm it is less than or equal to
+            # the size of interface_cams and return the correct num_cams
+            if isinstance(cameras, int):
+
+                # if num_cams is larger than the # cameras on current interface,
+                # raise an error
+                assert (
+                    cameras <= num_interface_cams
+                ), f"num_cams={cameras} but the current interface only has {num_interface_cams} cameras."
+
+                # Otherwise, set num_cams to the # of available cameras
+                num_cams = cameras
+                print(f"No config file passed. Selecting the first {num_cams} cameras in the list.")
+
+                return num_cams
+        # If there are no cameras on the interface, return None
+        return None
+
     # Identify the interface we are going to send a command for synchronous recording
-    iface_idx = [i for i, f in enumerate(iface_list) if len(f.GetCameras()) > 0]
-    assert len(iface_idx) == 1, "Unable to automatically pick interface as cameras found on multiple"
-    iface = iface_list[iface_idx[0]]  # TODO: find this intelligently
+    iface = None
+    for current_iface in iface_list:
+
+        current_iface_cams = select_interface(current_iface, iface_cameras)
+
+        # If the value returned from select_interface is not None,
+        # select the current interface
+        if current_iface_cams is not None:
+            iface = current_iface
+            iface_cams = current_iface_cams
+            # Break out of the loop after finding the interface and cameras
+            break
+
+    # Confirm that cameras were found on an interface
+    assert iface is not None, "Unable to find valid interface."
+
     iface.TLInterface.GevActionDeviceKey.SetValue(0)
     iface.TLInterface.GevActionGroupKey.SetValue(1)
     iface.TLInterface.GevActionGroupMask.SetValue(1)
-    cams = [Camera(i, lock=True) for i in range(num_cams)]
+
+    if config != "":
+        # if config is passed then use the config list
+        # of cameras to select
+        cams = [Camera(i, lock=True) for i in iface_cams]
+    else:
+        # otherwise just select the first num_cams cameras
+        cams = [Camera(i, lock=True) for i in range(iface_cams)]
+    num_cams = len(cams)
 
     def init_camera(c):
         # Initialize each available camera
@@ -81,10 +165,10 @@ def record_dual(vid_file, max_frames=100, num_cams=4, preview=True, resize=0.5, 
         c.ActionGroupMask = 1
 
         # set up trigger setting
-        c.TriggerMode = 'Off'
-        c.TriggerSelector = 'AcquisitionStart'   # Need to select AcquisitionStart for real time clock
-        c.TriggerSource = 'Action0'
-        c.TriggerMode = 'On'
+        c.TriggerMode = "Off"
+        c.TriggerSelector = "AcquisitionStart"  # Need to select AcquisitionStart for real time clock
+        c.TriggerSource = "Action0"
+        c.TriggerMode = "On"
 
         # Initializing an image queue for each camera
         image_queue_dict[c.DeviceSerialNumber] = Queue(max_frames)
@@ -105,6 +189,10 @@ def record_dual(vid_file, max_frames=100, num_cams=4, preview=True, resize=0.5, 
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(cams)) as executor:
         l = list(executor.map(init_camera, cams))
 
+    # Get the timestamp that should be used for the file names
+    now = datetime.now()
+    time_str = now.strftime("%Y%m%d_%H%M%S")
+
     cams.sort(key=lambda x: x.DeviceSerialNumber)
 
     # print(cams[0].get_info('PixelFormat'))
@@ -119,10 +207,11 @@ def record_dual(vid_file, max_frames=100, num_cams=4, preview=True, resize=0.5, 
 
     for c in cams:
         c.GevIEEE1588DataSetLatch()
-        print('Primary' if c.GevIEEE1588StatusLatched == 'Master' else 'Secondary', c.GevIEEE1588OffsetFromMasterLatched)
+        print(
+            "Primary" if c.GevIEEE1588StatusLatched == "Master" else "Secondary", c.GevIEEE1588OffsetFromMasterLatched
+        )
 
     def acquire():
-
         def start_cam(i):
             # this won't truly start them until command is send below
             cams[i].start()
@@ -135,7 +224,7 @@ def record_dual(vid_file, max_frames=100, num_cams=4, preview=True, resize=0.5, 
         value = cams[0].TimestampLatchValue
         latchValue = int(value + 0.250 * 1e9)
         iface.TLInterface.GevActionTime.SetValue(latchValue)
-        iface.TLInterface.GevActionGroupKey.SetValue(1)   # these group/mask/device numbers should match above
+        iface.TLInterface.GevActionGroupKey.SetValue(1)  # these group/mask/device numbers should match above
         iface.TLInterface.GevActionGroupMask.SetValue(1)
         iface.TLInterface.GevActionDeviceKey.SetValue(0)
         iface.TLInterface.ActionCommand()
@@ -179,7 +268,7 @@ def record_dual(vid_file, max_frames=100, num_cams=4, preview=True, resize=0.5, 
                         visualization_queue.put({"im": real_time_images}, block=False)
 
         except KeyboardInterrupt:
-            tqdm.write("Crtl-C detected")
+            tqdm.write("Ctrl-C detected")
 
         for c in cams:
             c.stop()
@@ -250,8 +339,6 @@ def record_dual(vid_file, max_frames=100, num_cams=4, preview=True, resize=0.5, 
             cv2.waitKey(1)
 
     def write_queue(vid_file, image_queue, json_queue, serial):
-        now = datetime.now()
-        time_str = now.strftime("%Y%m%d_%H%M%S")
         vid_file = os.path.splitext(vid_file)[0] + f"_{time_str}.{serial}.mp4"
 
         print(vid_file)
@@ -296,7 +383,7 @@ def record_dual(vid_file, max_frames=100, num_cams=4, preview=True, resize=0.5, 
         out_video.release()
 
         # Adding the json info corresponding to the current camera to its own queue
-        json_queue.put({"serial": serial, "timestamps": timestamps, "real_times": real_times, "time_str": time_str})
+        json_queue.put({"serial": serial, "timestamps": timestamps, "real_times": real_times})
 
         # average frame time from ns to s
         ts = np.asarray(timestamps)
@@ -358,7 +445,6 @@ def record_dual(vid_file, max_frames=100, num_cams=4, preview=True, resize=0.5, 
     all_json = {}
 
     for j in json_queue:
-        time_str = json_queue[j].queue[0]["time_str"]
         real_times = json_queue[j].queue[0]["real_times"]
 
         all_json[json_queue[j].queue[0]["serial"]] = json_queue[j].queue[0]
@@ -385,9 +471,9 @@ def record_dual(vid_file, max_frames=100, num_cams=4, preview=True, resize=0.5, 
     dt = (ts - ts[0, 0]) / 1e9
     spread = np.max(dt, axis=1) - np.min(dt, axis=1)
     if np.all(spread < 1e-6):
-        print('Timestamps well aligned and clean')
+        print("Timestamps well aligned and clean")
     else:
-        print(f'Timestamps showed a maximum spread of {np.max(spread) * 1000} ms')
+        print(f"Timestamps showed a maximum spread of {np.max(spread) * 1000} ms")
 
     return
 
