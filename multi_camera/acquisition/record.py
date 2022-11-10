@@ -37,7 +37,6 @@ window_sizes = {
     14: np.array([4, 4, 1]),
     15: np.array([4, 4, 1]),
     16: np.array([4, 4, 1]),
-
 }
 
 
@@ -60,7 +59,7 @@ def record_dual(vid_file, max_frames=100, num_cams=4, preview=True, resize=0.5, 
     else:
         iface_cameras = num_cams
 
-    def select_interface(interface,cameras):
+    def select_interface(interface, cameras):
         # This method takes in an interface and list of cameras (if a config
         # file is provided) or number of cameras. It checks if the current
         # interface has cameras and returns a list of valid camera IDs or
@@ -73,7 +72,7 @@ def record_dual(vid_file, max_frames=100, num_cams=4, preview=True, resize=0.5, 
 
         if num_interface_cams > 0:
             # If camera list is passed, confirm all SNs are valid
-            if isinstance(cameras,list):
+            if isinstance(cameras, list):
                 camera_id_list = [str(c) for c in cameras if interface_cams.GetBySerial(str(c)).IsValid()]
 
                 # if the camera_ID_list does not contain any valid cameras
@@ -87,16 +86,18 @@ def record_dual(vid_file, max_frames=100, num_cams=4, preview=True, resize=0.5, 
 
                 if invalid_ids:
                     # if len(camera_id_list) != len(cameras):
-                    print(f'The following camera ID(s) from {config} are invalid: {invalid_ids}')
+                    print(f"The following camera ID(s) from {config} are invalid: {invalid_ids}")
 
                 return camera_id_list
             # If num_cams is passed, confirm it is less than or equal to
             # the size of interface_cams and return the correct num_cams
-            if isinstance(cameras,int):
+            if isinstance(cameras, int):
 
                 # if num_cams is larger than the # cameras on current interface,
                 # raise an error
-                assert cameras <= num_interface_cams, f"num_cams={cameras} but the current interface only has {num_interface_cams} cameras."
+                assert (
+                    cameras <= num_interface_cams
+                ), f"num_cams={cameras} but the current interface only has {num_interface_cams} cameras."
 
                 # Otherwise, set num_cams to the # of available cameras
                 num_cams = cameras
@@ -110,7 +111,7 @@ def record_dual(vid_file, max_frames=100, num_cams=4, preview=True, resize=0.5, 
     iface = None
     for current_iface in iface_list:
 
-        current_iface_cams = select_interface(current_iface,iface_cameras)
+        current_iface_cams = select_interface(current_iface, iface_cameras)
 
         # If the value returned from select_interface is not None,
         # select the current interface
@@ -164,10 +165,10 @@ def record_dual(vid_file, max_frames=100, num_cams=4, preview=True, resize=0.5, 
         c.ActionGroupMask = 1
 
         # set up trigger setting
-        c.TriggerMode = 'Off'
-        c.TriggerSelector = 'AcquisitionStart'   # Need to select AcquisitionStart for real time clock
-        c.TriggerSource = 'Action0'
-        c.TriggerMode = 'On'
+        c.TriggerMode = "Off"
+        c.TriggerSelector = "AcquisitionStart"  # Need to select AcquisitionStart for real time clock
+        c.TriggerSource = "Action0"
+        c.TriggerMode = "On"
 
         # Initializing an image queue for each camera
         image_queue_dict[c.DeviceSerialNumber] = Queue(max_frames)
@@ -206,10 +207,11 @@ def record_dual(vid_file, max_frames=100, num_cams=4, preview=True, resize=0.5, 
 
     for c in cams:
         c.GevIEEE1588DataSetLatch()
-        print('Primary' if c.GevIEEE1588StatusLatched == 'Master' else 'Secondary', c.GevIEEE1588OffsetFromMasterLatched)
+        print(
+            "Primary" if c.GevIEEE1588StatusLatched == "Master" else "Secondary", c.GevIEEE1588OffsetFromMasterLatched
+        )
 
     def acquire():
-
         def start_cam(i):
             # this won't truly start them until command is send below
             cams[i].start()
@@ -222,7 +224,7 @@ def record_dual(vid_file, max_frames=100, num_cams=4, preview=True, resize=0.5, 
         value = cams[0].TimestampLatchValue
         latchValue = int(value + 0.250 * 1e9)
         iface.TLInterface.GevActionTime.SetValue(latchValue)
-        iface.TLInterface.GevActionGroupKey.SetValue(1)   # these group/mask/device numbers should match above
+        iface.TLInterface.GevActionGroupKey.SetValue(1)  # these group/mask/device numbers should match above
         iface.TLInterface.GevActionGroupMask.SetValue(1)
         iface.TLInterface.GevActionDeviceKey.SetValue(0)
         iface.TLInterface.ActionCommand()
@@ -469,9 +471,9 @@ def record_dual(vid_file, max_frames=100, num_cams=4, preview=True, resize=0.5, 
     dt = (ts - ts[0, 0]) / 1e9
     spread = np.max(dt, axis=1) - np.min(dt, axis=1)
     if np.all(spread < 1e-6):
-        print('Timestamps well aligned and clean')
+        print("Timestamps well aligned and clean")
     else:
-        print(f'Timestamps showed a maximum spread of {np.max(spread) * 1000} ms')
+        print(f"Timestamps showed a maximum spread of {np.max(spread) * 1000} ms")
 
     return
 
