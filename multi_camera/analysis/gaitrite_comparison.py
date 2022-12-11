@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+from typing import List
 
 
 def parse_gaitrite(filename: str):
@@ -26,11 +27,7 @@ def parse_gaitrite(filename: str):
 
     t0 = (df.iloc[0]['Date / Time Stamp'], df.iloc[0]['Computer Time (MSec)'])
 
-    try:
-        t0 = (datetime.strptime(t0[0], '%m/%d/%Y %I:%M:%S %p'), t0[1])
-    except:
-        print('falling back to alternative time parsing')
-        t0 = (datetime.strptime(t0[0], '%m/%d/%Y %H:%M'), t0[1])
+    t0 = (datetime.strptime(t0[0], '%m/%d/%Y %I:%M:%S %p'), t0[1])
 
     df = df[columns]
     df['Left Foot'] = df['Left/Right Foot'] > 0.5
@@ -69,7 +66,7 @@ def trace_average(timestamps: np.array, trace: np.array, intervals: np.array):
             continue
 
         # Compute the average of the trace over the interval
-        average = np.mean(trace[start_index:end_index], axis=0)
+        average = np.median(trace[start_index:end_index], axis=0)
         std = np.std(trace[start_index:end_index], axis=0)
         std = np.percentile(trace[start_index:end_index], 90, axis=0) - \
               np.percentile(trace[start_index:end_index], 10, axis=0)
@@ -155,10 +152,17 @@ def score_extraction(extraction: dict):
                                    extraction['right_heel_measurement'], extraction['right_toe_measurement']], axis=0)
     scores = measurements[:, -1]
 
-    return np.nansum(ranges * scores[:, None]) / np.nansum(scores)
+    return np.nansum(ranges * scores[:, None]) / (1e-9 + np.nansum(scores))
 
 
-def find_local_minima(data: tuple, t_range: float = 14.0, ret_scores=False):
+def get_offset_range(dt, df):
+    t0 = min(df['First Contact Time'].min(), df['Last Contact Time'].min())
+    tl = max(df['First Contact Time'].max(), df['Last Contact Time'].max())
+
+    return dt[0] - t0, dt[-1] - tl
+
+
+def find_local_minima(data: tuple, t_range: List[float] = None, ret_scores=False):
     """Find the local minima of the scores separated by at least 10 frames.
 
         Args:
@@ -170,7 +174,11 @@ def find_local_minima(data: tuple, t_range: float = 14.0, ret_scores=False):
 
     from scipy.signal import argrelextrema
 
-    t_offsets = np.linspace(-t_range, t_range, 200)
+    if t_range is None:
+        t_range = get_offset_range(data[0], data[2])
+        print(f'Offset range: {t_range}')
+
+    t_offsets = np.arange(t_range[0], t_range[1], 0.1)
     scores = np.array([score_extraction(extract_traces(*data, t, 4)) for t in t_offsets])
 
     # Find the local minima
@@ -223,33 +231,45 @@ def align_steps_multiple_trials(data, t_offsets):
 
     gt = []
     measurements = []
+    noise = []
+    confidence = []
     idxs = []
 
     for i, (d, t) in enumerate(zip(data, t_offsets)):
+        c = d[1][..., -1:]
+        c = extract_traces(d[0], c, d[2], t, 1)
         d = extract_traces(*d, t, 2)
 
         trial = np.concatenate([d['left_heel_gt'], d['left_toe_gt'], d['right_heel_gt'], d['right_toe_gt']], axis=0)
         gt.append(trial)
         measurements.append(np.concatenate([d['left_heel_measurement'], d['left_toe_measurement'], d['right_heel_measurement'], d['right_toe_measurement']], axis=0))
+        noise.append(np.concatenate([d['left_heel_range'], d['right_heel_range'], d['left_toe_range'], d['right_toe_range']], axis=0))
+        confidence.append( np.concatenate([c['left_heel_measurement'], c['right_heel_measurement'],  c['left_toe_measurement'], c['right_toe_measurement']], axis=0))
         idxs.append(np.zeros((trial.shape[0],)) + i)
 
     gt = np.concatenate(gt)
     measurements = np.concatenate(measurements)
+    noise = np.concatenate(noise)
+    confidence = np.concatenate(confidence)
     idxs = np.concatenate(idxs)
 
     R, t = procrustes(measurements, gt)
 
     residuals = np.dot(measurements, R) + t - gt
 
+    score = np.nansum(np.abs(residuals) * confidence) / (1e-9 + np.nansum(confidence)) / 2 # two columns
+    
+                      #np.nansum(noise * confidence) / (1e-9 + np.nansum(confidence))
+    
     grouped_residuals = []
     for i in np.unique(idxs):
         r = np.mean(np.abs(residuals[idxs == i, :]))
         grouped_residuals.append(r)
 
-    return R, t, residuals, np.array(grouped_residuals)
+    return R, t, residuals, np.array(grouped_residuals), score
 
 
-def find_best_alignment(data: list, maxiters=5):
+def find_best_alignment(data: list, maxiters=10):
     """ Find the best alignment of the data.
 
         For each trial, three are multiple possible time offsets corresponding to
@@ -263,29 +283,62 @@ def find_best_alignment(data: list, maxiters=5):
     """
 
     t_offsets = [find_local_minima(d) for d in data]
+
+    # in some cases it might find the wrong set of offsets. by forcing one of the
+    # trials, this can be overrided.
+    #t_offsets[0] = np.array([-0.242])
+
     t_idx = [np.argmin(np.abs(t)) for t in t_offsets]
+    best_t_idx = t_idx
 
     best_score = 1e10
 
-    for _ in range(maxiters):
-        test_offsets = [t[i] for t, i in zip(t_offsets, t_idx)]
-        R, t, residuals, grouped_residuals = align_steps_multiple_trials(data, test_offsets)
+    def get_best(t_idx, best_score=1e10):
+        best_t_idx = t_idx
 
-        score = np.nanmean(np.abs(residuals))
-        if score < best_score:
-            best_score = score
-        elif score == best_score:
-            break
-
-        order = np.flip(np.argsort(grouped_residuals))
-        for trial in order:
-            scores = []
+        for _ in range(maxiters):
             test_offsets = [t[i] for t, i in zip(t_offsets, t_idx)]
-            for test_offset in t_offsets[trial]:
-                test_offsets[trial] = test_offset
-                R, t, residuals, grouped_residuals = align_steps_multiple_trials(data, test_offsets)
-                scores.append(np.nanmean(np.abs(residuals)))
+            _, _, _, grouped_residuals, score = align_steps_multiple_trials(data, test_offsets)
 
-            t_idx[trial] = np.argmin(scores)
+            if score < best_score:
+                best_score = score
+                best_t_idx = t_idx
+            elif score == best_score:
+                break
+            print(score)
 
-    return R, t, t_offsets, best_score
+            order = np.flip(np.argsort(grouped_residuals))
+            for trial in order:
+                scores = []
+                test_offsets = [t[i] for t, i in zip(t_offsets, t_idx)]
+                for test_offset in t_offsets[trial]:
+                    test_offsets[trial] = test_offset
+                    _, _, _, _, score = align_steps_multiple_trials(data, test_offsets)
+                    scores.append(score)
+
+                t_idx[trial] = np.argmin(scores)
+        return best_t_idx, best_score
+
+    test_offsets = [t[i] for t, i in zip(t_offsets, t_idx)]
+    print(f'Before: {test_offsets}')
+
+    best_t_idx, best_score = get_best(t_idx)
+
+    test_offsets = [t[i] for t, i in zip(t_offsets, best_t_idx)]
+    print(f'Before: {test_offsets}')
+    
+    for i in range(2):
+        # try again from different initial settings
+        t_idx = [np.random.randint(len(t)) for t in t_offsets]
+        t_idx, score = get_best(t_idx)
+
+        if score < best_score:
+            best_t_idx = t_idx
+            best_score = score
+            
+    test_offsets = [t[i] for t, i in zip(t_offsets, best_t_idx)]
+    R, t, residuals, _, best_score = align_steps_multiple_trials(data, test_offsets)
+
+    print(f'Residuals (mm): {np.mean(np.abs(residuals)):.2f}')
+
+    return R, t, test_offsets, best_score

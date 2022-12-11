@@ -7,7 +7,7 @@ from typing import List
 
 from pose_pipeline import VideoInfo, TopDownPerson
 from .multi_camera_dj import MultiCameraRecording, SingleCameraVideo, PersonKeypointReconstruction
-from ..analysis.gaitrite_comparison import parse_gaitrite, extract_traces, find_best_alignment
+from ..analysis.gaitrite_comparison import parse_gaitrite, extract_traces, find_best_alignment, get_offset_range
 
 schema = dj.schema("multicamera_tracking_gaitrite")
 
@@ -22,6 +22,14 @@ schema = dj.schema("multicamera_tracking_gaitrite")
 # Right now, I'm choosing not to inherit from the Subjects table for the PosePipe
 # analysis framework just to minimize interdependecy. I'll use the same field names
 # though to allow performing a join.
+
+# Timestamps: a big issue is synchronizing the video and GaitRite data. The GaitRite file
+# has a t0 (with only 1 second resolution) and then has relative times in the dataframe.
+# The video timestamps are in absolute time. Consistent with the other analyses, we use
+# the relative video timestamps as the local timebase. To account for this, we apply this
+# relative offset to the timestamps in the GaitRite dataframes. However, this is still only
+# a crude approximation prior to further refinement. The t_offset we compute as a refinement
+# is added to the GaitRite event times before extracting data from the traces.
 
 
 @schema
@@ -95,10 +103,11 @@ class GaitRiteRecordingAlignment(dj.Computed):
 
             confidence = np.concatenate([c['left_heel_measurement'], c['right_heel_measurement'],  c['left_toe_measurement'], c['right_toe_measurement']], axis=0)
 
-            return np.nansum(np.abs(measurements - gt) * confidence) / np.nansum(confidence) + \
-                   np.nansum(noise * confidence) / np.nansum(confidence)
+            return np.nansum(np.abs(measurements - gt) * confidence) / (1e-9 + np.nansum(confidence)) + \
+                   np.nansum(noise * confidence) / (1e-9 + np.nansum(confidence))
 
-        t_offsets = np.linspace(-5, 5, 1000)
+        offset_range = get_offset_range(dt, df)
+        t_offsets = np.arange(offset_range[0], offset_range[1], 0.03)
         scores = [get_score(t) for t in t_offsets]
         t_offset = t_offsets[np.argmin(scores)]
         residuals = get_residuals(t_offset)
@@ -131,8 +140,11 @@ def fetch_data(key):
     
     # when the terminal frame is missing
     timestamps = timestamps[:kp3d.shape[0]]
+    dt = np.array([(t-timestamps[0]).total_seconds() for t in timestamps])
 
-    dt = np.array([(t-t0).total_seconds() for t in timestamps])
+    gaitrite_offset = (t0 - timestamps[0]).total_seconds()
+    df['First Contact Time'] += gaitrite_offset
+    df['Last Contact Time'] += gaitrite_offset
 
     return dt, kp3d, df
 
@@ -150,7 +162,7 @@ def plot_data(key, t_offset=None):
 
     idx = df['Left Foot']
 
-    _, ax = plt.subplots(2,2)
+    _, ax = plt.subplots(2,2,sharex=True,sharey=True)
     ax = ax.flatten()
 
     def step_plot(df, field, style, size, ax):
