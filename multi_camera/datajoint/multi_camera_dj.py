@@ -79,14 +79,10 @@ class PersonKeypointReconstruction(dj.Computed):
         N = max([len(k) for k in keypoints])
         keypoints = np.stack([np.concatenate([np.zeros([N-k.shape[0], *k.shape[1:]]), k], axis=0) for k in keypoints], axis=0)
 
+        print(len(camera_names), len(camera_name))
         # work out the order that matches the calibration (should normally match)
         order = [list(camera_name).index(c) for c in camera_names]
         points2d = np.stack([keypoints[o][:, :, :] for o in order], axis=0)
-
-        # threshold the weights at 0.5
-        weights = points2d[..., 2]
-        # weights[weights < 0.75] = 0
-        points2d[..., 2] = weights ** 2
 
         points3d, camera_weights = robust_triangulate_points(camera_calibration, points2d, return_weights=True)
         key['keypoints3d'] = np.array(points3d)
@@ -116,12 +112,8 @@ class PersonKeypointReconstruction(dj.Computed):
         joints3d = joints3d / 1000.0 # convert to m
         fps = np.unique((VideoInfo * SingleCameraVideo * MultiCameraRecording & self).fetch('fps'))
 
-        if method_name == 'MMPoseHalpe':
-            # Not needed if using tuned skeleton
-            # skeleton model expects this to look like COCO/OpenPose where pelvis and neck are midpoints
-            #joints3d[:, joint_names.index('Pelvis')] = (joints3d[:, joint_names.index('Left Hip')] + joints3d[:, joint_names.index('Right Hip')]) / 2
-            #joints3d[:, joint_names.index('Neck')] = (joints3d[:, joint_names.index('Left Shoulder')] + joints3d[:, joint_names.index('Right Shoulder')]) / 2
-            pass
+        if joints3d.shape[-1] == 4:
+            joints3d = joints3d[..., :-1]
 
         if end is not None:
             joints3d = joints3d[:int(end * fps)]
@@ -195,7 +187,7 @@ class PersonKeypointReprojectionVideos(dj.Computed):
 
         self.insert1(key)
 
-        videos = TopDownPerson * MultiCameraRecording * PersonKeypointReconstruction * SingleCameraVideo & BestDetectedFrames & key
+        videos = Video * MultiCameraRecording * PersonKeypointReconstruction * SingleCameraVideo & key
         video_keys, video_camera_name = (SingleCameraVideo.proj() * videos).fetch('KEY', 'camera_name')
         keypoints3d = (PersonKeypointReconstruction & key).fetch1('keypoints3d')
         camera_params, camera_names = (Calibration & key).fetch1('camera_calibration', 'camera_names')
@@ -207,15 +199,22 @@ class PersonKeypointReprojectionVideos(dj.Computed):
         fps = np.unique((VideoInfo & video_keys).fetch('fps'))[0]
 
         # compute keypoints from reprojection of SMPL fit
-        keypoints2d = np.array([project_distortion(camera_params, i, keypoints3d) for i in range(camera_params['mtx'].shape[0])])
+        kp3d = keypoints3d[..., :-1]
+        conf3d = keypoints3d[..., -1]
+        keypoints2d = np.array([project_distortion(camera_params, i, kp3d) for i in range(camera_params['mtx'].shape[0])])
 
         print(f'Height: {height}. Width: {width}. FPS: {fps}')
 
         # handle any bad projections
-        clipped_x = np.logical_or.reduce(keypoints2d[..., 0] <= 0, keypoints2d[..., 0] >= width, keypoints2d[..., 1] <= 0, keypoints2d[..., 1] >= height)
-        keypoints2d[..., 0] = np.clip(keypoints2d[..., 0], 0, width)
-        keypoints2d[..., 1] = np.clip(keypoints2d[..., 1], 0, height)
-        keypoints2d[clipped, 2] = 0
+        valid_kp = np.tile((conf3d < 0.5)[None, ...], [keypoints2d.shape[0], 1, 1])
+        clipped = np.logical_or.reduce((keypoints2d[..., 0] <= 0, keypoints2d[..., 0] >= width,
+                                       keypoints2d[..., 1] <= 0, keypoints2d[..., 1] >= height,
+                                       np.isnan(keypoints2d[..., 0]), np.isnan(keypoints2d[..., 1]),
+                                       valid_kp))
+        keypoints2d[clipped, 0] = 0
+        keypoints2d[clipped, 1] = 0
+        # add low confidence when clipped
+        keypoints2d = np.concatenate([keypoints2d, ~clipped[..., None] * 1.0], axis=-1)
 
         for i, video_key in enumerate(video_keys):
 
@@ -415,7 +414,7 @@ class SMPLReconstructionVideos(dj.Computed):
                 render_data = {3: {'vertices': vertices[idx], 'faces': faces, 'name': 'human'}}
 
                 frame = render.render(render_data, cameras, [frame], add_back=True)[0].copy()
-                frame = draw_keypoints(frame, keypoints2d[i][idx] / render.down_scale, radius=6, color=(125, 125, 255))
+                frame = draw_keypoints(frame, keypoints2d[i][idx] / render.down_scale, radius=2, color=(125, 125, 255))
 
                 return frame
 
@@ -584,7 +583,7 @@ class SMPLXReconstructionVideos(dj.Computed):
                 render_data = {3: {'vertices': vertices[idx], 'faces': faces, 'name': 'human'}}
 
                 frame = render.render(render_data, cameras, [frame], add_back=True)[0].copy()
-                frame = draw_keypoints(frame, keypoints2d[i][idx] / render.down_scale, radius=6, color=(125, 125, 255))
+                #frame = draw_keypoints(frame, keypoints2d[i][idx] / render.down_scale, radius=1, color=(125, 125, 255))
 
                 return frame
 
@@ -597,7 +596,7 @@ class SMPLXReconstructionVideos(dj.Computed):
             single_video_key = (SingleCameraVideo * SMPLReconstruction & key & video_key).fetch1('KEY')
             single_video_key['output_video'] = out_file_name
 
-            SMPLReconstructionVideos.Video.insert1(single_video_key)
+            SMPLXReconstructionVideos.Video.insert1(single_video_key)
 
             os.remove(video)
             os.remove(out_file_name)

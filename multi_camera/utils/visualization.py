@@ -1,11 +1,12 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
-from pose_pipeline import OpenPosePerson, TopDownPerson
+from pose_pipeline import OpenPosePerson, TopDownPerson, LiftingPerson
 
 
 def center_skeleton(keypoints3d, joints):
-    pelvis = np.mean(keypoints3d[:, np.array([joints.index('Left Hip'), joints.index('Right Hip')])], axis=1, keepdims=True)
+    joints = [j.upper() for j in joints]
+    pelvis = np.mean(keypoints3d[:, np.array([joints.index('LEFT HIP'), joints.index('RIGHT HIP')])], axis=1, keepdims=True)
     centered = keypoints3d - pelvis
 
     return centered
@@ -29,6 +30,14 @@ def skeleton_video(keypoints3d, filename, method, fps=30.0):
         joints = TopDownPerson.joint_names('MMPoseHalpe')
         left = ['Left Ankle', 'Left Little Toe',  'Left Big Toe', 'Left Ankle', 'Left Heel', 'Left Ankle', 'Left Knee', 'Left Hip', 'Pelvis', 'Neck', 'Head', 'Neck', 'Left Shoulder', 'Left Elbow', 'Left Wrist']
         right = ['Right Ankle', 'Right Little Toe', 'Right Big Toe', 'Right Ankle', 'Right Heel', 'Right Ankle', 'Right Knee', 'Right Hip', 'Pelvis', 'Neck', 'Head', 'Neck', 'Right Shoulder', 'Right Elbow', 'Right Wrist']
+    elif method == 'OpenPose_BODY25B':
+        joints = TopDownPerson.joint_names('OpenPose_BODY25B')
+        left = ['Left Ankle', 'Left Little Toe',  'Left Big Toe', 'Left Ankle', 'Left Heel', 'Left Ankle', 'Left Knee', 'Left Hip', 'Neck', 'Head', 'Neck', 'Left Shoulder', 'Left Elbow', 'Left Wrist']
+        right = ['Right Ankle', 'Right Little Toe', 'Right Big Toe', 'Right Ankle', 'Right Heel', 'Right Ankle', 'Right Knee', 'Right Hip', 'Neck', 'Head', 'Neck', 'Right Shoulder', 'Right Elbow', 'Right Wrist']
+    elif method == 'GastNet':
+        joints =  LiftingPerson.joint_names()
+        left = ['Left foot', 'Left knee', 'Left hip', 'Hip (root)', 'Spine', 'Thorax', 'Head', 'Nose', 'Head', 'Thorax', 'Left shoulder', 'Left elbow', 'Left wrist']
+        right = ['Right foot', 'Right knee', 'Right hip', 'Hip (root)', 'Spine', 'Thorax', 'Head', 'Nose', 'Head', 'Thorax', 'Right shoulder', 'Right elbow', 'Right wrist']
     else:
         raise Exception(f'Unknown method: {method}')
 
@@ -72,7 +81,8 @@ def skeleton_video(keypoints3d, filename, method, fps=30.0):
         lines[3][0].set_3d_properties(centered[frame_idx, num_main_joints:, 2], zdir='z')
 
 
-        ax.view_init(elev=10., azim=-frame_idx/30*np.pi*2)
+        #ax.view_init(elev=10., azim=-frame_idx/30*np.pi*2)
+        ax.view_init(elev=10., azim=0) #-frame_idx/30*np.pi*2)
 
     lines = initialize()
 

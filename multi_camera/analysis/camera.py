@@ -334,11 +334,11 @@ def compute_camera_weights(pair_error, permutations, sigma, N):
         err = err.at[permutations[i,0], permutations[i,1]].set(pair_error[i])
         err = err.at[permutations[i,1], permutations[i,0]].set(err[permutations[i,0], permutations[i,1]])
 
-    err = jnp.exp(-err**2 / sigma**2)
+    w = jnp.exp(-err**2 / sigma**2) #/ jnp.sqrt(2 * jnp.pi * sigma**2)
 
     # assign zero weight to views with nan as that indicates their
     # original confidence from the heatmaps never hit our threshold
-    weight = jnp.nanmedian(err, axis=0)
+    weight = jnp.nanmedian(w, axis=0)
     weight = jnp.where(jnp.isnan(weight), 0, weight)
 
     return weight

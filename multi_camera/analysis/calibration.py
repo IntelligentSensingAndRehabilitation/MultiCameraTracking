@@ -594,7 +594,7 @@ def calibrate_bundle(parsers, camera_names=None, fisheye=False, verbose=True, ze
     return error, cgroup.get_dicts()
 
 
-def run_calibration(vid_base, vid_path=".", return_parsers=False, frame_skip=5, jax_cal=False, **kwargs):
+def run_calibration(vid_base, vid_path=".", return_parsers=False, frame_skip=2, jax_cal=False, **kwargs):
     """
     Run the calibration routine on a video recording session
 
