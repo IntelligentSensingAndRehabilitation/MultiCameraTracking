@@ -163,6 +163,26 @@ class PersonKeypointReconstructionVideo(dj.Computed):
 
 
 @schema
+class PersonKeypointReprojectionVideo(dj.Computed):
+    definition = '''
+    # Video of preprojections
+    -> PersonKeypointReconstruction
+    ---
+    output_video      : attach@localattach    # datajoint managed video file
+    '''
+
+    def make(self, key):
+        from ..utils.visualization import make_reprojection_video
+        key['output_video'] = make_reprojection_video((CalibratedRecording * MultiCameraRecording & key).fetch('KEY'))
+        self.insert1(key)
+
+    @property
+    def key_source(self):
+        # awkward double negative is to ensure all BlurredVideo views were computed
+        return PersonKeypointReconstruction & MultiCameraRecording - (SingleCameraVideo - BlurredVideo).proj()
+    
+
+@schema
 class PersonKeypointReprojectionVideos(dj.Computed):
     definition = '''
     # Videos of reconstruction preprojections

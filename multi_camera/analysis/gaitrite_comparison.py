@@ -1,3 +1,4 @@
+import re
 import pandas as pd
 import numpy as np
 from typing import List
@@ -24,17 +25,36 @@ def parse_gaitrite(filename: str):
     df = pd.read_csv(filename, sep='\t', skipinitialspace=True)
     #df = pd.read_csv(filename, sep='\s*\t\s*', skipinitialspace=True)
 
-
+    
     t0 = (df.iloc[0]['Date / Time Stamp'], df.iloc[0]['Computer Time (MSec)'])
 
-    t0 = (datetime.strptime(t0[0], '%m/%d/%Y %I:%M:%S %p'), t0[1])
+    try:
+        t0 = (datetime.strptime(t0[0], '%m/%d/%Y %I:%M:%S %p'), t0[1])
+    except:
+        # some files only have minute precision so use the file timestamp instead
+
+         # Use a regular expression to extract the date and time component from the filename
+        date_time_string = re.search(r'\d{8}_\d{6}', filename).group(0)
+        # Parse the date and time component using the strptime method
+        t0 = (datetime.strptime(date_time_string, '%Y%m%d_%H%M%S'), t0[1])
+
+        print(t0)
 
     df = df[columns]
     df['Left Foot'] = df['Left/Right Foot'] > 0.5
     df = df.dropna()
 
     # Convert to mm
-    df[['Heel X', 'Heel Y', 'Toe X', 'Toe Y']] = df[['Heel X', 'Heel Y', 'Toe X', 'Toe Y']] * 10 / 0.8
+    # get scaling from Heel X field to cm
+    ratio = df.loc[2:, 'Step Length'] / np.diff(df['Heel X'].iloc[1:])
+    ratio = np.abs(ratio)
+
+    m_ratio = np.mean(ratio)
+    assert np.std(m_ratio) < 0.01, "Scaling factor is not constant"
+    df[['Heel X', 'Heel Y', 'Toe X', 'Toe Y']] = df[['Heel X', 'Heel Y', 'Toe X', 'Toe Y']] * m_ratio * 10
+
+    # not using the same handedness as our system
+    df[['Heel Y', 'Toe Y']] = -df[['Heel Y', 'Toe Y']]
 
     df.columns = [r.rstrip() for r in df.columns]
     return t0, df
@@ -156,10 +176,23 @@ def score_extraction(extraction: dict):
 
 
 def get_offset_range(dt, df):
+    """Get the range of the temporal offset to search.
+
+        Args:
+            dt (np.ndarray): The timestamps of the keypoints.
+            df (pd.DataFrame): The Gaitrite dataframe.
+        Returns: A list of the minimum and maximum offset to search.
+    """
+
     t0 = min(df['First Contact Time'].min(), df['Last Contact Time'].min())
     tl = max(df['First Contact Time'].max(), df['Last Contact Time'].max())
 
-    return dt[0] - t0, dt[-1] - tl
+    t_range = [dt[0] - t0, dt[-1] - tl]
+    if True: #t_range[0] > (t_range[1] - 1):
+        # add a bit of slop 
+        t_range[0] = t_range[0] - 2
+        t_range[1] = t_range[1] + 2
+    return t_range
 
 
 def find_local_minima(data: tuple, t_range: List[float] = None, ret_scores=False):
@@ -182,7 +215,7 @@ def find_local_minima(data: tuple, t_range: List[float] = None, ret_scores=False
     scores = np.array([score_extraction(extract_traces(*data, t, 4)) for t in t_offsets])
 
     # Find the local minima
-    minima = argrelextrema(scores, np.less, order=10)[0]
+    minima = argrelextrema(scores, np.less, order=5)[0]
 
     if ret_scores:
         return t_offsets[minima], t_offsets, scores
@@ -327,7 +360,7 @@ def find_best_alignment(data: list, maxiters=10):
     test_offsets = [t[i] for t, i in zip(t_offsets, best_t_idx)]
     print(f'Before: {test_offsets}')
     
-    for i in range(2):
+    for i in range(20):
         # try again from different initial settings
         t_idx = [np.random.randint(len(t)) for t in t_offsets]
         t_idx, score = get_best(t_idx)

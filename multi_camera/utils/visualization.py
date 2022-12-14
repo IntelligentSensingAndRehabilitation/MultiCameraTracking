@@ -1,5 +1,10 @@
+import os
+import cv2
 import numpy as np
+import concurrent
+import tempfile
 import matplotlib.pyplot as plt
+from tqdm import tqdm
 from mpl_toolkits.mplot3d import Axes3D
 from pose_pipeline import OpenPosePerson, TopDownPerson, LiftingPerson
 
@@ -125,3 +130,112 @@ def skeleton_video(keypoints3d, filename, method, fps=30.0):
     anim.save(filename, writer=writer)
 
     return anim
+
+
+def make_reprojection_video(key: dict, portrait_width=288, dilate=1.1, return_results=False):
+    """Create a video showing the cropped individual with the 2D keypoints project from each view""" 
+
+    from pose_pipeline import PersonBbox, BlurredVideo, TopDownPerson, Video, VideoInfo
+    from pose_pipeline.utils.bounding_box import crop_image_bbox
+    from multi_camera.datajoint.multi_camera_dj import MultiCameraRecording, PersonKeypointReconstruction, SingleCameraVideo, Calibration
+    from ..analysis.camera import project_distortion
+    from pose_pipeline.utils.visualization import video_overlay, draw_keypoints
+
+    recording_fn = (MultiCameraRecording & key).fetch1('video_base_filename')
+    videos = Video * MultiCameraRecording * PersonKeypointReconstruction * SingleCameraVideo & key
+    video_keys, video_camera_name = (SingleCameraVideo.proj() * videos).fetch('KEY', 'camera_name')
+    keypoints3d = (PersonKeypointReconstruction & key).fetch1('keypoints3d')
+    camera_params, camera_names = (Calibration & key).fetch1('camera_calibration', 'camera_names')
+    assert camera_names == video_camera_name.tolist(), "Videos don't match cameras in calibration"
+
+    # get video parameters
+    width = np.unique((VideoInfo & video_keys).fetch('width'))[0]
+    height = np.unique((VideoInfo & video_keys).fetch('height'))[0]
+    fps = np.unique((VideoInfo & video_keys).fetch('fps'))[0]
+
+    # compute keypoints from reprojection of SMPL fit
+    kp3d = keypoints3d[..., :-1]
+    conf3d = keypoints3d[..., -1]
+    keypoints2d = np.array([project_distortion(camera_params, i, kp3d) for i in range(camera_params['mtx'].shape[0])])
+
+    # handle any bad projections
+    valid_kp = np.tile((conf3d < 0.5)[None, ...], [keypoints2d.shape[0], 1, 1])
+    clipped = np.logical_or.reduce((keypoints2d[..., 0] <= 0, keypoints2d[..., 0] >= width,
+                                    keypoints2d[..., 1] <= 0, keypoints2d[..., 1] >= height,
+                                    np.isnan(keypoints2d[..., 0]), np.isnan(keypoints2d[..., 1]),
+                                    valid_kp))
+    keypoints2d[clipped, 0] = 0
+    keypoints2d[clipped, 1] = 0
+    # add low confidence when clipped
+    keypoints2d = np.concatenate([keypoints2d, ~clipped[..., None] * 1.0], axis=-1)
+
+    total_frames = kp3d.shape[0]
+
+
+    bbox_fns = [PersonBbox.get_overlay_fn(v) for v in video_keys]
+    videos = [(BlurredVideo & v).fetch1('output_video') for v in video_keys]
+    bboxes = [(PersonBbox & v).fetch1('bbox').astype(int) for v in video_keys]
+    kp2d_detected = np.array([(TopDownPerson & v).fetch1('keypoints')[:total_frames] for v in video_keys])
+    
+    def make_frames(video_idx):
+
+        video = videos[video_idx]
+        cap = cv2.VideoCapture(video)
+        bbox_fn = bbox_fns[video_idx]
+        bbox = bboxes[video_idx]
+
+        results = []
+
+        if video_idx == 0:
+            iter = tqdm(range(total_frames), desc=f'Extracting frames {recording_fn}')
+        else:
+            iter = range(total_frames)
+
+        for frame_idx in iter:
+            _, frame = cap.read()
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            
+            frame = draw_keypoints(frame, keypoints2d[video_idx, frame_idx], radius=6, color=(125, 125, 255), threshold=0.75)
+            frame = draw_keypoints(frame, kp2d_detected[video_idx, frame_idx], radius=4, color=(255, 80, 80), border_color=(64, 20, 20), threshold=0.75)
+            frame = bbox_fn(frame, frame_idx, width=2, color=(0, 0, 255))
+            frame = crop_image_bbox(frame, bbox[frame_idx], target_size=(portrait_width, int(portrait_width * 1920 / 1080)), dilate=dilate)[0]
+
+            results.append(frame)
+            
+        cap.release()
+        os.remove(video)
+        
+        return results
+
+    # use multithreading futures to run make_frames for each video in parallel and collate teh results
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        results = list(executor.map(make_frames, range(len(video_keys))))
+
+    def images_to_grid(images, n_cols=5):
+        n_rows = int(np.ceil(len(images) / n_cols))
+        grid = np.zeros((n_rows * images[0].shape[0], n_cols * images[0].shape[1], 3), dtype=np.uint8)
+        for i, img in enumerate(images):
+            row = i // n_cols
+            col = i % n_cols
+            grid[row * img.shape[0]:(row + 1) * img.shape[0], col * img.shape[1]:(col + 1) * img.shape[1], :] = img
+        return grid
+
+    # collate the results into a grid
+    results = [images_to_grid(r) for r in zip(*results)]
+
+    # write the collated frames into a video matching the original frame rate using opencv VideoWriter
+    fd, filename = tempfile.mkstemp(suffix=".mp4")
+    os.close(fd)
+
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    writer = cv2.VideoWriter(filename, fourcc, fps, (results[0].shape[1], results[0].shape[0]))
+    for frame in tqdm(results, desc='Writing'):
+        writer.write(cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
+    writer.release()
+
+    from pose_pipeline.utils.video_format import compress
+    filename = compress(filename)
+    
+    if return_results:
+        return filename, results
+    return filename

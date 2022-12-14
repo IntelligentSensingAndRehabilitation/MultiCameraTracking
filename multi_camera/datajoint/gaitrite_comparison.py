@@ -5,7 +5,7 @@ import pandas as pd
 
 from typing import List
 
-from pose_pipeline import VideoInfo, TopDownPerson
+from pose_pipeline import PersonBbox, VideoInfo, TopDownPerson
 from .multi_camera_dj import MultiCameraRecording, SingleCameraVideo, PersonKeypointReconstruction
 from ..analysis.gaitrite_comparison import parse_gaitrite, extract_traces, find_best_alignment, get_offset_range
 
@@ -125,7 +125,7 @@ def match_data(filename):
     return t0[0], df, vid_key
 
 
-def fetch_data(key):
+def fetch_data(key, only_present=False):
     """ Fetch the data from the database for a given GaitRite recording. """
 
     t0, df = (GaitRiteRecording & key).fetch1('gaitrite_t0', 'gaitrite_dataframe')
@@ -133,14 +133,20 @@ def fetch_data(key):
 
     timestamps = (VideoInfo * SingleCameraVideo * MultiCameraRecording & key).fetch('timestamps')[0]
     kp3d = (PersonKeypointReconstruction & key).fetch1('keypoints3d')
+    present = (PersonBbox * SingleCameraVideo & key).fetch('present', limit=1)[0]
+
+    # when the terminal frame is missing
+    timestamps = timestamps[:kp3d.shape[0]]
+    present = present[:kp3d.shape[0]]
+    dt = np.array([(t-timestamps[0]).total_seconds() for t in timestamps])
+    if only_present:
+        kp3d = kp3d[present]
+        dt = dt[present]
 
     target_names = ['Left Heel', 'Left Big Toe', 'Right Heel', 'Right Big Toe']
     joint_idx = np.array([TopDownPerson.joint_names('MMPoseHalpe').index(j) for j in target_names])
     kp3d = kp3d[:, joint_idx]
     
-    # when the terminal frame is missing
-    timestamps = timestamps[:kp3d.shape[0]]
-    dt = np.array([(t-timestamps[0]).total_seconds() for t in timestamps])
 
     gaitrite_offset = (t0 - timestamps[0]).total_seconds()
     df['First Contact Time'] += gaitrite_offset
@@ -148,7 +154,7 @@ def fetch_data(key):
 
     return dt, kp3d, df
 
-def plot_data(key, t_offset=None):
+def plot_data(key, t_offset=None, axis=0):
 
     import matplotlib.pyplot as plt
 
@@ -170,16 +176,21 @@ def plot_data(key, t_offset=None):
                 np.stack([df[field].values, df[field].values]), style, markersize=size)
 
     for i in range(4):
-        ax[i].plot(dt, kp3d[:, i, 0], 'k')
+        ax[i].plot(dt, kp3d[:, i, axis], 'k')
 
+        if axis == 0:
+            a = 'X'
+        elif axis == 1:
+            a = 'Y'
+        
         if i == 0:
-            step_plot(df.loc[idx], 'Heel X', 'bo-', 2.5, ax[i])
+            step_plot(df.loc[idx], f'Heel {a}', 'bo-', 2.5, ax[i])
         elif i == 1:
-            step_plot(df.loc[idx], 'Toe X', 'bo-', 1.5, ax[i])
+            step_plot(df.loc[idx], f'Toe {a}', 'bo-', 1.5, ax[i])
         elif i == 2:
-            step_plot(df.loc[~idx], 'Heel X', 'ro-', 2.5, ax[i])
+            step_plot(df.loc[~idx], f'Heel {a}', 'ro-', 2.5, ax[i])
         elif i == 3:
-            step_plot(df.loc[~idx], 'Toe X', 'ro-', 1.5, ax[i])
+            step_plot(df.loc[~idx], f'Toe {a}', 'ro-', 1.5, ax[i])
 
 
 def import_gaitrite_files(subject_id: int, filenames: List[str]):
