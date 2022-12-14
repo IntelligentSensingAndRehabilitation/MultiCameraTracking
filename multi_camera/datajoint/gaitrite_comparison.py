@@ -191,6 +191,15 @@ def plot_data(key, t_offset=None, axis=0):
             step_plot(df.loc[~idx], f'Heel {a}', 'ro-', 2.5, ax[i])
         elif i == 3:
             step_plot(df.loc[~idx], f'Toe {a}', 'ro-', 1.5, ax[i])
+    ax[0].set_title('Left Heel')
+    ax[1].set_title('Left Toe')
+    ax[2].set_title('Right Heel')
+    ax[3].set_title('Right Toe')
+    ax[2].set_xlabel('Time (s)')
+    ax[3].set_xlabel('Time (s)')
+    ax[0].set_ylabel('Position (mm)')
+    ax[2].set_ylabel('Position (mm)')
+    plt.tight_layout()
 
 
 def import_gaitrite_files(subject_id: int, filenames: List[str]):

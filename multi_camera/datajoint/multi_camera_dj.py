@@ -180,7 +180,7 @@ class PersonKeypointReprojectionVideo(dj.Computed):
     def make(self, key):
         from ..utils.visualization import make_reprojection_video
 
-        key["output_video"] = make_reprojection_video((CalibratedRecording * MultiCameraRecording & key).fetch("KEY"))
+        key["output_video"] = make_reprojection_video(key)
         self.insert1(key)
 
     @property
