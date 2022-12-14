@@ -343,7 +343,44 @@ def compute_camera_weights(pair_error, permutations, sigma, N):
 
     return weight
 
-def robust_triangulate_points(camera_params, points2d, sigma=100, threshold=0.1, return_weights=False):
+@jit
+def weiszfeld_geometric_median(points, max_iter=100, epsilon=1e-2):
+    """ Compute the geometric median of a set of points using the Weiszfeld algorithm
+    
+        Parameters:
+            points (array) : points to compute the median of. Shape (N, D)
+            max_iter (int) : maximum number of iterations to run
+            epsilon (float): convergence threshold
+    """
+
+    # Initialize the median to the mean of the points]
+    weight_mask = jnp.any(jnp.isnan(points), axis=-1) == False
+    median = jnp.nanmean(points, axis=0)
+
+    def update(carry):
+        i, median, _ = carry
+
+        # Compute the distances from each point to the median
+        distances = jnp.linalg.norm(points - median, axis=1)
+
+        # Compute the weights for each point based on its distance from the median
+        weights = 1 / (distances + 1e-9)
+        #weights = weights * weight_mask
+
+        # Update the median to the weighted mean of the points
+        new_median = jnp.nansum(points * weights[:, np.newaxis], axis=0) / jnp.nansum(weights)
+
+        return i+1, new_median, median
+
+    def cond_fun(carry):
+        i, median, last_median = carry
+        break_condition = (i > max_iter) | (jnp.linalg.norm(median - last_median) < epsilon)
+        return ~break_condition
+
+    return jax.lax.while_loop(cond_fun, update, (0, median, median * 0.0))[1]
+
+
+def robust_triangulate_points(camera_params, points2d, sigma=150, threshold=0.5, return_weights=False, return_all=False):
     r""" Triangulate points robustly accounting for agreement
 
         This algorithm is based http://arxiv.org/abs/2203.15865
@@ -377,8 +414,10 @@ def robust_triangulate_points(camera_params, points2d, sigma=100, threshold=0.1,
     # mark points below threshold as nan so they are entirely excluded, then work out
     # distance from cluster median centers
     point3d_clusters = point3d_clusters.at[point3d_clusters[..., -1] < threshold, :-1].set(jnp.nan)
-    deltas = point3d_clusters - jnp.nanmedian(point3d_clusters, axis=0, keepdims=True)
-    pair_error = np.linalg.norm(deltas[..., :-1], axis=-1)
+    _geometric_median = vmap(vmap(weiszfeld_geometric_median, in_axes=1, out_axes=0), in_axes=1, out_axes=0)
+    centers = _geometric_median(point3d_clusters[..., :-1])
+    deltas = point3d_clusters[..., :-1] - centers
+    pair_error = np.linalg.norm(deltas, axis=-1)
 
     # slightly ugly, would be nice to magically broadcast across arbitrary shapes, but
     # compute weights for each camera based on median distance from cluster center
@@ -391,6 +430,9 @@ def robust_triangulate_points(camera_params, points2d, sigma=100, threshold=0.1,
     conf3d = robust_points3d[..., -1]
     conf3d = jnp.where(jnp.isnan(conf3d), 0, conf3d)
     robust_points3d = robust_points3d.at[..., -1].set(conf3d)
+
+    if return_all:
+        return robust_points3d, robust_weights, point3d_clusters, pair_error, deltas, centers
 
     if return_weights:
         return robust_points3d, robust_weights

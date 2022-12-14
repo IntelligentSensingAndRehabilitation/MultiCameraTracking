@@ -316,8 +316,8 @@ def make_reprojection_video(key: dict, portrait_width=288, dilate=1.1, return_re
     from pose_pipeline.utils.visualization import video_overlay, draw_keypoints
 
     recording_fn = (MultiCameraRecording & key).fetch1("video_base_filename")
-    videos = Video * MultiCameraRecording * PersonKeypointReconstruction * SingleCameraVideo & key
-    video_keys, video_camera_name = (SingleCameraVideo.proj() * videos).fetch("KEY", "camera_name")
+    videos = TopDownPerson * MultiCameraRecording * PersonKeypointReconstruction * SingleCameraVideo & key
+    video_keys, video_camera_name = (TopDownPerson.proj() * SingleCameraVideo.proj() * videos).fetch("KEY", "camera_name")
     keypoints3d = (PersonKeypointReconstruction & key).fetch1("keypoints3d")
     camera_params, camera_names = (Calibration & key).fetch1("camera_calibration", "camera_names")
     assert camera_names == video_camera_name.tolist(), "Videos don't match cameras in calibration"
@@ -350,7 +350,7 @@ def make_reprojection_video(key: dict, portrait_width=288, dilate=1.1, return_re
     # add low confidence when clipped
     keypoints2d = np.concatenate([keypoints2d, ~clipped[..., None] * 1.0], axis=-1)
 
-    total_frames = kp3d.shape[0]
+    total_frames = min(kp3d.shape[0], np.min((VideoInfo & video_keys).fetch('num_frames')))
 
     bbox_fns = [PersonBbox.get_overlay_fn(v) for v in video_keys]
     videos = [(BlurredVideo & v).fetch1("output_video") for v in video_keys]
