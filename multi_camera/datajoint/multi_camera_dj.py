@@ -41,10 +41,25 @@ class CalibratedRecording(dj.Manual):
 
 
 @schema
+class PersonKeypointReconstructionMethodLookup(dj.Lookup):
+    definition = """
+    reconstruction_method      : int
+    ---
+    reconstruction_method_name : varchar(50)
+    """
+    contents = [
+        {"reconstruction_method": 0, "reconstruction_method_name": "RobustTriangulation"},
+        {"reconstruction_method": 1, "reconstruction_method_name": "Optimization"},
+        {"reconstruction_method": 2, "reconstruction_method_name": "ImplicitOptimization"},
+    ]
+
+
+@schema
 class PersonKeypointReconstructionMethod(dj.Manual):
     definition = """
     # Use the TopDownKeypoints to reconstruct the 3D joint locations
     -> CalibratedRecording
+    -> PersonKeypointReconstructionMethodLookup
     tracking_method     :  int
     top_down_method     :  int
     """
@@ -69,18 +84,19 @@ class PersonKeypointReconstruction(dj.Computed):
         recording_key = (MultiCameraRecording & key).fetch1("KEY")
         top_down_method = key["top_down_method"]
         tracking_method = key["tracking_method"]
+        reconstruction_method = key["reconstruction_method"]
 
         camera_calibration, camera_names = (Calibration & calibration_key).fetch1("camera_calibration", "camera_names")
         keypoints, camera_name = (
             TopDownPerson * SingleCameraVideo * MultiCameraRecording
-            & {"top_down_method": top_down_method, "tracking_method": tracking_method}
+            & {"top_down_method": top_down_method, "tracking_method": tracking_method, "reconstruction_method": reconstruction_method}
             & recording_key
         ).fetch("keypoints", "camera_name")
 
-        # need to add zeros to missing frames since they occurr at the beginning of videos
+        # need to add zeros for missing frames at the end
         N = max([len(k) for k in keypoints])
         keypoints = np.stack(
-            [np.concatenate([np.zeros([N - k.shape[0], *k.shape[1:]]), k], axis=0) for k in keypoints], axis=0
+            [np.concatenate([k, np.zeros([N - k.shape[0], *k.shape[1:]])], axis=0) for k in keypoints], axis=0
         )
 
         print(len(camera_names), len(camera_name))
@@ -88,11 +104,42 @@ class PersonKeypointReconstruction(dj.Computed):
         order = [list(camera_name).index(c) for c in camera_names]
         points2d = np.stack([keypoints[o][:, :, :] for o in order], axis=0)
 
-        points3d, camera_weights = robust_triangulate_points(camera_calibration, points2d, return_weights=True)
+        joints = TopDownPerson.joint_names('MMPoseHalpe')
+        pairs = [('Left Ankle', 'Left Knee'), ('Right Ankle', 'Right Knee'),
+                ('Left Knee', 'Left Hip'), ('Right Knee', 'Right Hip'),
+                ('Left Hip', 'Pelvis'), ('Right Hip', 'Pelvis'),
+                ('Left Shoulder', 'Left Elbow'), ('Right Shoulder', 'Right Elbow'),
+                ('Left Elbow', 'Left Wrist'), ('Right Elbow', 'Right Wrist')]
+        skeleton = np.array([(joints.index(p[0]), joints.index(p[1])) for p in pairs])            
+
+        # select method for reconstruction
+        reconstruction_method_name = (PersonKeypointReconstructionMethodLookup & key).fetch1("reconstruction_method_name")
+        if reconstruction_method_name == "RobustTriangulation":
+            points3d, camera_weights = robust_triangulate_points(camera_calibration, points2d, return_weights=True)
+
+        elif reconstruction_method_name == "Optimization":
+            from ..analysis.optimize_reconstruction import optimize_trajectory
+            points2d = points2d[:, :, :27]            
+            points3d, camera_weights = optimize_trajectory(points2d, camera_calibration, 'explicit', 
+                                                           return_weights=True, delta_weight=0.05, skeleton_weight=1.0,
+                                                           skeleton=skeleton, max_iters=2000)
+
+        elif reconstruction_method_name == "ImplicitOptimization":
+            from ..analysis.optimize_reconstruction import optimize_trajectory
+            points2d = points2d[:, :, :27]            
+            points3d, camera_weights = optimize_trajectory(points2d, camera_calibration, 'implicit', 
+                                                           return_weights=True, delta_weight=0.05, skeleton_weight=0.0,
+                                                           skeleton=skeleton, max_iters=20000, robust_loss=True)
+
         key["keypoints3d"] = np.array(points3d)
         key["camera_weights"] = np.array(camera_weights)
 
         self.insert1(key, allow_direct_insert=True)
+
+    @property
+    def key_source(self):
+        # awkward double negative is to ensure all BlurredVideo views were computed
+        return PersonKeypointReconstructionMethod - (SingleCameraVideo - TopDownPerson).proj()
 
     def export_trc(self, filename, z_offset=0, start=None, end=None, return_points=False, smooth=False):
         """Export an OpenSim file of marker trajectories

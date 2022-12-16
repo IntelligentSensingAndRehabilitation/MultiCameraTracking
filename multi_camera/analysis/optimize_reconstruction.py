@@ -25,21 +25,13 @@ from typing import Callable, Sequence, Tuple
 
 Initializer = Callable
 
-from functools import partial
-import dataclasses
-import time
-
-import tqdm
-import numpy as np
-
 import jax
 import jax.numpy as jnp
-import flax
 import flax.linen as nn
 from flax.core import freeze, unfreeze
-from flax.core.frozen_dict import FrozenDict
-
 import optax
+
+from .camera import reprojection_error
 
 
 class KeypointTrajectory(nn.Module):
@@ -88,7 +80,6 @@ class ImplicitTrajectory(nn.Module):
     spatial_dims: int = 3
     dense_init: Initializer = nn.initializers.lecun_normal()
     concatenate_layers = 4
-    #dense_init: Initializer = nn.initializers.zeros
 
     @nn.compact
     def __call__(self, input_points):
@@ -109,28 +100,21 @@ class ImplicitTrajectory(nn.Module):
         x = x.reshape(-1, self.joints, self.spatial_dims)
         return x * 1000.0
 
-        #grid = self.param('grid', self.dense_init, (2, self.joints * self.spatial_dims))
-        #x = input_points * grid[0, None, :] + grid[1, None, :]
-        #x = x.reshape(-1, self.joints, self.spatial_dims)
-        #return x * 1000.0
 
-
-def huber(x, delta=5.0, max=30, max_slope=0.1):
+def huber(x, delta=5.0, max=10000, max_slope=0.1):
     """Huber loss."""
     x = jnp.where(jnp.abs(x) < delta, 0.5 * x ** 2, delta * (jnp.abs(x) - 0.5 * delta))
-    #x = jnp.where(x > max, (x - max) * max_slope + max, x)
+    x = jnp.where(x > max, (x - max) * max_slope + max, x)
     return x
 
 
-def reprojection_loss(camera_params, points2d, points3d):
+def reprojection_loss(camera_params, points2d, points3d, huber_max=100):
     """Compute reprojection loss between 3D keypoints and 2D keypoints."""
-
-    from .camera import reprojection_error
 
     conf = points2d[..., -1]
     conf = conf * (conf > 0.5) # only use points with high confidence
     loss = reprojection_error(camera_params, points2d[..., :-1], points3d)
-    delta = huber(jnp.linalg.norm(loss, axis=-1))
+    delta = huber(jnp.linalg.norm(loss, axis=-1), max=huber_max)
     #delta = jnp.linalg.norm(loss, axis=-1)
     return jnp.nanmean(delta * conf)
 
@@ -142,6 +126,7 @@ def smoothness_loss(points3d):
     delta = jnp.linalg.norm(delta, axis=-1)
     return jnp.nanmean(delta)
 
+
 def relative_smoothness_loss(points3d, reference_joint):
     """Compute reprojection loss between 3D keypoints and 2D keypoints."""
 
@@ -149,6 +134,7 @@ def relative_smoothness_loss(points3d, reference_joint):
     delta = jnp.diff(points3d, axis=0)
     delta = jnp.linalg.norm(delta, axis=-1)
     return jnp.nanmean(delta)
+
 
 def skeleton_loss(points3d, skeleton_pairs):
     """Compute change in limb lengths"""
@@ -166,15 +152,19 @@ def build_explicit(keypoints2d):
     model = KeypointTrajectory(size=n_steps, joints=n_joints, spatial_dims=3)
     return model
 
+
 def build_implicit(keypoints2d):
     n_steps = keypoints2d.shape[1]
     n_joints = keypoints2d.shape[2]
-    model = ImplicitTrajectory(size=n_steps, features=[64, 128, 256, 512, 1024], joints=n_joints, spatial_dims=3)
+    model = ImplicitTrajectory(size=n_steps, features=[128, 256, 512, 512, 512], joints=n_joints, spatial_dims=3)
     return model
 
 
 def optimize_trajectory(keypoints2d, camera_params, method='implicit', skeleton=None, learning_rate=None, 
-                       return_model=False, seed=0, skeleton_weight=0.0, delta_weight=0.0, max_iters=2000): 
+                       return_model=False, seed=0, skeleton_weight=0.0, delta_weight=0.0, max_iters=2000,
+                       robust_loss=False, tolerance=1e-7, camera_weight_distance=20, return_weights=False):
+
+    from .camera import robust_triangulate_points
 
     if method == 'implicit':
         model = build_implicit(keypoints2d)
@@ -187,14 +177,19 @@ def optimize_trajectory(keypoints2d, camera_params, method='implicit', skeleton=
         else:
             learning_rate = 1e-1
 
-    x = np.arange(keypoints2d.shape[1])[:, None]
+    x = jnp.arange(keypoints2d.shape[1])[:, None]
 
     variables = model.init(jax.random.PRNGKey(seed), x)
+
+    # use robust triangulation to determine weights
+    if not robust_loss:
+        _, camera_weights = robust_triangulate_points(camera_params, keypoints2d, return_weights=True)
+        keypoints2d = jnp.concatenate([keypoints2d[..., :-1], camera_weights[..., None]], axis=-1) 
 
     @jax.jit
     def loss_fn(variables, delta_weight=delta_weight, skeleton_weight=skeleton_weight):
         pred = model.apply(variables, x)
-        l_repro = reprojection_loss(camera_params, keypoints2d, pred)
+        l_repro = reprojection_loss(camera_params, keypoints2d, pred, huber_max=100 if robust_loss else 10000)
         l_delta = smoothness_loss(pred) #+ relative_smoothness_loss(pred, 19) # pelvis
         if skeleton is None:
             l_skeleton = 0.0
@@ -206,14 +201,31 @@ def optimize_trajectory(keypoints2d, camera_params, method='implicit', skeleton=
     opt_state = tx.init(variables)
     loss_grad_fn = jax.value_and_grad(loss_fn)
 
-    for i in range(max_iters):    
-        loss_val, grads = loss_grad_fn(variables)
+    @jax.jit
+    def training_step(variables, opt_state):
+        loss_val, grads = loss_grad_fn(variables) #, huber_max=100 if i > max_iters // 2 else 1000)
         updates, opt_state = tx.update(grads, opt_state)
         variables = optax.apply_updates(variables, updates)
-        if i % np.ceil(max_iters / 20) == 0:
+        return variables, opt_state, loss_val
+
+    last_loss = []
+    for i in range(max_iters):    
+        variables, opt_state, loss_val = training_step(variables, opt_state)
+        
+        if i % jnp.ceil(max_iters / 20) == 0:
             print('Loss step {}: '.format(i), loss_val)
+        if not robust_loss and i > 200 and (jnp.abs(last_loss[i-150] - loss_val) / loss_val) < tolerance:
+            print('Converged after {} steps'.format(i))
+            break
+        last_loss.append(loss_val)
 
     pred = model.apply(variables, x)
+
+    # compute camera weights
+    conf = keypoints2d[..., -1]
+    loss = reprojection_error(camera_params, keypoints2d[..., :-1], pred)
+    delta = jnp.linalg.norm(loss, axis=-1)
+    camera_weights = jnp.exp(-delta / camera_weight_distance) * conf
 
     if return_model:
 
@@ -223,6 +235,9 @@ def optimize_trajectory(keypoints2d, camera_params, method='implicit', skeleton=
         if skeleton is not None:
             losses['skeleton_loss'] = skeleton_loss(pred, skeleton)
 
-        return pred, {'model': model, 'variables': variables, **losses}
+        return pred, camera_weights, {'model': model, 'variables': variables, **losses}
     
+    if return_weights:
+        return pred, camera_weights
+
     return pred
