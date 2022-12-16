@@ -127,7 +127,7 @@ def procrustes(measurements, ground_truth):
     return R, t
 
 
-def extract_traces(timestamps: np.array, keypoints: np.array, gaitrite_df: pd.DataFrame, t_offset: float = 0.0, cutoff=2):
+def extract_traces(timestamps: np.array, keypoints: np.array, gaitrite_df: pd.DataFrame, t_offset: float = 0.0, cutoff=3):
     """Extract the traces from the Gaitrite dataframe.
 
         Args:
@@ -143,10 +143,14 @@ def extract_traces(timestamps: np.array, keypoints: np.array, gaitrite_df: pd.Da
     left_intervals = gaitrite_df.loc[idx, ['First Contact Time', 'Last Contact Time']].values + t_offset
     left_heel_gt = gaitrite_df.loc[idx, ['Heel X', 'Heel Y']].values
     left_toe_gt = gaitrite_df.loc[idx, ['Toe X', 'Toe Y']].values
+    left_heel_gt = np.concatenate([left_heel_gt, np.zeros([left_heel_gt.shape[0], 1])], axis=1)
+    left_toe_gt = np.concatenate([left_toe_gt, np.zeros([left_toe_gt.shape[0], 1])], axis=1)
 
     right_intervals = gaitrite_df.loc[~idx, ['First Contact Time', 'Last Contact Time']].values + t_offset
     right_heel_gt = gaitrite_df.loc[~idx, ['Heel X', 'Heel Y']].values
     right_toe_gt = gaitrite_df.loc[~idx, ['Toe X', 'Toe Y']].values
+    right_heel_gt = np.concatenate([right_heel_gt, np.zeros([right_heel_gt.shape[0], 1])], axis=1)
+    right_toe_gt = np.concatenate([right_toe_gt, np.zeros([right_toe_gt.shape[0], 1])], axis=1)
 
     left_heel_measurement, s1, = trace_average(timestamps, keypoints[:, 0, :cutoff], left_intervals)
     left_toe_measurement, s2, = trace_average(timestamps, keypoints[:, 1, :cutoff], left_intervals)
@@ -271,7 +275,7 @@ def align_steps_multiple_trials(data, t_offsets):
     for i, (d, t) in enumerate(zip(data, t_offsets)):
         c = d[1][..., -1:]
         c = extract_traces(d[0], c, d[2], t, 1)
-        d = extract_traces(*d, t, 2)
+        d = extract_traces(*d, t, 3)
 
         trial = np.concatenate([d['left_heel_gt'], d['left_toe_gt'], d['right_heel_gt'], d['right_toe_gt']], axis=0)
         gt.append(trial)

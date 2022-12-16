@@ -84,7 +84,7 @@ class GaitRiteRecordingAlignment(dj.Computed):
     def make(self, key):
         R, t = (GaitRiteCalibration & key).fetch1('r', 't')
         dt, kp3d, df = fetch_data(key)
-        kp3d_aligned = kp3d[:, :, :2] @ R + t
+        kp3d_aligned = kp3d[:, :, :3] @ R + t
         kp3d_confidence = kp3d[..., -1:]
 
         def get_residuals(t_offset):
@@ -164,11 +164,20 @@ def plot_data(key, t_offset=None, axis=0):
     dt, kp3d, df = fetch_data(key)
     R, t = (GaitRiteCalibration & key).fetch1('r', 't')
 
-    kp3d = kp3d[:, :, :2] @ R + t
+    if kp3d.shape[-1] == 4:
+        conf = kp3d[:, :, 3]
+    else:
+        conf = np.ones_like(kp3d[:, :, 0])
+    if len(t) == 3:
+        kp3d = kp3d[:, :, :3] @ R + t
+    else:
+        print(kp3d.shape, R.shape)
+        kp3d = kp3d[:, :, :2] @ R + t
+    
 
     idx = df['Left Foot']
 
-    _, ax = plt.subplots(2,2,sharex=True,sharey=True)
+    _, ax = plt.subplots(3,2,sharex=True,sharey=True)
     ax = ax.flatten()
 
     def step_plot(df, field, style, size, ax):
@@ -182,6 +191,8 @@ def plot_data(key, t_offset=None, axis=0):
             a = 'X'
         elif axis == 1:
             a = 'Y'
+        else:
+            continue
         
         if i == 0:
             step_plot(df.loc[idx], f'Heel {a}', 'bo-', 2.5, ax[i])
@@ -191,12 +202,20 @@ def plot_data(key, t_offset=None, axis=0):
             step_plot(df.loc[~idx], f'Heel {a}', 'ro-', 2.5, ax[i])
         elif i == 3:
             step_plot(df.loc[~idx], f'Toe {a}', 'ro-', 1.5, ax[i])
+
+    ax[4].plot(dt, conf[:, 0] * 5000, 'b')
+    ax[4].plot(dt, conf[:, 2] * 5000, 'r')
+    ax[5].plot(dt, conf[:, 1] * 5000, 'b')
+    ax[5].plot(dt, conf[:, 3] * 5000, 'r')
+
     ax[0].set_title('Left Heel')
     ax[1].set_title('Left Toe')
     ax[2].set_title('Right Heel')
     ax[3].set_title('Right Toe')
-    ax[2].set_xlabel('Time (s)')
-    ax[3].set_xlabel('Time (s)')
+    ax[4].set_ylabel('Confidence')
+    ax[5].set_ylabel('Confidence')
+    ax[4].set_xlabel('Time (s)')
+    ax[5].set_xlabel('Time (s)')
     ax[0].set_ylabel('Position (mm)')
     ax[2].set_ylabel('Position (mm)')
     plt.tight_layout()
