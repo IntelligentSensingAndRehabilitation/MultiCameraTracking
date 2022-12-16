@@ -65,46 +65,82 @@ class GaitRiteCalibration(dj.Computed):
     """
 
     def make(self, key):
-        recording_keys = (GaitRiteRecording & key).fetch('KEY')
+        recording_keys = (GaitRiteRecording * PersonKeypointReconstruction & key & "reconstruction_method=0").fetch(
+            "KEY"
+        )
         data = [fetch_data(k) for k in recording_keys]
         R, t, t_offsets, best_score = find_best_alignment(data)
 
         self.insert1(dict(**key, r=R, t=t, t_offsets=t_offsets, score=best_score))
-        
+
+    @property
+    def key_source(self):
+        """Only calibrate if all the reconstruction methods are computed"""
+        return GaitRiteSession - (GaitRiteRecording - PersonKeypointReconstruction & "reconstruction_method=0").proj()
+
+
 @schema
 class GaitRiteRecordingAlignment(dj.Computed):
     definition = """
     -> GaitRiteCalibration
     -> GaitRiteRecording
+    -> PersonKeypointReconstruction
     ---
     t_offset               : float
     residuals              : longblob
     """
 
     def make(self, key):
-        R, t = (GaitRiteCalibration & key).fetch1('r', 't')
+        R, t = (GaitRiteCalibration & key).fetch1("r", "t")
         dt, kp3d, df = fetch_data(key)
         kp3d_aligned = kp3d[:, :, :3] @ R + t
         kp3d_confidence = kp3d[..., -1:]
 
         def get_residuals(t_offset):
             d = extract_traces(dt, kp3d_aligned, df, t_offset)
-            gt = np.concatenate([d['left_heel_gt'], d['right_heel_gt'], d['left_toe_gt'], d['right_toe_gt']], axis=0)
-            measurements = np.concatenate([d['left_heel_measurement'], d['right_heel_measurement'],  d['left_toe_measurement'], d['right_toe_measurement']], axis=0)
+            gt = np.concatenate([d["left_heel_gt"], d["right_heel_gt"], d["left_toe_gt"], d["right_toe_gt"]], axis=0)
+            measurements = np.concatenate(
+                [
+                    d["left_heel_measurement"],
+                    d["right_heel_measurement"],
+                    d["left_toe_measurement"],
+                    d["right_toe_measurement"],
+                ],
+                axis=0,
+            )
             return measurements - gt
 
         def get_score(t_offset):
             d = extract_traces(dt, kp3d_aligned, df, t_offset)
             c = extract_traces(dt, kp3d_confidence, df, t_offset, 1)
 
-            gt = np.concatenate([d['left_heel_gt'], d['right_heel_gt'], d['left_toe_gt'], d['right_toe_gt']], axis=0)
-            measurements = np.concatenate([d['left_heel_measurement'], d['right_heel_measurement'],  d['left_toe_measurement'], d['right_toe_measurement']], axis=0)
-            noise = np.concatenate([d['left_heel_range'], d['right_heel_range'], d['left_toe_range'], d['right_toe_range']])
+            gt = np.concatenate([d["left_heel_gt"], d["right_heel_gt"], d["left_toe_gt"], d["right_toe_gt"]], axis=0)
+            measurements = np.concatenate(
+                [
+                    d["left_heel_measurement"],
+                    d["right_heel_measurement"],
+                    d["left_toe_measurement"],
+                    d["right_toe_measurement"],
+                ],
+                axis=0,
+            )
+            noise = np.concatenate(
+                [d["left_heel_range"], d["right_heel_range"], d["left_toe_range"], d["right_toe_range"]]
+            )
 
-            confidence = np.concatenate([c['left_heel_measurement'], c['right_heel_measurement'],  c['left_toe_measurement'], c['right_toe_measurement']], axis=0)
+            confidence = np.concatenate(
+                [
+                    c["left_heel_measurement"],
+                    c["right_heel_measurement"],
+                    c["left_toe_measurement"],
+                    c["right_toe_measurement"],
+                ],
+                axis=0,
+            )
 
-            return np.nansum(np.abs(measurements - gt) * confidence) / (1e-9 + np.nansum(confidence)) + \
-                   np.nansum(noise * confidence) / (1e-9 + np.nansum(confidence))
+            return np.nansum(np.abs(measurements - gt) * confidence) / (1e-9 + np.nansum(confidence)) + np.nansum(
+                noise * confidence
+            ) / (1e-9 + np.nansum(confidence))
 
         offset_range = get_offset_range(dt, df)
         t_offsets = np.arange(offset_range[0], offset_range[1], 0.03)
@@ -113,123 +149,127 @@ class GaitRiteRecordingAlignment(dj.Computed):
         residuals = get_residuals(t_offset)
 
         self.insert1(dict(**key, t_offset=t_offset, residuals=residuals))
-        
+
 
 def match_data(filename):
 
     t0, df = parse_gaitrite(filename)
 
     delta_t = f'ABS(TIMESTAMP(recording_timestamps) - TIMESTAMP("{t0[0]}"))'
-    vid_key = MultiCameraRecording.proj(x=delta_t).fetch('KEY', 'x', order_by='x ASC', limit=1, as_dict=True)[0]
+    vid_key = MultiCameraRecording.proj(x=delta_t).fetch("KEY", "x", order_by="x ASC", limit=1, as_dict=True)[0]
 
     return t0[0], df, vid_key
 
 
 def fetch_data(key, only_present=False):
-    """ Fetch the data from the database for a given GaitRite recording. """
+    """Fetch the data from the database for a given GaitRite recording."""
 
-    t0, df = (GaitRiteRecording & key).fetch1('gaitrite_t0', 'gaitrite_dataframe')
+    t0, df = (GaitRiteRecording & key).fetch1("gaitrite_t0", "gaitrite_dataframe")
     df = pd.DataFrame(df)
 
-    timestamps = (VideoInfo * SingleCameraVideo * MultiCameraRecording & key).fetch('timestamps')[0]
-    kp3d = (PersonKeypointReconstruction & key).fetch1('keypoints3d')
-    present = (PersonBbox * SingleCameraVideo & key).fetch('present', limit=1)[0]
+    df[["Heel Y", "Toe Y"]] = df[["Heel Y", "Toe Y"]] * -1
+    timestamps = (VideoInfo * SingleCameraVideo * MultiCameraRecording & key).fetch("timestamps")[0]
+    kp3d = (PersonKeypointReconstruction & key).fetch1("keypoints3d")
+    present = (PersonBbox * SingleCameraVideo & key).fetch("present", limit=1)[0]
 
     # when the terminal frame is missing
-    timestamps = timestamps[:kp3d.shape[0]]
-    present = present[:kp3d.shape[0]]
-    dt = np.array([(t-timestamps[0]).total_seconds() for t in timestamps])
+    timestamps = timestamps[: kp3d.shape[0]]
+    present = present[: kp3d.shape[0]]
+    dt = np.array([(t - timestamps[0]).total_seconds() for t in timestamps])
     if only_present:
         kp3d = kp3d[present]
         dt = dt[present]
 
-    target_names = ['Left Heel', 'Left Big Toe', 'Right Heel', 'Right Big Toe']
-    joint_idx = np.array([TopDownPerson.joint_names('MMPoseHalpe').index(j) for j in target_names])
+    target_names = ["Left Heel", "Left Big Toe", "Right Heel", "Right Big Toe"]
+    joint_idx = np.array([TopDownPerson.joint_names("MMPoseHalpe").index(j) for j in target_names])
     kp3d = kp3d[:, joint_idx]
-    
 
     gaitrite_offset = (t0 - timestamps[0]).total_seconds()
-    df['First Contact Time'] += gaitrite_offset
-    df['Last Contact Time'] += gaitrite_offset
+    df["First Contact Time"] += gaitrite_offset
+    df["Last Contact Time"] += gaitrite_offset
 
     return dt, kp3d, df
+
 
 def plot_data(key, t_offset=None, axis=0):
 
     import matplotlib.pyplot as plt
 
     if t_offset is None:
-        t_offset = (GaitRiteRecordingAlignment & key).fetch1('t_offset')
+        t_offset = (GaitRiteRecordingAlignment & key).fetch1("t_offset")
 
     dt, kp3d, df = fetch_data(key)
-    R, t = (GaitRiteCalibration & key).fetch1('r', 't')
+    R, t = (GaitRiteCalibration & key).fetch1("r", "t")
 
     if kp3d.shape[-1] == 4:
         conf = kp3d[:, :, 3]
     else:
         conf = np.ones_like(kp3d[:, :, 0])
-    if len(t) == 3:
+    if R.shape[0] == 3:
         kp3d = kp3d[:, :, :3] @ R + t
     else:
-        print(kp3d.shape, R.shape)
+        print(kp3d.shape, R.shape, t.shape)
         kp3d = kp3d[:, :, :2] @ R + t
-    
 
-    idx = df['Left Foot']
+    idx = df["Left Foot"]
 
-    _, ax = plt.subplots(3,2,sharex=True,sharey=True)
+    _, ax = plt.subplots(3, 2, sharex=True, sharey=True)
     ax = ax.flatten()
 
     def step_plot(df, field, style, size, ax):
-        ax.plot(df[['First Contact Time', 'Last Contact Time']].T + t_offset, 
-                np.stack([df[field].values, df[field].values]), style, markersize=size)
+        ax.plot(
+            df[["First Contact Time", "Last Contact Time"]].T + t_offset,
+            np.stack([df[field].values, df[field].values]),
+            style,
+            markersize=size,
+        )
 
     for i in range(4):
-        ax[i].plot(dt, kp3d[:, i, axis], 'k')
+        ax[i].plot(dt, kp3d[:, i, axis], "k")
 
         if axis == 0:
-            a = 'X'
+            a = "X"
         elif axis == 1:
-            a = 'Y'
+            a = "Y"
         else:
             continue
-        
+
         if i == 0:
-            step_plot(df.loc[idx], f'Heel {a}', 'bo-', 2.5, ax[i])
+            step_plot(df.loc[idx], f"Heel {a}", "bo-", 2.5, ax[i])
         elif i == 1:
-            step_plot(df.loc[idx], f'Toe {a}', 'bo-', 1.5, ax[i])
+            step_plot(df.loc[idx], f"Toe {a}", "bo-", 1.5, ax[i])
         elif i == 2:
-            step_plot(df.loc[~idx], f'Heel {a}', 'ro-', 2.5, ax[i])
+            step_plot(df.loc[~idx], f"Heel {a}", "ro-", 2.5, ax[i])
         elif i == 3:
-            step_plot(df.loc[~idx], f'Toe {a}', 'ro-', 1.5, ax[i])
+            step_plot(df.loc[~idx], f"Toe {a}", "ro-", 1.5, ax[i])
 
-    ax[4].plot(dt, conf[:, 0] * 5000, 'b')
-    ax[4].plot(dt, conf[:, 2] * 5000, 'r')
-    ax[5].plot(dt, conf[:, 1] * 5000, 'b')
-    ax[5].plot(dt, conf[:, 3] * 5000, 'r')
+    ax[4].plot(dt, conf[:, 0] * 5000, "b")
+    ax[4].plot(dt, conf[:, 2] * 5000, "r")
+    ax[5].plot(dt, conf[:, 1] * 5000, "b")
+    ax[5].plot(dt, conf[:, 3] * 5000, "r")
 
-    ax[0].set_title('Left Heel')
-    ax[1].set_title('Left Toe')
-    ax[2].set_title('Right Heel')
-    ax[3].set_title('Right Toe')
-    ax[4].set_ylabel('Confidence')
-    ax[5].set_ylabel('Confidence')
-    ax[4].set_xlabel('Time (s)')
-    ax[5].set_xlabel('Time (s)')
-    ax[0].set_ylabel('Position (mm)')
-    ax[2].set_ylabel('Position (mm)')
+    ax[0].set_title("Left Heel")
+    ax[1].set_title("Left Toe")
+    ax[2].set_title("Right Heel")
+    ax[3].set_title("Right Toe")
+    ax[4].set_ylabel("Confidence")
+    ax[5].set_ylabel("Confidence")
+    ax[4].set_xlabel("Time (s)")
+    ax[5].set_xlabel("Time (s)")
+    ax[0].set_ylabel("Position (mm)")
+    ax[2].set_ylabel("Position (mm)")
     plt.tight_layout()
 
 
 def import_gaitrite_files(subject_id: int, filenames: List[str]):
-    """ Import GaitRite files into the database. 
-    
-        This expects all the filenames correspond to one subject, but nothing
-        about the code will enforce this.
+    """Import GaitRite files into the database.
 
-        Args:
-            subject_id (int): The subject ID to associate with the files.
-            filenames (List[str]): The list of GaitRite files to import.
+    This expects all the filenames correspond to one subject, but nothing
+    about the code will enforce this.
+
+    Args:
+        subject_id (int): The subject ID to associate with the files.
+        filenames (List[str]): The list of GaitRite files to import.
     """
 
     data = [match_data(filename) for filename in filenames]
@@ -245,10 +285,10 @@ def import_gaitrite_files(subject_id: int, filenames: List[str]):
         # insert the recordings
         for filename, (t0, df, vid_key) in zip(filenames, data):
 
-            x = vid_key.pop('x')
+            x = vid_key.pop("x")
 
             if np.abs(x) > 10:
-                print(f'Skipping {filename} due to large time offset: {x} seconds')
+                print(f"Skipping {filename} due to large time offset: {x} seconds")
                 continue
 
             # update the key with the video key
@@ -257,11 +297,12 @@ def import_gaitrite_files(subject_id: int, filenames: List[str]):
             # get the filename without extension without from the full path
             stripped_filename = os.path.split(os.path.splitext(filename)[0])[1]
             print(stripped_filename)
-            
+
             # convert the pandas dataframe to a list of dictionaries:
-            df_dict = df.to_dict('records')
+            df_dict = df.to_dict("records")
 
             print(key)
 
-            GaitRiteRecording.insert1(dict(**key, gaitrite_filename=stripped_filename, 
-                                      gaitrite_dataframe=df_dict, gaitrite_t0=t0))
+            GaitRiteRecording.insert1(
+                dict(**key, gaitrite_filename=stripped_filename, gaitrite_dataframe=df_dict, gaitrite_t0=t0)
+            )
