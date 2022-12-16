@@ -33,6 +33,9 @@ def bilevel_optimization(
     massKg=60,
 ):
 
+    if not os.path.exists(output_path):
+        os.mkdir(output_path)
+
     model_path = os.path.split(model_name)[0]
     print(f"Model name: {model_name}, model path: {model_path}")
     print(f"trc_file_path: {trc_file_path}")
@@ -48,16 +51,19 @@ def bilevel_optimization(
         customOsim.skeleton.setScaleGroupUniformScaling(customOsim.skeleton.getBodyNode("hand_r"))
     customOsim.skeleton.autogroupSymmetricPrefixes("ulna", "radius")
 
+    # 7. Process the trial
     fitter = nimble.biomechanics.MarkerFitter(customOsim.skeleton, customOsim.markersMap)
-    fitter.setInitialIKSatisfactoryLoss(0.05)
+    fitter.setInitialIKSatisfactoryLoss(0.005)
     # fitter.setInitialIKSatisfactoryLoss(0.5)
     fitter.setInitialIKMaxRestarts(50)
     # fitter.setIterationLimit(500)
     fitter.setIterationLimit(500)
+
+    print(customOsim.trackingMarkers)
     fitter.setTrackingMarkers(customOsim.trackingMarkers)
 
     # This is 1.0x the values in the default code
-    fitter.setRegularizeAnatomicalMarkerOffsets(1.0)
+    fitter.setRegularizeAnatomicalMarkerOffsets(10.0)
     # This is 1.0x the default value
     fitter.setRegularizeTrackingMarkerOffsets(0.05)
     # These are 2x the values in the default code
@@ -101,7 +107,7 @@ def bilevel_optimization(
     }
     gauss = gauss.condition(observedValues)
     anthropometrics.setDistribution(gauss)
-    fitter.setAnthropometricPrior(anthropometrics, 0.001)
+    fitter.setAnthropometricPrior(anthropometrics, 0.1)
 
     results: List[nimble.biomechanics.MarkerInitialization] = fitter.runMultiTrialKinematicsPipeline(
         [t.markerTimesteps for t in trcFiles],
@@ -139,7 +145,12 @@ def bilevel_optimization(
     for i in range(customOsim.skeleton.getNumBodyNodes()):
         bodyNode: nimble.dynamics.BodyNode = customOsim.skeleton.getBodyNode(i)
         # Now that we adjust the markers BEFORE we rescale the body, we don't want to rescale the marker locations at all
-        bodyScalesMap[bodyNode.getName()] = [1, 1, 1]  # bodyNode.getScale()
+        bodyScalesMap[bodyNode.getName()] = [
+            1.0 / bodyNode.getScale()[0],
+            1.0 / bodyNode.getScale()[1],
+            1.0 / bodyNode.getScale()[2],
+        ]
+
     markerOffsetsMap: Dict[str, Tuple[str, np.ndarray]] = {}
     markerNames: List[str] = []
     for k in fitMarkers:
@@ -152,6 +163,14 @@ def bilevel_optimization(
         markerOffsetsMap,
         os.path.join(output_path, "results", "Models", "unscaled_but_with_optimized_markers.osim"),
     )
+    # copy the Geometry directory from the model_path to the output_path
+    if os.path.exists(os.path.join(model_path, "Geometry")) and ~os.path.exists(
+        os.path.join(output_path, "results", "Models", "Geometry")
+    ):
+        shutil.copytree(
+            os.path.join(model_path, "Geometry"),
+            os.path.join(output_path, "results", "Models", "Geometry"),
+        )
 
     print(markerOffsetsMap)
 
@@ -217,7 +236,7 @@ def bilevel_optimization(
         process.wait()
 
 
-def process_reconstruction_keys(keys: List[dict]):
+def process_reconstruction_keys(keys: List[dict], output_path: str):
     """Covert 3D reconstructions into OpenSim results
 
     Args:
@@ -249,21 +268,33 @@ def process_reconstruction_keys(keys: List[dict]):
                 (PersonKeypointReconstruction & key).export_trc(file_path)
                 trc_files.append(file_path)
 
-            model_file = (
-                "/home/jcotton/projects/pose/MultiCameraTracking/notebooks/biomechanics_fit/Rajagopal2015_Halpe.osim"
-            )
-            output_path = "/home/jcotton/projects/pose/MultiCameraTracking/notebooks/biomechanics_fit/results2/"
-
+            # Get location of this file
+            model_path = os.path.dirname(os.path.abspath(__file__))
+            model_path = os.path.join(model_path, "..", "..", "..")
+            model_file = os.path.join(model_path, "models/Rajagopal2015_Halpe/Rajagopal2015_Halpe.osim")
             bilevel_optimization(trc_files, output_path, model_file, run_opensim=True)
 
 
 if __name__ == "__main__":
+    # e.g. python multi_camera/analysis/biomechanics/bilevel_optimization.py --filenames p309_gaitrite_20221024_143143 p309_gaitrite_20221024_143323 video_base_filename --output results/p309
+    import argparse
     from multi_camera.datajoint.multi_camera_dj import *
     from multi_camera.analysis.biomechanics import bilevel_optimization
 
-    keys = (
-        PersonKeypointReconstruction * MultiCameraRecording
-        & '(video_base_filename LIKE "p309_gaitrite_20221024_143143" or video_base_filename LIKE "p309_gaitrite_20221024_143323" or video_base_filename LIKE "p309_gaitrite_20221024_143627")and reconstruction_method=2'
-        # & 'video_base_filename LIKE "p310%" and reconstruction_method=0'
-    ).fetch("KEY")
-    bilevel_optimization.process_reconstruction_keys(keys)
+    parser = argparse.ArgumentParser(description="Output OpenSim files from 3D reconstructions")
+    parser.add_argument("filenames", nargs="+", help="List of filenames to process")
+    parser.add_argument("-t", "--top_down", type=int, default=2, help="Top down method to use")
+    parser.add_argument("-r", "--reconstruction_method", type=int, default=2, help="Reconstruction method to use")
+    parser.add_argument("-o", "--output", type=str, default="results", help="Output directory for results")
+    args = parser.parse_args()
+    print(args)
+    print([fn for fn in args.filenames])
+    keys = [
+        (
+            PersonKeypointReconstruction * MultiCameraRecording
+            & f'video_base_filename LIKE "{fn}" and reconstruction_method={args.reconstruction_method} and top_down_method={args.top_down}'
+        ).fetch("KEY")
+        for fn in args.filenames
+    ]
+    print(keys)
+    bilevel_optimization.process_reconstruction_keys(keys, args.output)
