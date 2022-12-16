@@ -57,20 +57,24 @@ def project_distortion(camera_params, i, points):
     # last dimension ensures broadcasting works
     transformed = (extri @ points[..., None])[..., 0]
 
-    xp = transformed[..., 0] / transformed[..., 2]
-    yp = transformed[..., 1] / transformed[..., 2]
+    distance = jnp.abs(transformed[..., 2])
+
+    xp = transformed[..., 0] / jnp.where(distance < 1e-1, 1e6, transformed[..., 2])
+    yp = transformed[..., 1] / jnp.where(distance < 1e-1, 1e6, transformed[..., 2])
     r2 = xp ** 2 + yp ** 2
+    r2 = jnp.where(jnp.isnan(r2), 0, r2)
 
-    dist = camera_params['dist'][i]
-    gamma = 1.0 + dist[0] * r2 + dist[1] * r2**2 + dist[4] * r2**3
+    dist = jnp.take(camera_params['dist'], i, axis=0)
+    gamma = 1.0 + dist[0] * r2 #+ dist[1] * r2**2 + dist[4] * r2**3
 
-    xpp = gamma * xp + 2*dist[2]*xp*yp + dist[3] * (r2 + 2 * xp**2)
-    ypp = gamma * yp + dist[2]*(r2 + 2*yp**2) + 2*dist[3]*xp*yp
+    xpp = gamma * xp #+ 2*dist[2]*xp*yp + dist[3] * (r2 + 2 * xp**2)
+    ypp = gamma * yp #+ dist[2]*(r2 + 2*yp**2) + 2*dist[3]*xp*yp
 
     points = jnp.stack([xpp, ypp, jnp.ones(xpp.shape)], axis=-1)
     proj = (intri @ points[..., None])[..., 0]
     # remove affine dimension and get u,v coordinates
-    return proj[..., :-1] / proj[..., -1:]
+
+    return jnp.where(jnp.abs(proj[..., -1:]) < 1e-6, 0, proj[..., :-1] / proj[..., -1:])
 
 
 @jit
