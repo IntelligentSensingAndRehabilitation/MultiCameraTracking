@@ -122,13 +122,13 @@ class PersonKeypointReconstruction(dj.Computed):
             points2d = points2d[:, :, :27]            
             points3d, camera_weights = optimize_trajectory(points2d, camera_calibration, 'explicit', 
                                                            return_weights=True, delta_weight=0.05, skeleton_weight=1.0,
-                                                           skeleton=skeleton, max_iters=2000)
+                                                           skeleton=skeleton, max_iters=20000, robust_loss=True)
 
         elif reconstruction_method_name == "ImplicitOptimization":
             from ..analysis.optimize_reconstruction import optimize_trajectory
             points2d = points2d[:, :, :27]            
             points3d, camera_weights = optimize_trajectory(points2d, camera_calibration, 'implicit', 
-                                                           return_weights=True, delta_weight=0.05, skeleton_weight=0.0,
+                                                           return_weights=True, delta_weight=0.05, skeleton_weight=1.0,
                                                            skeleton=skeleton, max_iters=20000, robust_loss=True)
 
         key["keypoints3d"] = np.array(points3d)

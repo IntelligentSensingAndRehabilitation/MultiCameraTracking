@@ -162,7 +162,7 @@ def build_implicit(keypoints2d):
 
 def optimize_trajectory(keypoints2d, camera_params, method='implicit', skeleton=None, learning_rate=None, 
                        return_model=False, seed=0, skeleton_weight=0.0, delta_weight=0.0, max_iters=2000,
-                       robust_loss=False, tolerance=1e-7, camera_weight_distance=20, return_weights=False):
+                       robust_loss=False, return_confidence=True, tolerance=1e-7, camera_weight_distance=20, return_weights=False):
 
     from .camera import robust_triangulate_points
 
@@ -197,7 +197,10 @@ def optimize_trajectory(keypoints2d, camera_params, method='implicit', skeleton=
             l_skeleton = skeleton_loss(pred, skeleton)
         return l_repro + l_delta * delta_weight + l_skeleton * skeleton_weight
         
-    tx = optax.adam(learning_rate=learning_rate)
+    tx = optax.chain(
+        optax.adam(learning_rate=learning_rate),
+        optax.zero_nans(),
+        optax.clip_by_global_norm(1.0))
     opt_state = tx.init(variables)
     loss_grad_fn = jax.value_and_grad(loss_fn)
 
@@ -226,6 +229,10 @@ def optimize_trajectory(keypoints2d, camera_params, method='implicit', skeleton=
     loss = reprojection_error(camera_params, keypoints2d[..., :-1], pred)
     delta = jnp.linalg.norm(loss, axis=-1)
     camera_weights = jnp.exp(-delta / camera_weight_distance) * conf
+
+    if return_confidence:
+        conf3d = jnp.sum(camera_weights ** 2, axis=0) / jnp.sum(camera_weights, axis=0)
+        pred = jnp.concatenate([pred, conf3d[..., None]], axis=-1)
 
     if return_model:
 
