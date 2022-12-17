@@ -4,12 +4,6 @@ Marker Registration, and Inverse Kinematic Problems for Human Motion Reconstruct
 
 Code largely adopted from
 https://github.com/keenon/AddBiomechanics/blob/main/server/engine/engine.py
-
-It is a little awkward in palces as the system expects to pass data around as files. However
-this isn't a major issue since we will mostly want to load these results into OpenSim anyway.
-
-Nimble gets a bit flaky with Jupyter so also worth running this in a script. The default calling
-of this script allows filtering by a subject name and date.
 """
 
 import os
@@ -19,10 +13,8 @@ import numpy as np
 from typing import List, Tuple, Dict
 import nimblephysics as nimble
 
-# from nimblephysics.loader import absPath
 
-
-def bilevel_optimization(
+def fit_markers(
     markers: List[List[Dict]],
     model_name="Rajagopal2015_Halpe",
     sex="male",
@@ -40,7 +32,7 @@ def bilevel_optimization(
     fitter.setTriadsToTracking()
     fitter.setInitialIKSatisfactoryLoss(0.05)
     fitter.setInitialIKMaxRestarts(50)
-    fitter.setIterationLimit(300)
+    fitter.setIterationLimit(1000)
 
     # Create an anthropometric prior
     anthropometrics: nimble.biomechanics.Anthropometrics = nimble.biomechanics.Anthropometrics.loadFromFile(
@@ -69,8 +61,6 @@ def bilevel_optimization(
     gauss = gauss.condition(observedValues)
     anthropometrics.setDistribution(gauss)
     fitter.setAnthropometricPrior(anthropometrics, 0.1)
-
-    marker_names = list(customOsim.markersMap.keys())
 
     results = fitter.runMultiTrialKinematicsPipeline(
         markers,
@@ -101,31 +91,46 @@ def fetch_formatted_markers(key):
     return [map_frame(k) for k in kp3d]
 
 
-def save_results(results: List[nimble.biomechanics.MarkerInitialization], skeleton, output_path: str):
+def get_trial_performance(
+    result: nimble.biomechanics.MarkerInitialization, markers: List[Dict], skeleton: nimble.dynamics.Skeleton
+):
+    """Returns a dictionary of performance metrics for a single trial
+
+    Args:
+        result (nimble.biomechanics.MarkerInitialization): The result of a single trial
+        markers (List[Dict]): The markers for a single trial
+        skeleton (nimble.dynamics.Skeleton): The skeleton
+    Returns:
+        Dict: A dictionary of performance metrics
+    """
+
+    resultIK = nimble.biomechanics.IKErrorReport(skeleton, result.updatedMarkerMap, result.poses, markers)
+    return {
+        "averageRootMeanSquaredError": resultIK.averageRootMeanSquaredError,
+        "averageMaxError": resultIK.averageMaxError,
+        "getSortedMarkerRMSE": resultIK.getSortedMarkerRMSE(),
+    }
+
+
+def save_model(
+    model_name: str,
+    skeleton_definition: Dict,
+    output_path: str,
+    mass_kg: float = 60,
+    height_m: float = 1.7,
+):
+
+    if not os.path.exists(os.path.join(output_path, "Models")):
+        os.mkdir(os.path.join(output_path, "Models"))
+
+    # get path to this file
+    model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "NimbleModels")
+    model_file = os.path.join(model_path, model_name + ".osim")
+
     # Update custom skeleton
-    skeleton.setGroupScales(results[0].groupScales)
-    fitMarkers: Dict[str, Tuple[nimble.dynamics.BodyNode, np.ndarray]] = results[0].updatedMarkerMap
+    skeleton = reload_skeleton(model_name, skeleton_definition["group_scales"], skeleton_definition["marker_offsets"])
+    fitMarkers = skeleton_definition["marker_offsets"]
 
-    # 8.2. Write out the usable OpenSim results
-    if not os.path.exists(os.path.join(output_path, "results")):
-        os.mkdir(os.path.join(output_path, "results"))
-    if not os.path.exists(os.path.join(output_path, "results", "IK")):
-        os.mkdir(os.path.join(output_path, "results", "IK"))
-    if not os.path.exists(os.path.join(output_path, "results", "ID")):
-        os.mkdir(os.path.join(output_path, "results", "ID"))
-    if not os.path.exists(os.path.join(output_path, "results", "C3D")):
-        os.mkdir(os.path.join(output_path, "results", "C3D"))
-    if not os.path.exists(os.path.join(output_path, "results", "Models")):
-        os.mkdir(os.path.join(output_path, "results", "Models"))
-    # if exportMJCF and not os.path.exists(path+'results/MuJoCo'):
-    #    os.mkdir(path+'results/MuJoCo')
-    # if exportSDF and not os.path.exists(path+'results/SDF'):
-    #    os.mkdir(path+'results/SDF')
-    if not os.path.exists(os.path.join(output_path, "results", "MarkerData")):
-        os.mkdir(os.path.join(output_path, "results", "MarkerData"))
-
-    # 8.2.1. Adjusting marker locations
-    print("Adjusting marker locations on scaled OpenSim file", flush=True)
     bodyScalesMap: Dict[str, np.ndarray] = {}
     for i in range(skeleton.getNumBodyNodes()):
         bodyNode: nimble.dynamics.BodyNode = skeleton.getBodyNode(i)
@@ -137,90 +142,108 @@ def save_results(results: List[nimble.biomechanics.MarkerInitialization], skelet
         ]
 
     markerOffsetsMap: Dict[str, Tuple[str, np.ndarray]] = {}
-    markerNames: List[str] = []
-    for k in fitMarkers:
-        v = fitMarkers[k]
-        markerOffsetsMap[k] = (v[0].getName(), v[1])
-        markerNames.append(k)
+    for n, k in zip(skeleton.getBodyNodes(), fitMarkers):
+        markerOffsetsMap[k] = (n.getName(), fitMarkers[k])
+
+    print([n.getName() for n in skeleton.getBodyNodes()])
+    print(skeleton_definition["body_scale_map"].keys())
+    print(markerOffsetsMap.keys())
+    print(skeleton_definition["marker_offsets"].keys())
     nimble.biomechanics.OpenSimParser.moveOsimMarkers(
-        os.path.join(output_path, "fit_rational.osim"),
-        bodyScalesMap,
-        markerOffsetsMap,
-        os.path.join(output_path, "results", "Models", "unscaled_but_with_optimized_markers.osim"),
+        model_file,
+        skeleton_definition["body_scale_map"],
+        skeleton_definition["marker_offsets_map"],
+        os.path.join(output_path, "Models", "unscaled_but_with_optimized_markers.osim"),
     )
 
-    if False:
-        # copy the Geometry directory from the model_path to the output_path
-        if os.path.exists(os.path.join(model_path, "Geometry")) and ~os.path.exists(
-            os.path.join(output_path, "results", "Models", "Geometry")
-        ):
-            shutil.copytree(
-                os.path.join(model_path, "Geometry"),
-                os.path.join(output_path, "results", "Models", "Geometry"),
-            )
+    print(output_path)
 
-    print(markerOffsetsMap)
-
-    for trc_file, result in zip(trc_file_path, results):
-        trialName = os.path.split(trc_file)[1].split(".")[0]
-
-        trialProcessingResult = {}
-
-        resultIK = nimble.biomechanics.IKErrorReport(
-            customOsim.skeleton, fitMarkers, result.poses, trcFile.markerTimesteps
-        )
-        trialProcessingResult["autoAvgRMSE"] = resultIK.averageRootMeanSquaredError
-        trialProcessingResult["autoAvgMax"] = resultIK.averageMaxError
-        trialProcessingResult["markerErrors"] = resultIK.getSortedMarkerRMSE()
-
-        print(trialProcessingResult)
-
-        # Write out the .mot files
-        nimble.biomechanics.OpenSimParser.saveMot(
-            customOsim.skeleton,
-            os.path.join(output_path, "results/IK/" + trialName + "_ik.mot"),
-            trcFile.timestamps,
-            result.poses,
-        )
-        resultIK.saveCSVMarkerErrorReport(
-            os.path.join(output_path, "results/IK/" + trialName + "_ik_per_marker_error_report.csv")
-        )
-        # nimble.biomechanics.OpenSimParser.saveGRFMot(
-        #    os.path.join(path, 'results/ID/'+trialName+'_grf.mot'), trcFile.timestamps, forcePlates)
-        nimble.biomechanics.OpenSimParser.saveTRC(
-            os.path.join(output_path, "results/MarkerData/" + trialName + ".trc"),
-            trcFile.timestamps,
-            trcFile.markerTimesteps,
-        )
-        # if c3dFile is not None:
-        #    shutil.copyfile(trialPath + 'markers.c3d', path +
-        #                    'results/C3D/' + trialName + '.c3d')
-
-    # 8.2.2. Write the XML instructions for the OpenSim scaling tool
     nimble.biomechanics.OpenSimParser.saveOsimScalingXMLFile(
         "optimized_scale_and_markers",
-        customOsim.skeleton,
-        massKg,
-        heightM,
-        "Models/unscaled_but_with_optimized_markers.osim",
+        skeleton,
+        mass_kg,
+        height_m,
+        os.path.join(output_path, "Models", "unscaled_but_with_optimized_markers.osim"),
         "Unassigned",
-        "Models/optimized_scale_and_markers.osim",
-        os.path.join(output_path, "results", "Models", "rescaling_setup.xml"),
+        os.path.join(output_path, "Models", "optimized_scale_and_markers.osim"),
+        os.path.join(output_path, "Models", "rescaling_setup.xml"),
     )
 
-    if run_opensim:
-        # REQUIRES INSTALLING OpenSim on server
-        CMD = "LD_LIBRARY_PATH=/home/jcotton/projects/pose/opensim_dependencies_install/adol-c/lib64:/home/jcotton/projects/pose/opensim_dependencies_install/ipopt/lib/ /home/jcotton/projects/pose/opensim-core-install/bin/opensim-cmd"
-        # 8.2.3. Call the OpenSim scaling tool
-        command = (
-            "cd "
-            + os.path.join(output_path, "results")
-            + f" && {CMD} run-tool "
-            + os.path.join(output_path, "results/Models/rescaling_setup.xml")
-        )
-        print("Scaling OpenSim files: " + command, flush=True)
-        process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE)
-        process.wait()
+    # REQUIRES INSTALLING OpenSim on server
+    CMD = "LD_LIBRARY_PATH=/home/jcotton/projects/pose/opensim_dependencies_install/adol-c/lib64:/home/jcotton/projects/pose/opensim_dependencies_install/ipopt/lib/ /home/jcotton/projects/pose/opensim-core-install/bin/opensim-cmd"
+
+    # 8.2.3. Call the OpenSim scaling tool
+    # command = "cd " + os.path.join(output_path, "Models") + f" && {CMD} run-tool " + "rescaling_setup.xml"
+    command = f"{CMD} run-tool " + os.path.join(output_path, "Models", "rescaling_setup.xml")
+    print("Scaling OpenSim files: " + command, flush=True)
+    process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE)
+    process.wait()
+
+
+# kp, skeleton, kp, timestamps, trial, output_dir
+def save_trial(
+    poses: np.array,
+    skeleton: nimble.dynamics.Skeleton,
+    markers: List[Dict],
+    timestamps: List[float],
+    trial_name: str,
+    output_path: str,
+):
+    """Saves a single trial to disk
+
+    Args:
+        result (nimble.biomechanics.MarkerInitialization): The result of a single trial
+        skeleton (nimble.dynamics.Skeleton): The skeleton
+        markers (List[Dict]): The markers for a single trial
+        timestamps (List[float]): The timestamps for a single trial
+        trial_name (str): The name of the trial
+        output_path (str): The path to save the trial to
+    """
+
+    print(trial_name)
+    if not os.path.exists(os.path.join(output_path, "IK")):
+        os.mkdir(os.path.join(output_path, "IK"))
+    if not os.path.exists(os.path.join(output_path, "MarkerData")):
+        os.mkdir(os.path.join(output_path, "MarkerData"))
+
+    # Write out the .mot files
+    nimble.biomechanics.OpenSimParser.saveMot(
+        skeleton,
+        os.path.join(output_path, "IK/" + trial_name + "_ik.mot"),
+        timestamps,
+        poses.T,
+    )
+
+    nimble.biomechanics.OpenSimParser.saveTRC(
+        os.path.join(output_path, "MarkerData/" + trial_name + ".trc"),
+        timestamps,
+        markers,
+    )
+
+
+def reload_skeleton(model_name: str, body_scales_map, mass_kg=60, height_m=1.7):
+    """Reloads a skeleton from a model file
+
+    Args:
+        model_name (str): The name of the model
+        body_scales_map (Dict[str, np.ndarray]): The body scales map
+        marker_offset_map (Dict[str, Tuple[str, np.ndarray]]): The marker offset map
+        mass_kg (float): The mass of the model
+        height_m (float): The height of the model
+
+    Returns:
+        nimble.dynamics.Skeleton: The skeleton
+    """
+
+    # get path to this file
+    model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "NimbleModels")
+    model_file = os.path.join(model_path, model_name + ".osim")
+
+    # Update custom skeleton
+    skeleton = nimble.biomechanics.OpenSimParser.parseOsim(model_file).skeleton
+    skeleton.setGroupScales(body_scales_map)
+
+    return skeleton
 
 
 def process_reconstruction_keys(keys: List[dict], output_path: str):
@@ -229,37 +252,12 @@ def process_reconstruction_keys(keys: List[dict], output_path: str):
     Args:
         keys: List of keys to process. Should match PersonKeypointReconstruction
     """
-    from ...datajoint.multi_camera_dj import (
-        MultiCameraRecording,
-        PersonKeypointReconstruction,
-        PersonKeypointReconstructionMethodLookup,
-    )
-    from pose_pipeline import TopDownMethodLookup
-    import tempfile
 
-    reconstruction_method_name = np.unique(
-        (PersonKeypointReconstructionMethodLookup & keys).fetch("reconstruction_method_name")
-    )
-    assert len(reconstruction_method_name) == 1, "Multiple reconstruction methods found"
+    kps = [fetch_formatted_markers(k) for k in keys]
+    results, skeleton = bilevel_optimization(kps)
 
-    method_name = np.unique((TopDownMethodLookup & keys).fetch("top_down_method_name"))
-    assert len(method_name) == 1, "Multiple keypoint types found"
-
-    trc_files = []
-    if method_name == "MMPoseHalpe":
-        with tempfile.TemporaryDirectory() as temp_dir:
-
-            for key in keys:
-                fn = (MultiCameraRecording & key).fetch1("video_base_filename")
-                file_path = os.path.join(temp_dir, fn + ".trc")
-                (PersonKeypointReconstruction & key).export_trc(file_path)
-                trc_files.append(file_path)
-
-            # Get location of this file
-            model_path = os.path.dirname(os.path.abspath(__file__))
-            model_path = os.path.join(model_path, "..", "..", "..")
-            model_file = os.path.join(model_path, "models/Rajagopal2015_Halpe/Rajagopal2015_Halpe.osim")
-            bilevel_optimization(trc_files, output_path, model_file, run_opensim=True)
+    for result, kp in zip(results, kps):
+        print(get_trial_performance(result, kp, skeleton))
 
 
 if __name__ == "__main__":
