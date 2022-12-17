@@ -153,7 +153,7 @@ class PersonKeypointReconstruction(dj.Computed):
         """
 
         from pose_pipeline import TopDownPerson, VideoInfo
-        from multi_camera.analysis.opensim import normalize_marker_names, points3d_to_trc
+        from multi_camera.analysis.biomechanics.opensim import normalize_marker_names, points3d_to_trc
 
         method_name = (TopDownMethodLookup & self).fetch1("top_down_method_name")
         joint_names = TopDownPerson.joint_names(method_name)
@@ -413,7 +413,7 @@ class SMPLReconstruction(dj.Computed):
         """
 
         from pose_pipeline import TopDownPerson, VideoInfo
-        from multi_camera.analysis.opensim import normalize_marker_names, points3d_to_trc
+        from multi_camera.analysis.biomechanics.opensim import normalize_marker_names, points3d_to_trc
 
         joint_names = TopDownPerson.joint_names("OpenPose")
         joints3d = self.fetch1("joints3d")
