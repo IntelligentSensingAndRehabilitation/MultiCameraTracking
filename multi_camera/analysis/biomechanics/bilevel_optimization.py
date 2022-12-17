@@ -23,63 +23,24 @@ import nimblephysics as nimble
 
 
 def bilevel_optimization(
-    trc_file_path: List[str],
-    output_path: str,
-    model_name="/home/jcotton/projects/pose/MultiCameraTracking/notebooks/biomechanics_fit/Rajagopal2015_Halpe.osim",
-    model_path="/home/jcotton/projects/pose/MultiCameraTracking/notebooks/biomechanics_fit",
-    run_opensim=False,
+    markers: List[List[Dict]],
+    model_name="Rajagopal2015_Halpe",
     sex="male",
     heightM=1.7,
     massKg=60,
-):
+):  # -> Tuple(List[nimble.biomechanics.MarkerInitialization], nimble.dynamics.Skeleton):
 
-    if not os.path.exists(output_path):
-        os.mkdir(output_path)
+    # get path to this file
+    model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "NimbleModels")
+    model_file = os.path.join(model_path, model_name + ".osim")
 
-    model_path = os.path.split(model_name)[0]
-    print(f"Model name: {model_name}, model path: {model_path}")
-    print(f"trc_file_path: {trc_file_path}")
-    shutil.copy(model_name, os.path.join(output_path, "fit.osim"))
+    customOsim = nimble.biomechanics.OpenSimParser.parseOsim(model_file)
 
-    nimble.biomechanics.OpenSimParser.rationalizeJoints(
-        os.path.join(output_path, "fit.osim"), os.path.join(output_path, "fit_rational.osim")
-    )
-    customOsim = nimble.biomechanics.OpenSimParser.parseOsim(os.path.join(output_path, "fit_rational.osim"))
-
-    customOsim.skeleton.autogroupSymmetricSuffixes()
-    if customOsim.skeleton.getBodyNode("hand_r") is not None:
-        customOsim.skeleton.setScaleGroupUniformScaling(customOsim.skeleton.getBodyNode("hand_r"))
-    customOsim.skeleton.autogroupSymmetricPrefixes("ulna", "radius")
-
-    # 7. Process the trial
     fitter = nimble.biomechanics.MarkerFitter(customOsim.skeleton, customOsim.markersMap)
-    fitter.setInitialIKSatisfactoryLoss(0.005)
-    # fitter.setInitialIKSatisfactoryLoss(0.5)
+    fitter.setTriadsToTracking()
+    fitter.setInitialIKSatisfactoryLoss(0.05)
     fitter.setInitialIKMaxRestarts(50)
-    # fitter.setIterationLimit(500)
-    fitter.setIterationLimit(500)
-
-    print(customOsim.trackingMarkers)
-    fitter.setTrackingMarkers(customOsim.trackingMarkers)
-
-    # This is 1.0x the values in the default code
-    fitter.setRegularizeAnatomicalMarkerOffsets(10.0)
-    # This is 1.0x the default value
-    fitter.setRegularizeTrackingMarkerOffsets(0.05)
-    # These are 2x the values in the default code
-    # fitter.setMinSphereFitScore(3e-5 * 2)
-    # fitter.setMinAxisFitScore(6e-5 * 2)
-    fitter.setMinSphereFitScore(0.01)
-    fitter.setMinAxisFitScore(0.001)
-    # Default max joint weight is 0.5, so this is 2x the default value
-    fitter.setMaxJointWeight(1.0)
-
-    trcFiles = []
-    for trc_file in trc_file_path:
-        trcFile = nimble.biomechanics.OpenSimParser.loadTRC(trc_file)
-        trialErrorReport = fitter.generateDataErrorsReport(trcFile.markerTimesteps)
-        print(fitter.checkForEnoughMarkers(trcFile.markerTimesteps), trialErrorReport)
-        trcFiles.append(trcFile)
+    fitter.setIterationLimit(300)
 
     # Create an anthropometric prior
     anthropometrics: nimble.biomechanics.Anthropometrics = nimble.biomechanics.Anthropometrics.loadFromFile(
@@ -109,16 +70,40 @@ def bilevel_optimization(
     anthropometrics.setDistribution(gauss)
     fitter.setAnthropometricPrior(anthropometrics, 0.1)
 
-    results: List[nimble.biomechanics.MarkerInitialization] = fitter.runMultiTrialKinematicsPipeline(
-        [t.markerTimesteps for t in trcFiles],
+    marker_names = list(customOsim.markersMap.keys())
+
+    results = fitter.runMultiTrialKinematicsPipeline(
+        markers,
         nimble.biomechanics.InitialMarkerFitParams()
         .setMaxTrialsToUseForMultiTrialScaling(5)
         .setMaxTimestepsToUseForMultiTrialScaling(4000),
         150,
     )
 
+    return results, customOsim.skeleton
+
+
+def fetch_formatted_markers(key):
+    from pose_pipeline import TopDownPerson, TopDownMethodLookup
+    from multi_camera.datajoint.multi_camera_dj import PersonKeypointReconstruction
+    from multi_camera.analysis.biomechanics.opensim import normalize_marker_names
+
+    method_name = (TopDownMethodLookup & key).fetch1("top_down_method_name")
+    joint_names = TopDownPerson.joint_names(method_name)
+    joint_names = normalize_marker_names(joint_names)
+
+    kp3d = (PersonKeypointReconstruction & key).fetch1("keypoints3d")
+    kp3d = kp3d / 1000.0  # mm -> m
+
+    def map_frame(kp3d):
+        return {j: k[[1, 2, 0]] for j, k in zip(joint_names, kp3d)}
+
+    return [map_frame(k) for k in kp3d]
+
+
+def save_results(results: List[nimble.biomechanics.MarkerInitialization], skeleton, output_path: str):
     # Update custom skeleton
-    customOsim.skeleton.setGroupScales(results[0].groupScales)
+    skeleton.setGroupScales(results[0].groupScales)
     fitMarkers: Dict[str, Tuple[nimble.dynamics.BodyNode, np.ndarray]] = results[0].updatedMarkerMap
 
     # 8.2. Write out the usable OpenSim results
@@ -142,8 +127,8 @@ def bilevel_optimization(
     # 8.2.1. Adjusting marker locations
     print("Adjusting marker locations on scaled OpenSim file", flush=True)
     bodyScalesMap: Dict[str, np.ndarray] = {}
-    for i in range(customOsim.skeleton.getNumBodyNodes()):
-        bodyNode: nimble.dynamics.BodyNode = customOsim.skeleton.getBodyNode(i)
+    for i in range(skeleton.getNumBodyNodes()):
+        bodyNode: nimble.dynamics.BodyNode = skeleton.getBodyNode(i)
         # Now that we adjust the markers BEFORE we rescale the body, we don't want to rescale the marker locations at all
         bodyScalesMap[bodyNode.getName()] = [
             1.0 / bodyNode.getScale()[0],
@@ -163,14 +148,16 @@ def bilevel_optimization(
         markerOffsetsMap,
         os.path.join(output_path, "results", "Models", "unscaled_but_with_optimized_markers.osim"),
     )
-    # copy the Geometry directory from the model_path to the output_path
-    if os.path.exists(os.path.join(model_path, "Geometry")) and ~os.path.exists(
-        os.path.join(output_path, "results", "Models", "Geometry")
-    ):
-        shutil.copytree(
-            os.path.join(model_path, "Geometry"),
-            os.path.join(output_path, "results", "Models", "Geometry"),
-        )
+
+    if False:
+        # copy the Geometry directory from the model_path to the output_path
+        if os.path.exists(os.path.join(model_path, "Geometry")) and ~os.path.exists(
+            os.path.join(output_path, "results", "Models", "Geometry")
+        ):
+            shutil.copytree(
+                os.path.join(model_path, "Geometry"),
+                os.path.join(output_path, "results", "Models", "Geometry"),
+            )
 
     print(markerOffsetsMap)
 
@@ -293,7 +280,7 @@ if __name__ == "__main__":
         (
             PersonKeypointReconstruction * MultiCameraRecording
             & f'video_base_filename LIKE "{fn}" and reconstruction_method={args.reconstruction_method} and top_down_method={args.top_down}'
-        ).fetch("KEY")
+        ).fetch1("KEY")
         for fn in args.filenames
     ]
     print(keys)
