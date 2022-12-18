@@ -151,6 +151,17 @@ class GaitRiteRecordingAlignment(dj.Computed):
         self.insert1(dict(**key, t_offset=t_offset, residuals=residuals))
 
 
+def get_walking_time_range(key, margin=0.5):
+
+    assert len(GaitRiteRecordingAlignment & key) <= 1, "Select only one recording"
+    assert len(GaitRiteRecordingAlignment & key) == 1, f"No GaitRiteAlignment found for  {key}"
+    t_offset = (GaitRiteRecordingAlignment & key).fetch1("t_offset")
+    dt, kp3d, df = fetch_data(key)
+    first_step = df["First Contact Time"].min()
+    last_step = df["Last Contact Time"].max()
+    return first_step + t_offset - margin, last_step + t_offset + margin
+
+
 def match_data(filename):
 
     t0, df = parse_gaitrite(filename)

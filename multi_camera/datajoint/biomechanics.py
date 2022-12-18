@@ -43,6 +43,7 @@ class BiomechanicalReconstruction(dj.Computed):
         -> GaitRiteRecording
         -> PersonKeypointReconstruction
         ---
+        timestamps             : longblob
         poses                  : longblob
         joint_centers          : longblob
         average_rmse           : float
@@ -67,8 +68,32 @@ class BiomechanicalReconstruction(dj.Computed):
 
         print(f"Processing {len(trials)} trials with key: {key}")
 
-        kps = [bilevel_optimization.fetch_formatted_markers(k) for k in trials]
+        kps = []
+        trial_timestamps = []
+        for k in trials:
+            import numpy as np
+            from pose_pipeline import VideoInfo
+            from .multi_camera_dj import SingleCameraVideo, MultiCameraRecording
+            from .gaitrite_comparison import get_walking_time_range
+
+            k = k.copy()
+            k["reconstruction_method"] = 0
+            trange = get_walking_time_range(k)
+
+            kp = bilevel_optimization.fetch_formatted_markers(k)
+            dt = (MultiCameraRecording & k).fetch_timestamps()
+
+            valid = np.logical_and(dt >= trange[0], dt <= trange[1])
+            kp = [kp for kp, v in zip(kp, valid) if v]
+            dt = dt[valid]
+
+            kps.append(kp)
+            trial_timestamps.append(dt)
+
+        # kps = [bilevel_optimization.fetch_formatted_markers(k) for k in trials]
         results, skeleton = bilevel_optimization.fit_markers(kps, key["model_name"])
+
+        print(f"Received {len(results)} results from {len(kps)} trials")
 
         body_scale_map = {}
         for i in range(skeleton.getNumBodyNodes()):
@@ -94,11 +119,12 @@ class BiomechanicalReconstruction(dj.Computed):
         }
         self.insert1({"skeleton_definition": skeleton_defintion, **key})
 
-        for t, r, kp in zip(trials, results, kps):
+        for t, r, kp, dt in zip(trials, results, kps, trial_timestamps):
             t = (PersonKeypointReconstruction & t).fetch1("KEY")
             t.update(key)
             trial_key = t.copy()
 
+            t["timestamps"] = dt
             t["poses"] = r.poses.T
             t["joint_centers"] = r.jointCenters.reshape(-1, 3, r.jointCenters.shape[-1]).T
 
@@ -127,13 +153,22 @@ class BiomechanicalReconstruction(dj.Computed):
         bilevel_optimization.save_model(model_name, skeleton_def, output_dir)
 
         for key in (self.Trial & self).fetch("KEY"):
+            from .gaitrite_comparison import get_walking_time_range
+
             kp = bilevel_optimization.fetch_formatted_markers(key)
             trial = (MultiCameraRecording & key).fetch1("video_base_filename")
             poses = (self.Trial & key).fetch1("poses")
+            timestamps = (self.Trial & key).fetch1("timestamps")
 
-            timestamps = (VideoInfo * SingleCameraVideo & key).fetch("timestamps")[0]
-            timestamps = np.array([(t - timestamps[0]).total_seconds() for t in timestamps])
-            timestamps = timestamps[: len(kp)]
+            # export the same time range to match the fitting filter
+            key = key.copy()
+            key["reconstruction_method"] = 0
+            trange = get_walking_time_range(key)
+
+            kp = bilevel_optimization.fetch_formatted_markers(key)
+            dt = (MultiCameraRecording & key).fetch_timestamps()
+            valid = np.logical_and(dt >= trange[0], dt <= trange[1])
+            kp = [kp for kp, v in zip(kp, valid) if v]
 
             bilevel_optimization.save_trial(poses, skeleton, kp, timestamps, trial, output_dir)
 

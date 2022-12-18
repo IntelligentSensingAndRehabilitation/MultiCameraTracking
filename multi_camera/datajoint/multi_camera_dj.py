@@ -18,6 +18,14 @@ class MultiCameraRecording(dj.Manual):
     video_base_filename : varchar(100)   # base name for the videos without serial prefix
     """
 
+    def fetch_timestamps(self):
+        assert len(self) == 1, "Only fetch timestamps for one recording at a time"
+        timestamps = (SingleCameraVideo * VideoInfo & self).fetch("timestamps")
+        N = min([len(t) for t in timestamps])
+        timestamps = timestamps[0]
+        dt = np.array([(t - timestamps[0]).total_seconds() for t in timestamps])
+        return dt[:N]
+
 
 @schema
 class SingleCameraVideo(dj.Manual):
