@@ -89,7 +89,11 @@ class PersonKeypointReconstruction(dj.Computed):
         camera_calibration, camera_names = (Calibration & calibration_key).fetch1("camera_calibration", "camera_names")
         keypoints, camera_name = (
             TopDownPerson * SingleCameraVideo * MultiCameraRecording
-            & {"top_down_method": top_down_method, "tracking_method": tracking_method, "reconstruction_method": reconstruction_method}
+            & {
+                "top_down_method": top_down_method,
+                "tracking_method": tracking_method,
+                "reconstruction_method": reconstruction_method,
+            }
             & recording_key
         ).fetch("keypoints", "camera_name")
 
@@ -104,32 +108,61 @@ class PersonKeypointReconstruction(dj.Computed):
         order = [list(camera_name).index(c) for c in camera_names]
         points2d = np.stack([keypoints[o][:, :, :] for o in order], axis=0)
 
-        joints = TopDownPerson.joint_names('MMPoseHalpe')
-        pairs = [('Left Ankle', 'Left Knee'), ('Right Ankle', 'Right Knee'),
-                ('Left Knee', 'Left Hip'), ('Right Knee', 'Right Hip'),
-                ('Left Hip', 'Pelvis'), ('Right Hip', 'Pelvis'),
-                ('Left Shoulder', 'Left Elbow'), ('Right Shoulder', 'Right Elbow'),
-                ('Left Elbow', 'Left Wrist'), ('Right Elbow', 'Right Wrist')]
-        skeleton = np.array([(joints.index(p[0]), joints.index(p[1])) for p in pairs])            
+        joints = TopDownPerson.joint_names("MMPoseHalpe")
+        pairs = [
+            ("Left Ankle", "Left Knee"),
+            ("Right Ankle", "Right Knee"),
+            ("Left Knee", "Left Hip"),
+            ("Right Knee", "Right Hip"),
+            ("Left Hip", "Pelvis"),
+            ("Right Hip", "Pelvis"),
+            ("Left Shoulder", "Left Elbow"),
+            ("Right Shoulder", "Right Elbow"),
+            ("Left Elbow", "Left Wrist"),
+            ("Right Elbow", "Right Wrist"),
+            ("Left Heel", "Left Big Toe"),
+            ("Right Heel", "Right Big Toe"),
+        ]
+        skeleton = np.array([(joints.index(p[0]), joints.index(p[1])) for p in pairs])
 
         # select method for reconstruction
-        reconstruction_method_name = (PersonKeypointReconstructionMethodLookup & key).fetch1("reconstruction_method_name")
+        reconstruction_method_name = (PersonKeypointReconstructionMethodLookup & key).fetch1(
+            "reconstruction_method_name"
+        )
         if reconstruction_method_name == "RobustTriangulation":
             points3d, camera_weights = robust_triangulate_points(camera_calibration, points2d, return_weights=True)
 
         elif reconstruction_method_name == "Optimization":
             from ..analysis.optimize_reconstruction import optimize_trajectory
-            points2d = points2d[:, :, :27]            
-            points3d, camera_weights = optimize_trajectory(points2d, camera_calibration, 'explicit', 
-                                                           return_weights=True, delta_weight=0.05, skeleton_weight=1.0,
-                                                           skeleton=skeleton, max_iters=20000, robust_loss=True)
+
+            points2d = points2d[:, :, :27]
+            points3d, camera_weights = optimize_trajectory(
+                points2d,
+                camera_calibration,
+                "explicit",
+                return_weights=True,
+                delta_weight=0.05,
+                skeleton_weight=1.0,
+                skeleton=skeleton,
+                max_iters=20000,
+                robust_loss=True,
+            )
 
         elif reconstruction_method_name == "ImplicitOptimization":
             from ..analysis.optimize_reconstruction import optimize_trajectory
-            points2d = points2d[:, :, :27]            
-            points3d, camera_weights = optimize_trajectory(points2d, camera_calibration, 'implicit', 
-                                                           return_weights=True, delta_weight=0.05, skeleton_weight=1.0,
-                                                           skeleton=skeleton, max_iters=20000, robust_loss=True)
+
+            points2d = points2d[:, :, :27]
+            points3d, camera_weights = optimize_trajectory(
+                points2d,
+                camera_calibration,
+                "implicit",
+                return_weights=True,
+                delta_weight=0.05,
+                skeleton_weight=1.0,
+                skeleton=skeleton,
+                max_iters=20000,
+                robust_loss=True,
+            )
 
         key["keypoints3d"] = np.array(points3d)
         key["camera_weights"] = np.array(camera_weights)
