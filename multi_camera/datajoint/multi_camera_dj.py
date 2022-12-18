@@ -220,6 +220,43 @@ class PersonKeypointReconstruction(dj.Computed):
 
 
 @schema
+class PersonKeypointReprojectionQuality(dj.Computed):
+    definition = """
+    -> PersonKeypointReconstruction
+    ---
+    reprojection_pck       : float
+    reprojection_metrics   : longblob
+    """
+
+    def make(self, key):
+        from multi_camera.analysis import fit_quality
+
+        kp3d = (PersonKeypointReconstruction & key).fetch1("keypoints3d")
+        kp2d, video_camera_name = (TopDownPerson * SingleCameraVideo & key).fetch("keypoints", "camera_name")
+        camera_params, camera_names = (Calibration & key).fetch1("camera_calibration", "camera_names")
+        assert camera_names == video_camera_name.tolist(), "Videos don't match cameras in calibration"
+
+        # to keep it comparable, only analyzing the first 27 joints, also need to exclude 3D confidence
+        # for projection to work properly
+        kp3d = kp3d[:, :27, :3]
+
+        # handle cases where there are different numbers of frames
+        N = min([k.shape[0] for k in kp2d])
+        kp2d = np.stack([k[:N] for k in kp2d], axis=0)
+        kp2d = kp2d[:, :, : kp3d.shape[1]]
+
+        metrics, thresh, confidence = fit_quality.reprojection_quality(kp3d, camera_params, kp2d)
+
+        key["reprojection_pck"] = metrics[np.argmin(np.abs(thresh - 5)), np.argmin(np.abs(confidence - 0.5))]
+        key["reprojection_metrics"] = {
+            "metrics": np.array(metrics),
+            "thresh": np.array(thresh),
+            "confidence": np.array(confidence),
+        }
+        self.insert1(key)
+
+
+@schema
 class PersonKeypointReconstructionVideo(dj.Computed):
     definition = """
     # Video from reconstruction

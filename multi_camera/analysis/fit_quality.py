@@ -1,0 +1,25 @@
+import jax
+from jax import numpy as jnp
+from .camera import project_distortion
+
+
+def reprojection_quality(keypoints3d, camera_params, keypoints2d):
+
+    keypoints2d_proj = jnp.array(
+        [project_distortion(camera_params, i, keypoints3d) for i in range(camera_params["mtx"].shape[0])]
+    )
+
+    projection_error = jnp.linalg.norm(keypoints2d_proj - keypoints2d[..., :2], axis=-1)
+    keypoint_conf = keypoints2d[..., 2]
+
+    def pck(x, c):
+        return jnp.sum(jnp.logical_and(projection_error < x, keypoint_conf >= c)) / jnp.sum(keypoint_conf >= c)
+
+    thresh = jnp.linspace(0, 20.0, 100)
+    confidence = jnp.linspace(0, 0.9, 10)
+
+    perf = lambda x: jnp.array([pck(x, c) for c in confidence])
+
+    metrics = jax.vmap(perf)(thresh)
+
+    return metrics, thresh, confidence
