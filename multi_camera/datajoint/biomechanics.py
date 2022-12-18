@@ -21,7 +21,11 @@ class BiomechanicalReconstructionLookup(dj.Lookup):
     reconstruction_method   : int
     model_name              : varchar(255)
     """
-    contents = [(2, 2, "Rajagopal2015_Halpe")]
+    contents = [
+        (2, 0, "Rajagopal2015_Halpe"),
+        (2, 1, "Rajagopal2015_Halpe"),
+        (2, 2, "Rajagopal2015_Halpe"),
+    ]
 
 
 @schema

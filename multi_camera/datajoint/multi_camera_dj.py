@@ -73,12 +73,16 @@ class PersonKeypointReconstruction(dj.Computed):
     ---
     keypoints3d         : longblob
     camera_weights      : longblob
+    reprojection_loss   : float
+    skeleton_loss       : float
+    smoothness_loss     : float
     """
 
     def make(self, key):
 
         import numpy as np
         from ..analysis.camera import robust_triangulate_points
+        from ..analysis.optimize_reconstruction import skeleton_loss, reprojection_loss, smoothness_loss
 
         calibration_key = (Calibration & key).fetch1("KEY")
         recording_key = (MultiCameraRecording & key).fetch1("KEY")
@@ -110,6 +114,8 @@ class PersonKeypointReconstruction(dj.Computed):
 
         joints = TopDownPerson.joint_names("MMPoseHalpe")
         pairs = [
+            ("Pelvis", "Right Hip"),
+            ("Pelvis", "Left Hip"),
             ("Left Ankle", "Left Knee"),
             ("Right Ankle", "Right Knee"),
             ("Left Knee", "Left Hip"),
@@ -122,6 +128,11 @@ class PersonKeypointReconstruction(dj.Computed):
             ("Right Elbow", "Right Wrist"),
             ("Left Heel", "Left Big Toe"),
             ("Right Heel", "Right Big Toe"),
+            ("Right Shoulder", "Left Shoulder"),
+            ("Right Shoulder", "Right Elbow"),
+            ("Right Elbow", "Right Wrist"),
+            ("Left Shoulder", "Left Elbow"),
+            ("Left Elbow", "Left Wrist"),
         ]
         skeleton = np.array([(joints.index(p[0]), joints.index(p[1])) for p in pairs])
 
@@ -141,10 +152,10 @@ class PersonKeypointReconstruction(dj.Computed):
                 camera_calibration,
                 "explicit",
                 return_weights=True,
-                delta_weight=0.05,
-                skeleton_weight=1.0,
+                delta_weight=0.1,
+                skeleton_weight=0.1,
                 skeleton=skeleton,
-                max_iters=20000,
+                max_iters=50000,
                 robust_loss=True,
             )
 
@@ -157,15 +168,18 @@ class PersonKeypointReconstruction(dj.Computed):
                 camera_calibration,
                 "implicit",
                 return_weights=True,
-                delta_weight=0.05,
-                skeleton_weight=1.0,
+                delta_weight=0.1,
+                skeleton_weight=0.1,
                 skeleton=skeleton,
-                max_iters=20000,
+                max_iters=50000,
                 robust_loss=True,
             )
 
         key["keypoints3d"] = np.array(points3d)
         key["camera_weights"] = np.array(camera_weights)
+        key["reprojection_loss"] = reprojection_loss(camera_calibration, points2d, points3d[:, :, :3], huber_max=100)
+        key["skeleton_loss"] = skeleton_loss(points3d[:, :, :3], skeleton)
+        key["smoothness_loss"] = smoothness_loss(points3d[:, :, :3])
 
         self.insert1(key, allow_direct_insert=True)
 
@@ -173,6 +187,38 @@ class PersonKeypointReconstruction(dj.Computed):
     def key_source(self):
         # awkward double negative is to ensure all BlurredVideo views were computed
         return PersonKeypointReconstructionMethod - (SingleCameraVideo - TopDownPerson).proj()
+
+    def plot_joint(self, joint_idx, relative=False):
+        from pose_pipeline import VideoInfo, PersonBbox
+        from matplotlib import pyplot as plt
+
+        kp3d = self.fetch1("keypoints3d")
+        timestamps = (VideoInfo * SingleCameraVideo & self).fetch("timestamps", limit=1)[0]
+        present = np.stack((PersonBbox * SingleCameraVideo & self).fetch("present"))
+        present = np.sum(present, axis=0) / present.shape[0]
+        kp2d = (TopDownPerson * SingleCameraVideo & self).fetch("keypoints")
+
+        if relative:
+            relative_idx = TopDownPerson.joint_names("MMPoseHalpe").index("Pelvis")
+            kp3d = kp3d - kp3d[:, relative_idx, None, :]
+
+        kp3d = kp3d[:, :27]
+
+        N = min([k.shape[0] for k in kp2d])
+        keypoints2d = np.stack([k[:N] for k in kp2d], axis=0)
+
+        keypoints2d = keypoints2d[:, :, : kp3d.shape[1]]
+        dt = np.array([(t - timestamps[0]).total_seconds() for t in timestamps])
+        dt = dt[: kp3d.shape[0]]
+
+        fig, ax = plt.subplots(3, 1, figsize=(5, 4))
+        ax[0].plot(dt, kp3d[:, joint_idx, :3])
+        ax[1].plot(dt, kp3d[:, joint_idx, 3])
+        ax[1].plot(dt, present)
+        ax[1].set_ylim(0, 1)
+        ax[2].plot(dt, keypoints2d[:, :, joint_idx, 2].T)
+
+        plt.tight_layout()
 
     def export_trc(self, filename, z_offset=0, start=None, end=None, return_points=False, smooth=False):
         """Export an OpenSim file of marker trajectories

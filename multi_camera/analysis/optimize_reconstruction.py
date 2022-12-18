@@ -131,17 +131,17 @@ def relative_smoothness_loss(points3d, reference_joint):
 
     points3d = points3d - points3d[:, reference_joint, None, :]
     delta = jnp.diff(points3d, axis=0)
-    delta = jnp.linalg.norm(delta, axis=-1)
-    return jnp.nanmean(delta)
+    delta = jnp.linalg.norm(delta, axis=-1) ** 2
+    return jnp.sqrt(jnp.nanmean(delta))
 
 
 def skeleton_loss(points3d, skeleton_pairs):
     """Compute change in limb lengths"""
 
     limb_lengths = points3d[:, skeleton_pairs[:, 0]] - points3d[:, skeleton_pairs[:, 1]]
-    delta_limb_lengths = jnp.diff(limb_lengths, axis=0)
-    delta_limb_lengths = jnp.linalg.norm(delta_limb_lengths, axis=-1)
-    return jnp.nanmean(delta_limb_lengths)
+    limb_lengths = jnp.linalg.norm(limb_lengths, axis=-1)
+    delta_limb_lengths = jnp.var(limb_lengths, axis=0)
+    return jnp.sqrt(jnp.nanmean(delta_limb_lengths))
 
 
 def build_explicit(keypoints2d):
@@ -155,7 +155,7 @@ def build_explicit(keypoints2d):
 def build_implicit(keypoints2d):
     n_steps = keypoints2d.shape[1]
     n_joints = keypoints2d.shape[2]
-    model = ImplicitTrajectory(size=n_steps, features=[128, 256, 512, 512, 512], joints=n_joints, spatial_dims=3)
+    model = ImplicitTrajectory(size=n_steps, features=[256, 256, 512, 512, 1024], joints=n_joints, spatial_dims=3)
     return model
 
 
@@ -186,7 +186,22 @@ def optimize_trajectory(
 
     if learning_rate is None:
         if method == "implicit":
-            learning_rate = optax.linear_schedule(init_value=1e-3, end_value=1e-5, transition_steps=max_iters)
+            # learning_rate = optax.linear_schedule(init_value=1e-4, end_value=1e-6, transition_steps=max_iters)
+
+            # work out the transition steps with a decay rate of 0.999 to have a final learning rate of 1e-6
+            decay_rate = 0.999
+            end_value = 1e-6
+            init_value = 1e-4
+            transition_steps = max_iters / int(jnp.log(end_value / init_value) / jnp.log(decay_rate))
+            learning_rate = optax.warmup_exponential_decay_schedule(
+                init_value=1e-6,
+                peak_value=init_value,
+                end_value=end_value,
+                warmup_steps=1000,
+                transition_begin=5000,
+                decay_rate=decay_rate,
+                transition_steps=transition_steps,
+            )
         else:
             learning_rate = 1e-1
 
@@ -202,7 +217,7 @@ def optimize_trajectory(
     @jax.jit
     def loss_fn(variables, delta_weight=delta_weight, skeleton_weight=skeleton_weight):
         pred = model.apply(variables, x)
-        l_repro = reprojection_loss(camera_params, keypoints2d, pred, huber_max=100 if robust_loss else 10000)
+        l_repro = reprojection_loss(camera_params, keypoints2d, pred, huber_max=10 if robust_loss else 10000)
         l_delta = smoothness_loss(pred)  # + relative_smoothness_loss(pred, 19) # pelvis
         if skeleton is None:
             l_skeleton = 0.0
@@ -215,19 +230,33 @@ def optimize_trajectory(
     loss_grad_fn = jax.value_and_grad(loss_fn)
 
     @jax.jit
-    def training_step(variables, opt_state):
-        loss_val, grads = loss_grad_fn(variables)  # , huber_max=100 if i > max_iters // 2 else 1000)
+    def training_step(variables, opt_state, **kwargs):
+        loss_val, grads = loss_grad_fn(variables, **kwargs)  # , huber_max=100 if i > max_iters // 2 else 1000)
         updates, opt_state = tx.update(grads, opt_state)
         variables = optax.apply_updates(variables, updates)
         return variables, opt_state, loss_val
 
     last_loss = []
     for i in range(max_iters):
-        variables, opt_state, loss_val = training_step(variables, opt_state)
+        # we have to ignore the additional regularizers for the some iterations to make sure
+        # it doesn't get stuck in a local minimum
+        variables, opt_state, loss_val = training_step(
+            variables,
+            opt_state,
+            delta_weight=delta_weight if i > 5000 else 0,
+            skeleton_weight=skeleton_weight if i > 5000 else 0,
+        )
 
         if i % jnp.ceil(max_iters / 20) == 0:
-            print("Loss step {}: ".format(i), loss_val)
-        if not robust_loss and i > 200 and (jnp.abs(last_loss[i - 150] - loss_val) / loss_val) < tolerance:
+            pred = model.apply(variables, x)
+            l_repro = reprojection_loss(camera_params, keypoints2d, pred, huber_max=100 if robust_loss else 10000)
+            l_delta = smoothness_loss(pred)
+            l_skeleton = skeleton_loss(pred, skeleton)
+
+            print(
+                f"Loss on step {i}: {loss_val:.3f} (repro: {l_repro:.3f}, delta: {l_delta:.3f}, skeleton: {l_skeleton:.3f})"
+            )
+        if not robust_loss and i > 40000 and (jnp.abs(last_loss[i - 150] - loss_val) / loss_val) < tolerance:
             print("Converged after {} steps".format(i))
             break
         last_loss.append(loss_val)
