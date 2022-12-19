@@ -25,6 +25,11 @@ class BiomechanicalReconstructionLookup(dj.Lookup):
         (2, 0, "Rajagopal2015_Halpe"),
         (2, 1, "Rajagopal2015_Halpe"),
         (2, 2, "Rajagopal2015_Halpe"),
+        (2, 0, "Rajagopal2015_Augmenter"),
+        (2, 1, "Rajagopal2015_Augmenter"),
+        (2, 2, "Rajagopal2015_Augmenter"),
+        (4, 0, "Rajagopal2015_Augmenter"),
+        (4, 2, "Rajagopal2015_Augmenter"),
     ]
 
 
@@ -72,15 +77,14 @@ class BiomechanicalReconstruction(dj.Computed):
         trial_timestamps = []
         for k in trials:
             import numpy as np
-            from pose_pipeline import VideoInfo
-            from .multi_camera_dj import SingleCameraVideo, MultiCameraRecording
+            from .multi_camera_dj import MultiCameraRecording
             from .gaitrite_comparison import get_walking_time_range
 
             k = k.copy()
             k["reconstruction_method"] = 0
             trange = get_walking_time_range(k)
 
-            kp = bilevel_optimization.fetch_formatted_markers(k)
+            kp = bilevel_optimization.fetch_formatted_markers(k, augmenter="Augmenter" in key["model_name"])
             dt = (MultiCameraRecording & k).fetch_timestamps()
 
             valid = np.logical_and(dt >= trange[0], dt <= trange[1])
@@ -155,7 +159,6 @@ class BiomechanicalReconstruction(dj.Computed):
         for key in (self.Trial & self).fetch("KEY"):
             from .gaitrite_comparison import get_walking_time_range
 
-            kp = bilevel_optimization.fetch_formatted_markers(key)
             trial = (MultiCameraRecording & key).fetch1("video_base_filename")
             poses = (self.Trial & key).fetch1("poses")
             timestamps = (self.Trial & key).fetch1("timestamps")
@@ -172,9 +175,24 @@ class BiomechanicalReconstruction(dj.Computed):
 
             bilevel_optimization.save_trial(poses, skeleton, kp, timestamps, trial, output_dir)
 
+            if "Augmenter" in model_name:
+                print(f"here {key}")
+                import nimblephysics as nimble
+                import os
+
+                kp = bilevel_optimization.fetch_formatted_markers(
+                    (PersonKeypointReconstruction & key).fetch1("KEY"), augmenter=True
+                )
+                kp = [kp for kp, v in zip(kp, valid) if v]
+                nimble.biomechanics.OpenSimParser.saveTRC(
+                    os.path.join(output_dir, "MarkerData/" + trial + "_augmenter.trc"),
+                    timestamps,
+                    kp,
+                )
+
 
 if __name__ == "__main__":
     import multi_camera.datajoint.biomechanics
     from multi_camera.datajoint.biomechanics import BiomechanicalReconstruction
 
-    BiomechanicalReconstruction.populate("subject_id=108")
+    BiomechanicalReconstruction.populate("subject_id=104 and model_name='Rajagopal2015_Augmenter'")

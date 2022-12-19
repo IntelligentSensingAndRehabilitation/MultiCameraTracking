@@ -92,17 +92,17 @@ def get_model(model_path):
     return {"model": model, "features_mean": train_features_mean, "features_std": train_features_std}
 
 
-def get_normalized_joints(kp3d, joint_names, height, weight, model):
-    from pose_pipeline import TopDownPerson
+def get_normalized_joints(kp3d, joint_names, keep_joints, height, weight, model):
 
-    joints = TopDownPerson.joint_names("MMPoseHalpe")
-
-    joint_idx = [joints.index(j) for j in joint_names]
-    delta_joints = kp3d[:, joint_idx] - kp3d[:, joints.index("Pelvis"), None]
+    joint_idx = [joint_names.index(j) for j in keep_joints]
+    delta_joints = kp3d[:, joint_idx] - kp3d[:, joint_names.index("Pelvis"), None]
     delta_joints = delta_joints[:, :, :3] / height  # drop confidence and scale by height
 
-    # now flatten delta_joints and add height and weight as the last two columns
-    delta_joints = delta_joints.reshape(-1, delta_joints.shape[1] * delta_joints.shape[2])
+    # flatten keypoints after reordering axes
+    delta_joints = np.take(delta_joints, [0, 1, 2], axis=-1)
+    delta_joints = delta_joints.reshape([delta_joints.shape[0], -1])
+
+    # and add height and weight as the last two columns
     delta_joints = np.concatenate([delta_joints, height * np.ones((delta_joints.shape[0], 1))], axis=1)
     delta_joints = np.concatenate([delta_joints, weight * np.ones((delta_joints.shape[0], 1))], axis=1)
 
@@ -113,26 +113,27 @@ def get_normalized_joints(kp3d, joint_names, height, weight, model):
     return delta_joints[None, ...]
 
 
-def predict_and_denormalize(kp3d, joint_names, height, weight, model):
-    from pose_pipeline import TopDownPerson
-
-    joints = TopDownPerson.joint_names("MMPoseHalpe")
-
-    delta_joints = get_normalized_joints(kp3d, joint_names, height, weight, model)
+def predict_and_denormalize(kp3d, joint_names, keep_joints, height, weight, model):
+    delta_joints = get_normalized_joints(kp3d, joint_names, keep_joints, height, weight, model)
     pred = model["model"].predict(delta_joints)[0]
     pred = pred * height
 
-    # note the scale of 1000 as we work in mm
-    pred = pred.reshape(pred.shape[0], -1, 3) * 1000.0 + kp3d[:, joints.index("Pelvis"), None, :3]
+    pred = pred.reshape(pred.shape[0], -1, 3) + kp3d[:, joint_names.index("Pelvis"), None, :3]
 
     return pred
 
 
-def convert_markers(key):
-    from ...datajoint.multi_camera_dj import PersonKeypointReconstruction
-    from pose_pipeline import TopDownPerson
+def convert_markers(key, trange=None):
+    from ...datajoint.multi_camera_dj import MultiCameraRecording, PersonKeypointReconstruction, SingleCameraVideo
+    from pose_pipeline import TopDownPerson, TopDownMethodLookup
 
-    joints = TopDownPerson.joint_names("MMPoseHalpe")
+    top_down_method_name = (TopDownMethodLookup * SingleCameraVideo & key).fetch("top_down_method_name", limit=1)[0]
+    print("top_down_method_name", top_down_method_name)
+    joints = TopDownPerson.joint_names(top_down_method_name)
+
+    if top_down_method_name == "OpenPose":
+        # replace "Sternum" in joints list with "Neck"
+        joints[joints.index("Sternum")] = "Neck"
 
     # get path to current file
     path = os.path.dirname(os.path.abspath(__file__))
@@ -142,13 +143,54 @@ def convert_markers(key):
     upper_model = get_model(os.path.join(augmenter_model_dir, "v0.2_upper"))
 
     kp3d = (PersonKeypointReconstruction & key).fetch1("keypoints3d")
+    kp3d = kp3d / 1000.0  # convert to meters
 
-    height = kp3d[:, joints.index("Head")] - kp3d[:, joints.index("Right Heel")]
-    height = np.median(np.linalg.norm(height[:, :3], axis=-1)) / 1000.0
+    kp3d = np.take(kp3d, [1, 2, 0], axis=-1)  # convert to OpenSim convention
 
-    lower_markers = predict_and_denormalize(kp3d, lower_body_joints, height, 60, lower_model)
-    upper_markers = predict_and_denormalize(kp3d, upper_body_joints, height, 60, upper_model)
+    if trange is not None:
+        timestamps = (MultiCameraRecording & key).fetch_timestamps()
+        kp3d = kp3d[np.logical_and(timestamps >= trange[0], timestamps <= trange[1])]
+
+    if "Head" in joints:
+        height = kp3d[:, joints.index("Head")] - kp3d[:, joints.index("Right Heel")]
+    else:
+        height = kp3d[:, joints.index("Nose")] - kp3d[:, joints.index("Right Heel")]
+
+    height = np.median(np.linalg.norm(height[:, :3], axis=-1))
+    print(f"height: {height}")
+
+    lower_markers = predict_and_denormalize(kp3d, joints, lower_body_joints, height, 60, lower_model)
+    upper_markers = predict_and_denormalize(kp3d, joints, upper_body_joints, height, 60, upper_model)
 
     markers = np.concatenate([lower_markers, upper_markers], axis=1)
     marker_names = lower_body_markers + upper_body_markers
     return markers, marker_names
+
+
+if __name__ == "__main__":
+
+    import datetime
+    from pose_pipeline import VideoInfo
+    from multi_camera.datajoint.multi_camera_dj import (
+        PersonKeypointReconstruction,
+        SingleCameraVideo,
+        MultiCameraRecording,
+    )
+    from multi_camera.analysis.biomechanics import bilevel_optimization
+    from multi_camera.analysis.biomechanics import opencap_augmenter
+    from multi_camera.datajoint.gaitrite_comparison import get_walking_time_range
+
+    key = (
+        PersonKeypointReconstruction * MultiCameraRecording
+        & 'video_base_filename LIKE "p104_GaitRite_20221208_101420%" and reconstruction_method=0 and top_down_method=4'
+    ).fetch1("KEY")
+
+    trange = get_walking_time_range({**key, "top_down_method": 2, "reconstruction_method": 0})
+    markers, marker_names = opencap_augmenter.convert_markers(key, trange)
+
+    def map_frame(kp3d):
+        return {j: k for j, k in zip(marker_names, kp3d)}
+
+    kp3d = [map_frame(k) for k in markers]
+
+    bilevel_optimization.fit_markers([kp3d], model_name="Rajagopal2015_Augmenter")

@@ -65,7 +65,7 @@ def fit_markers(
     results = fitter.runMultiTrialKinematicsPipeline(
         markers,
         nimble.biomechanics.InitialMarkerFitParams()
-        .setMaxTrialsToUseForMultiTrialScaling(5)
+        .setMaxTrialsToUseForMultiTrialScaling(10)
         .setMaxTimestepsToUseForMultiTrialScaling(4000),
         150,
     )
@@ -73,22 +73,34 @@ def fit_markers(
     return results, customOsim.skeleton
 
 
-def fetch_formatted_markers(key):
+def fetch_formatted_markers(key, augmenter=False):
     from pose_pipeline import TopDownPerson, TopDownMethodLookup
     from multi_camera.datajoint.multi_camera_dj import PersonKeypointReconstruction
     from multi_camera.analysis.biomechanics.opensim import normalize_marker_names
 
-    method_name = (TopDownMethodLookup & key).fetch1("top_down_method_name")
-    joint_names = TopDownPerson.joint_names(method_name)
-    joint_names = normalize_marker_names(joint_names)
+    if augmenter:
+        from multi_camera.analysis.biomechanics import opencap_augmenter
 
-    kp3d = (PersonKeypointReconstruction & key).fetch1("keypoints3d")
-    kp3d = kp3d / 1000.0  # mm -> m
+        markers, marker_names = opencap_augmenter.convert_markers(key)
 
-    def map_frame(kp3d):
-        return {j: k[[1, 2, 0]] for j, k in zip(joint_names, kp3d)}
+        def map_frame(kp3d):
+            return {j: k for j, k in zip(marker_names, kp3d)}
 
-    return [map_frame(k) for k in kp3d]
+        kp3d = [map_frame(k) for k in markers]
+        return kp3d
+
+    else:
+        method_name = (TopDownMethodLookup & key).fetch1("top_down_method_name")
+        joint_names = TopDownPerson.joint_names(method_name)
+        joint_names = normalize_marker_names(joint_names)
+
+        kp3d = (PersonKeypointReconstruction & key).fetch1("keypoints3d")
+        kp3d = kp3d / 1000.0  # mm -> m
+
+        def map_frame(kp3d):
+            return {j: k[[1, 2, 0]] for j, k in zip(joint_names, kp3d)}
+
+        return [map_frame(k) for k in kp3d]
 
 
 def get_trial_performance(
@@ -145,10 +157,6 @@ def save_model(
     for n, k in zip(skeleton.getBodyNodes(), fitMarkers):
         markerOffsetsMap[k] = (n.getName(), fitMarkers[k])
 
-    print([n.getName() for n in skeleton.getBodyNodes()])
-    print(skeleton_definition["body_scale_map"].keys())
-    print(markerOffsetsMap.keys())
-    print(skeleton_definition["marker_offsets"].keys())
     nimble.biomechanics.OpenSimParser.moveOsimMarkers(
         model_file,
         skeleton_definition["body_scale_map"],
