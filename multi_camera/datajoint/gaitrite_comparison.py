@@ -65,9 +65,9 @@ class GaitRiteCalibration(dj.Computed):
     """
 
     def make(self, key):
-        recording_keys = (GaitRiteRecording * PersonKeypointReconstruction & key & "reconstruction_method=0").fetch(
-            "KEY"
-        )
+        recording_keys = (
+            GaitRiteRecording * PersonKeypointReconstruction & key & "reconstruction_method=0 and top_down_method=2"
+        ).fetch("KEY")
         data = [fetch_data(k) for k in recording_keys]
         R, t, t_offsets, best_score = find_best_alignment(data)
 
@@ -76,7 +76,12 @@ class GaitRiteCalibration(dj.Computed):
     @property
     def key_source(self):
         """Only calibrate if all the reconstruction methods are computed"""
-        return GaitRiteSession - (GaitRiteRecording - PersonKeypointReconstruction & "reconstruction_method=0").proj()
+        return (
+            GaitRiteSession
+            - (
+                GaitRiteRecording - (PersonKeypointReconstruction & "reconstruction_method=0 and top_down_method=2")
+            ).proj()
+        )
 
 
 @schema
@@ -151,6 +156,152 @@ class GaitRiteRecordingAlignment(dj.Computed):
         self.insert1(dict(**key, t_offset=t_offset, residuals=residuals))
 
 
+@schema
+class GaitRiteRecordingStepPositionError(dj.Computed):
+    definition = """
+    -> GaitRiteRecordingAlignment
+    ---
+    mean_heel_error : float
+    mean_toe_error : float
+    """
+
+    # note that side is a bit redundant in the primary key, but putting it here
+    # lets us joint on the steps from the length errors too
+    class Step(dj.Part):
+        definition = """
+        -> master
+        step_id : int
+        side          : enum('Left', 'Right')
+        ---
+        heel_error    : float
+        toe_error     : float
+        heel_noise    : float
+        toe_noise     : float
+        heel_conf     : float
+        toe_conf      : float
+        heel_x        : float
+        """
+
+    def make(self, key):
+
+        t_offset = (GaitRiteRecordingAlignment & key).fetch1("t_offset")
+
+        dt, kp3d, df = fetch_data(key)
+        R, t = (GaitRiteCalibration & key).fetch1("r", "t")
+
+        conf = kp3d[:, :, 3]
+        kp3d = kp3d[:, :, :3] @ R + t
+
+        step_keys = []
+        for i, step in df.iterrows():
+            step_key = key.copy()
+            step_key["step_id"] = i
+            step_key["side"] = "Left" if step["Left Foot"] else "Right"
+
+            trace_idx = np.logical_and(
+                dt >= step["First Contact Time"] + t_offset, dt <= step["Last Contact Time"] + t_offset
+            )
+            if step_key["side"] == "Left":
+                heel_trace = kp3d[trace_idx, 0, 0]
+                heel_conf = conf[trace_idx, 0]
+                toe_trace = kp3d[trace_idx, 1, 0]
+                toe_conf = conf[trace_idx, 1]
+            else:
+                heel_trace = kp3d[trace_idx, 2, 0]
+                heel_conf = conf[trace_idx, 2]
+                toe_trace = kp3d[trace_idx, 3, 0]
+                toe_conf = conf[trace_idx, 3]
+
+            # step_key["heel_error"] = np.sqrt(np.mean((heel_trace - step["Heel X"]) ** 2))
+            step_key["heel_error"] = np.sqrt(np.mean(np.abs(heel_trace - step["Heel X"])))
+            # step_key["toe_error"] = np.sqrt(np.mean((toe_trace - step["Toe X"]) ** 2))
+            step_key["toe_error"] = np.sqrt(np.mean(np.abs(toe_trace - step["Toe X"])))
+            step_key["heel_noise"] = np.std(heel_trace)
+            step_key["toe_noise"] = np.std(toe_trace)
+            step_key["heel_conf"] = np.mean(heel_conf)
+            step_key["toe_conf"] = np.mean(toe_conf)
+            step_key["heel_x"] = step["Heel X"]
+
+            step_keys.append(step_key)
+
+        key["mean_heel_error"] = np.mean([k["heel_error"] for k in step_keys])
+        key["mean_toe_error"] = np.mean([k["toe_error"] for k in step_keys])
+
+        self.insert1(key)
+        self.Step.insert(step_keys)
+
+
+@schema
+class GaitRiteRecordingStepLengthError(dj.Computed):
+    definition = """
+    -> GaitRiteRecordingAlignment
+    ---
+    mean_step_length_error : float
+    mean_stride_length_error : float
+    """
+
+    class Step(dj.Part):
+        definition = """
+        -> master
+        step_id : int
+        side          : enum('Left', 'Right')
+        ---
+        step_length_error    : float
+        stride_length_error  : float
+        """
+
+    def make(self, key):
+
+        t_offset = (GaitRiteRecordingAlignment & key).fetch1("t_offset")
+
+        dt, kp3d, df = fetch_data(key)
+        R, t = (GaitRiteCalibration & key).fetch1("r", "t")
+
+        conf = kp3d[:, :, 3]
+        kp3d = kp3d[:, :, :3] @ R + t
+
+        last_left_heel = None
+        last_right_heel = None
+
+        step_keys = []
+        for i, step in df.iterrows():
+            step_key = key.copy()
+            step_key["step_id"] = i
+            step_key["side"] = "Left" if step["Left Foot"] else "Right"
+
+            trace_idx = np.logical_and(
+                dt >= step["First Contact Time"] + t_offset, dt <= step["Last Contact Time"] + t_offset
+            )
+            if step_key["side"] == "Left":
+                heel_trace = kp3d[trace_idx, 0, 0]
+            else:
+                heel_trace = kp3d[trace_idx, 2, 0]
+
+            if i >= 2:
+                # GaitRite step lengths only defined after first step
+                stride_length = np.abs(
+                    np.mean(heel_trace) - (last_left_heel if step_key["side"] == "Left" else last_right_heel)
+                )
+                step_length = np.abs(
+                    np.mean(heel_trace) - (last_right_heel if step_key["side"] == "Left" else last_left_heel)
+                )
+                step_key["step_length_error"] = step_length - step["Step Length"] * 10.0  # convert to mm
+                step_key["stride_length_error"] = stride_length - step["Stride Length"] * 10.0
+                step_keys.append(step_key)
+
+            # store this position for next step computation
+            if step_key["side"] == "Left":
+                last_left_heel = np.mean(heel_trace)
+            else:
+                last_right_heel = np.mean(heel_trace)
+
+        key["mean_step_length_error"] = np.mean([np.abs(k["step_length_error"]) for k in step_keys])
+        key["mean_stride_length_error"] = np.mean([np.abs(k["stride_length_error"]) for k in step_keys])
+
+        self.insert1(key)
+        self.Step.insert(step_keys)
+
+
 def get_walking_time_range(key, margin=0.5):
 
     assert len(GaitRiteRecordingAlignment & key) <= 1, "Select only one recording"
@@ -173,7 +324,18 @@ def match_data(filename):
 
 
 def fetch_data(key, only_present=False):
-    """Fetch the data from the database for a given GaitRite recording."""
+    """Fetch the data from the database for a given GaitRite recording.
+
+    Traces are ordered as follows: left heel,  left toe, right heel, right toe
+
+    Args:
+        key (dict): The key of the GaitRiteRecording.
+        only_present (bool, optional): Whether to only return the data for the frames where the person is present. Defaults to False.
+    Returns:
+        dt (np.array): The timestamps of the video frames.
+        kp3d (np.array): The 3D keypoints of the person.
+        df (pd.DataFrame): The GaitRite data.
+    """
 
     t0, df = (GaitRiteRecording & key).fetch1("gaitrite_t0", "gaitrite_dataframe")
     df = pd.DataFrame(df)
@@ -298,7 +460,7 @@ def import_gaitrite_files(subject_id: int, filenames: List[str]):
 
             x = vid_key.pop("x")
 
-            if np.abs(x) > 10:
+            if np.abs(x) > 15:
                 print(f"Skipping {filename} due to large time offset: {x} seconds")
                 continue
 
@@ -315,5 +477,6 @@ def import_gaitrite_files(subject_id: int, filenames: List[str]):
             print(key)
 
             GaitRiteRecording.insert1(
-                dict(**key, gaitrite_filename=stripped_filename, gaitrite_dataframe=df_dict, gaitrite_t0=t0)
+                dict(**key, gaitrite_filename=stripped_filename, gaitrite_dataframe=df_dict, gaitrite_t0=t0),
+                skip_duplicates=True,
             )
