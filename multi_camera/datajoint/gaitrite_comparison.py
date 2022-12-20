@@ -449,8 +449,38 @@ def import_gaitrite_files(subject_id: int, filenames: List[str]):
         filenames (List[str]): The list of GaitRite files to import.
     """
 
-    data = [match_data(filename) for filename in filenames]
-    min_t0 = min([d[0] for d in data])
+    from scipy.optimize import linear_sum_assignment
+
+    t0s = []
+    dfs = []
+    for filename in filenames:
+        t0, df = parse_gaitrite(filename)
+        t0s.append(t0[0])
+        dfs.append(df)
+    t0s = np.array(t0s)
+
+    possible_matches = MultiCameraRecording & f'ABS(TIMESTAMP(recording_timestamps) - TIMESTAMP("{t0s[0]}")) < 60*60'
+    keys, recording_times = possible_matches.fetch("KEY", "recording_timestamps")
+
+    # perform a greedy hungarian match between the t0s and the recording times
+    # to find the best match
+    t0s = t0s[:, np.newaxis]
+    recording_times = recording_times[np.newaxis, :]
+    delta_t = np.abs(t0s - recording_times)
+    delta_t = np.array([[t.total_seconds() for t in ts] for ts in delta_t])
+    match_files, match_keys = linear_sum_assignment(delta_t)
+    if ~np.all(match_files == np.arange(len(filenames))):
+        print("Could not match all filenames to recordings")
+        bases = [os.path.basename(f) for f in filenames]
+        print(f'Matched files: {", ".join([bases[i] for i in match_files])}')
+        print(f'Unmatched files: {", ".join([bases[i] for i in np.setdiff1d(np.arange(len(filenames)), match_files)])}')
+        from IPython.display import display
+
+        display(possible_matches)
+    assert np.all(match_files == np.arange(len(filenames))), "Could not match all filenames to recordings"
+    keys = [keys[i] for i in match_keys]
+
+    min_t0 = np.min(t0s)
 
     # open a datajoint transaction
     with dj.conn().transaction:
@@ -460,11 +490,12 @@ def import_gaitrite_files(subject_id: int, filenames: List[str]):
         GaitRiteSession.insert1(key)
 
         # insert the recordings
-        for filename, (t0, df, vid_key) in zip(filenames, data):
+        for filename, t0, df, vid_key in zip(filenames, t0s[:, 0], dfs, keys):
+            print(vid_key)
+            vid_timestamp = (MultiCameraRecording & vid_key).fetch1("recording_timestamps")
+            dt = (t0 - vid_timestamp).total_seconds()
 
-            x = vid_key.pop("x")
-
-            if np.abs(x) > 15:
+            if np.abs(dt) > 30:
                 print(f"Skipping {filename} due to large time offset: {x} seconds")
                 continue
 
