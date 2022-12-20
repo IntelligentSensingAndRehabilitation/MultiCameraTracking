@@ -73,7 +73,7 @@ def parse_gaitrite(filename: str):
         print(t0)
 
     df = df[columns]
-    df["Left Foot"] = df["Left/Right Foot"] > 0.5
+    df["Left Foot"] = df["Left/Right Foot"] < 0.5
     df = df.dropna()
 
     # Convert to mm
@@ -84,9 +84,6 @@ def parse_gaitrite(filename: str):
     m_ratio = np.mean(ratio)
     assert np.std(m_ratio) < 0.01, "Scaling factor is not constant"
     df[["Heel X", "Heel Y", "Toe X", "Toe Y"]] = df[["Heel X", "Heel Y", "Toe X", "Toe Y"]] * m_ratio * 10
-
-    # not using the same handedness as our system
-    df[["Heel Y", "Toe Y"]] = -df[["Heel Y", "Toe Y"]]
 
     df.columns = [r.rstrip() for r in df.columns]
     return t0, df
@@ -445,7 +442,7 @@ def find_best_alignment(data: list, maxiters=10):
                 best_t_idx = t_idx
             elif score == best_score:
                 break
-            print(score)
+            print(score, test_offsets)
 
             order = np.flip(np.argsort(grouped_residuals))
             for trial in order:
@@ -467,7 +464,7 @@ def find_best_alignment(data: list, maxiters=10):
     test_offsets = [t[i] for t, i in zip(t_offsets, best_t_idx)]
     print(f"Before: {test_offsets}")
 
-    for i in range(20):
+    for i in range(5):
         # try again from different initial settings
         t_idx = [np.random.randint(len(t)) for t in t_offsets]
         t_idx, score = get_best(t_idx)

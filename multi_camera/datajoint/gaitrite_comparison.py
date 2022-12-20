@@ -5,7 +5,7 @@ import pandas as pd
 
 from typing import List
 
-from pose_pipeline import PersonBbox, VideoInfo, TopDownPerson
+from pose_pipeline import PersonBbox, VideoInfo, TopDownPerson, TopDownMethodLookup
 from .multi_camera_dj import MultiCameraRecording, SingleCameraVideo, PersonKeypointReconstruction
 from ..analysis.gaitrite_comparison import parse_gaitrite, extract_traces, find_best_alignment, get_offset_range
 
@@ -340,10 +340,14 @@ def fetch_data(key, only_present=False):
     t0, df = (GaitRiteRecording & key).fetch1("gaitrite_t0", "gaitrite_dataframe")
     df = pd.DataFrame(df)
 
+    # GaitRite uses the opposite handedness to our system
     df[["Heel Y", "Toe Y"]] = df[["Heel Y", "Toe Y"]] * -1
+
     timestamps = (VideoInfo * SingleCameraVideo * MultiCameraRecording & key).fetch("timestamps")[0]
     kp3d = (PersonKeypointReconstruction & key).fetch1("keypoints3d")
     present = (PersonBbox * SingleCameraVideo & key).fetch("present", limit=1)[0]
+    top_down_method_name = (TopDownMethodLookup & key).fetch1("top_down_method_name")
+    joint_names = TopDownPerson.joint_names(top_down_method_name)
 
     # when the terminal frame is missing
     timestamps = timestamps[: kp3d.shape[0]]
@@ -354,7 +358,7 @@ def fetch_data(key, only_present=False):
         dt = dt[present]
 
     target_names = ["Left Heel", "Left Big Toe", "Right Heel", "Right Big Toe"]
-    joint_idx = np.array([TopDownPerson.joint_names("MMPoseHalpe").index(j) for j in target_names])
+    joint_idx = np.array([joint_names.index(j) for j in target_names])
     kp3d = kp3d[:, joint_idx]
 
     gaitrite_offset = (t0 - timestamps[0]).total_seconds()
