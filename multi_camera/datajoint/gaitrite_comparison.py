@@ -147,7 +147,8 @@ class GaitRiteRecordingAlignment(dj.Computed):
                 noise * confidence
             ) / (1e-9 + np.nansum(confidence))
 
-        offset_range = get_offset_range(dt, df)
+        present = np.sum(kp3d[:, :, 3], axis=1) > 0
+        offset_range = get_offset_range(dt[present], df)
         t_offsets = np.arange(offset_range[0], offset_range[1], 0.03)
         scores = [get_score(t) for t in t_offsets]
         t_offset = t_offsets[np.argmin(scores)]
@@ -222,7 +223,10 @@ class GaitRiteRecordingStepPositionError(dj.Computed):
             step_key["toe_conf"] = np.mean(toe_conf)
             step_key["heel_x"] = step["Heel X"]
 
-            step_keys.append(step_key)
+            if np.sum(trace_idx) > 0 and ~np.isnan(step_key["heel_conf"]) and ~np.isnan(step_key["heel_error"]):
+                # avoid nans when GaitRite timing doesn't overlap recording. this is also reflected
+                # in nan values in the confidence if the person isn't tracked at that time
+                step_keys.append(step_key)
 
         key["mean_heel_error"] = np.mean([k["heel_error"] for k in step_keys])
         key["mean_toe_error"] = np.mean([k["toe_error"] for k in step_keys])
@@ -287,7 +291,10 @@ class GaitRiteRecordingStepLengthError(dj.Computed):
                 )
                 step_key["step_length_error"] = step_length - step["Step Length"] * 10.0  # convert to mm
                 step_key["stride_length_error"] = stride_length - step["Stride Length"] * 10.0
-                step_keys.append(step_key)
+
+                if ~np.isnan(stride_length) and ~np.isnan(step_length):
+                    # avoid nans when GaitRite timing doesn't overlap recording
+                    step_keys.append(step_key)
 
             # store this position for next step computation
             if step_key["side"] == "Left":
@@ -302,7 +309,7 @@ class GaitRiteRecordingStepLengthError(dj.Computed):
         self.Step.insert(step_keys)
 
 
-def get_walking_time_range(key, margin=0.5):
+def get_walking_time_range(key, margin=2.5):
 
     assert len(GaitRiteRecordingAlignment & key) <= 1, "Select only one recording"
     assert len(GaitRiteRecordingAlignment & key) == 1, f"No GaitRiteAlignment found for  {key}"
@@ -496,7 +503,7 @@ def import_gaitrite_files(subject_id: int, filenames: List[str]):
             dt = (t0 - vid_timestamp).total_seconds()
 
             if np.abs(dt) > 30:
-                print(f"Skipping {filename} due to large time offset: {x} seconds")
+                print(f"Skipping {filename} due to large time offset: {dt} seconds")
                 continue
 
             # update the key with the video key

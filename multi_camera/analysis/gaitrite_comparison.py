@@ -260,8 +260,8 @@ def get_offset_range(dt, df):
     t_range = [dt[0] - t0, dt[-1] - tl]
     if True:  # t_range[0] > (t_range[1] - 1):
         # add a bit of slop
-        t_range[0] = t_range[0] - 2
-        t_range[1] = t_range[1] + 2
+        t_range[0] = t_range[0] - 3
+        t_range[1] = t_range[1] + 3
     return t_range
 
 
@@ -278,7 +278,9 @@ def find_local_minima(data: tuple, t_range: List[float] = None, ret_scores=False
     from scipy.signal import argrelextrema
 
     if t_range is None:
-        t_range = get_offset_range(data[0], data[2])
+        kp = data[1]
+        present = np.sum(kp[:, :, 3], axis=1) > 0
+        t_range = get_offset_range(data[0][present], data[2])
         print(f"Offset range: {t_range}")
 
     t_offsets = np.arange(t_range[0], t_range[1], 0.1)
