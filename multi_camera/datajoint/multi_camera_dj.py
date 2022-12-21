@@ -154,7 +154,6 @@ class PersonKeypointReconstruction(dj.Computed):
         elif reconstruction_method_name == "Optimization":
             from ..analysis.optimize_reconstruction import optimize_trajectory
 
-            points2d = points2d[:, :, :27]
             points3d, camera_weights = optimize_trajectory(
                 points2d,
                 camera_calibration,
@@ -170,7 +169,6 @@ class PersonKeypointReconstruction(dj.Computed):
         elif reconstruction_method_name == "ImplicitOptimization":
             from ..analysis.optimize_reconstruction import optimize_trajectory
 
-            points2d = points2d[:, :, :27]
             points3d, camera_weights = optimize_trajectory(
                 points2d,
                 camera_calibration,

@@ -63,7 +63,6 @@ class KeypointTrajectory(nn.Module):
 def positional_encoding(inputs, positional_encoding_dims=3):
     batch_size, _ = inputs.shape
     inputs_freq = jax.vmap(lambda x: inputs * 2.0 ** x)(jnp.arange(positional_encoding_dims))
-    # print(inputs_freq)
     periodic_fns = jnp.stack([jnp.sin(inputs_freq), jnp.cos(inputs_freq)])
     periodic_fns = periodic_fns.swapaxes(0, 2).reshape([batch_size, -1])
     periodic_fns = jnp.concatenate([inputs, periodic_fns], axis=-1)
@@ -84,8 +83,8 @@ class ImplicitTrajectory(nn.Module):
     def __call__(self, input_points):
 
         # works better when using time scale (0,1)
-        input_points = input_points / self.size
-        input_points = positional_encoding(input_points, self.features[0] // 2)
+        input_points = input_points / self.size * jnp.pi
+        input_points = positional_encoding(input_points, 6)
 
         x = input_points
 
@@ -114,7 +113,6 @@ def reprojection_loss(camera_params, points2d, points3d, huber_max=100):
     conf = conf * (conf > 0.5)  # only use points with high confidence
     loss = reprojection_error(camera_params, points2d[..., :-1], points3d)
     delta = huber(jnp.linalg.norm(loss, axis=-1), max=huber_max)
-    # delta = jnp.linalg.norm(loss, axis=-1)
     return jnp.nanmean(delta * conf)
 
 
@@ -155,7 +153,7 @@ def build_explicit(keypoints2d):
 def build_implicit(keypoints2d):
     n_steps = keypoints2d.shape[1]
     n_joints = keypoints2d.shape[2]
-    model = ImplicitTrajectory(size=n_steps, features=[256, 256, 512, 512, 1024], joints=n_joints, spatial_dims=3)
+    model = ImplicitTrajectory(size=n_steps, features=[128, 256, 512, 1024, 2048], joints=n_joints, spatial_dims=3)
     return model
 
 
