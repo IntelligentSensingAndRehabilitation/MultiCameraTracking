@@ -62,15 +62,29 @@ And to export a TRC file that can be loaded into OpenSim
 
     (SMPLReconstruction & key).export_trc('outfile.trc')
 
+## Visualization and annotation.
+
+We have CLI support using the EasyMocap visualization. This can be used to select the person
+of interest from an Easymocap reconstruction for further top down analysis and visualization
+of the top down results. The smpl flag will show the SMPL reconstructions versus stick figures.
+
+    python apps/visualize.py --smpl FILENAME
+
+You can confirm the person you want by filtering
+
+    python apps/visualize.py --smpl FILENAME --filter SUBJECT_ID
+
+And if happy can even annotate accordingly
+
+    python apps/visualize.py --smpl FILENAME --filter SUBJECT_ID --annotate
+
+Finally, it can be used to visualize the results after annotation using the top down flag. This visualizes
+the SMPLReconstruction results
+
+    python apps/visualize.py --smpl --top_down FILENAME
+
 # Credits
 
 - Bundle adjustment from [Aniposelib](https://github.com/lambdaloop/aniposelib) is used for the calibration and triangulation.
 - [Easymocap](https://github.com/zju3dv/EasyMocap/) is used for fitting SMPL meshes to the 3D joint locations.
 - Code from [Pose2Sim](https://github.com/perfanalytics/pose2sim) is used for exporting to OpenSim and models from this repository are used for performing Inverse Kinematics on the extracted keypoints.
-
-# TODO
-- [ ] Add code to determine the robustness of calibration to camera occlusions and possibly include additional distortion terms.
-- [ ] Compare SMPL fitting that also includes 2D projections in [Easy Mocap](https://github.com/zju3dv/EasyMocap/blob/master/easymocap/pipeline/basic.py#L55)
-- [ ] Work on OpenSim model with more surface markers and then export them from the SMPL model, e.g. [Humor Mocap Markers for AMASS](https://github.com/davrempe/humor/blob/main/humor/body_model/utils.py#L17) although these don't perfectly match onto those in [OpenSim Rajagopal model](https://github.com/opensim-org/opensim-models/blob/master/Models/RajagopalModel/Rajagopal2015.osim#L13811) or [here](https://github.com/opensim-org/opensim-models/blob/master/Pipelines/Rajagopal/Markerset.xml). Might make sense to implement as a standalone SMPL<->OpenSim library.
-- [ ] Script the OpenSim fitting so it can run within the pipeline.
-- [ ] Add HuMoR optimization
