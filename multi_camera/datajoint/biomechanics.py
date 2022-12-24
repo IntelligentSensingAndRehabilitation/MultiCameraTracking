@@ -20,16 +20,27 @@ class BiomechanicalReconstructionLookup(dj.Lookup):
     top_down_method         : int 
     reconstruction_method   : int
     model_name              : varchar(255)
+    bilevel_settings        : int
+    ---
+    max_marker_offset                    : float
+    regularize_all_body_scales           : float
+    regularize_anatomical_marker_offsets : float
+    anthropomorphic_prior                : float
+    regularize_joint_bounds              : float
     """
     contents = [
-        (2, 0, "Rajagopal2015_Halpe"),
-        (2, 1, "Rajagopal2015_Halpe"),
-        (2, 2, "Rajagopal2015_Halpe"),
-        (2, 0, "Rajagopal2015_Augmenter"),
-        (2, 1, "Rajagopal2015_Augmenter"),
-        (2, 2, "Rajagopal2015_Augmenter"),
-        (4, 0, "Rajagopal2015_Augmenter"),
-        (4, 2, "Rajagopal2015_Augmenter"),
+        # (2, 0, "Rajagopal2015_Halpe"),
+        # (2, 1, "Rajagopal2015_Halpe"),
+        # (2, 2, "Rajagopal2015_Halpe"),
+        # (2, 0, "Rajagopal2015_Augmenter"),
+        # (2, 1, "Rajagopal2015_Augmenter"),
+        # (2, 2, "Rajagopal2015_Augmenter"),
+        # (4, 0, "Rajagopal2015_Augmenter"),
+        # (4, 2, "Rajagopal2015_Augmenter"),
+        # last two should remain zero for now
+        (2, 2, "Rajagopal2015_Halpe", 0, 0.0, 0.0, 0.0, 0.0, 0.0),
+        (2, 2, "Rajagopal2015_Halpe", 1, 0.1, 0.1, 10.0, 0.0, 0.0),
+        (2, 2, "Rajagopal2015_Halpe", 2, 0.05, 1.0, 50.0, 0.0, 0.0),
     ]
 
 
@@ -80,9 +91,10 @@ class BiomechanicalReconstruction(dj.Computed):
             from .multi_camera_dj import MultiCameraRecording
             from .gaitrite_comparison import get_walking_time_range
 
-            k = k.copy()
-            k["reconstruction_method"] = 0
-            trange = get_walking_time_range(k)
+            k2 = k.copy()
+            k2["reconstruction_method"] = 0
+            k2["top_down_method"] = 2
+            trange = get_walking_time_range(k2)
 
             kp = bilevel_optimization.fetch_formatted_markers(k, augmenter="Augmenter" in key["model_name"])
             dt = (MultiCameraRecording & k).fetch_timestamps()
@@ -94,8 +106,18 @@ class BiomechanicalReconstruction(dj.Computed):
             kps.append(kp)
             trial_timestamps.append(dt)
 
+        settings = (BiomechanicalReconstructionLookup & key).fetch1()
+
         # kps = [bilevel_optimization.fetch_formatted_markers(k) for k in trials]
-        results, skeleton = bilevel_optimization.fit_markers(kps, key["model_name"])
+        results, skeleton = bilevel_optimization.fit_markers(
+            kps,
+            key["model_name"],
+            max_marker_offset=settings["max_marker_offset"],
+            regularize_all_body_scales=settings["regularize_all_body_scales"],
+            regularize_anatomical_marker_offsets=settings["regularize_anatomical_marker_offsets"],
+            anthropomorphic_prior=settings["anthropomorphic_prior"],
+            regularize_joint_bounds=settings["regularize_joint_bounds"],
+        )
 
         print(f"Received {len(results)} results from {len(kps)} trials")
 
@@ -195,4 +217,4 @@ if __name__ == "__main__":
     import multi_camera.datajoint.biomechanics
     from multi_camera.datajoint.biomechanics import BiomechanicalReconstruction
 
-    BiomechanicalReconstruction.populate("subject_id=104 and model_name='Rajagopal2015_Augmenter'")
+    BiomechanicalReconstruction.populate("subject_id=136 and model_name='Rajagopal2015_Halpe'")

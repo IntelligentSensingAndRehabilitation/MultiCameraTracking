@@ -20,6 +20,11 @@ def fit_markers(
     sex="male",
     heightM=1.7,
     massKg=60,
+    max_marker_offset=0.0,
+    regularize_all_body_scales=0.0,
+    regularize_anatomical_marker_offsets=0.0,
+    anthropomorphic_prior=0.0,
+    regularize_joint_bounds=0.0,
 ):  # -> Tuple(List[nimble.biomechanics.MarkerInitialization], nimble.dynamics.Skeleton):
 
     # get path to this file
@@ -28,39 +33,56 @@ def fit_markers(
 
     customOsim = nimble.biomechanics.OpenSimParser.parseOsim(model_file)
 
+    customOsim.skeleton.autogroupSymmetricSuffixes()
+    if customOsim.skeleton.getBodyNode("hand_r") is not None:
+        customOsim.skeleton.setScaleGroupUniformScaling(customOsim.skeleton.getBodyNode("hand_r"))
+    customOsim.skeleton.autogroupSymmetricPrefixes("ulna", "radius")
+
     fitter = nimble.biomechanics.MarkerFitter(customOsim.skeleton, customOsim.markersMap)
-    fitter.setTriadsToTracking()
-    fitter.setInitialIKSatisfactoryLoss(0.05)
-    fitter.setInitialIKMaxRestarts(50)
+    fitter.setInitialIKSatisfactoryLoss(0.005)
+    fitter.setInitialIKMaxRestarts(200)
     fitter.setIterationLimit(1000)
 
-    # Create an anthropometric prior
-    anthropometrics: nimble.biomechanics.Anthropometrics = nimble.biomechanics.Anthropometrics.loadFromFile(
-        os.path.join(model_path, "ANSUR_metrics.xml")
-    )
+    if regularize_joint_bounds > 0.0:
+        fitter.setIgnoreJointLimits(True)  # this is detrimental without this upcoming feature
+        fitter.setRegularizeJointBounds(regularize_joint_bounds)
+    if max_marker_offset > 0.0:
+        fitter.setMaxMarkerOffset(max_marker_offset)  # 0.1
+    if regularize_all_body_scales > 0.0:
+        fitter.setRegularizeAllBodyScales(regularize_all_body_scales)  # 1.0
+    if regularize_anatomical_marker_offsets > 0.0:
+        fitter.setRegularizeAnatomicalMarkerOffsets(regularize_anatomical_marker_offsets)  # 10.0
+    if anthropomorphic_prior > 0.0:
+        # this code starting crashing in more recent versions of nimble
 
-    cols = anthropometrics.getMetricNames()
-    cols.append("Heightin")
-    cols.append("Weightlbs")
-    if sex == "male":
-        gauss: nimble.math.MultivariateGaussian = nimble.math.MultivariateGaussian.loadFromCSV(
-            os.path.join(model_path, "ANSUR_II_MALE_Public.csv"), cols, 0.001
-        )  # mm -> m
-    elif sex == "female":
-        gauss: nimble.math.MultivariateGaussian = nimble.math.MultivariateGaussian.loadFromCSV(
-            os.path.join(model_path, "ANSUR_II_FEMALE_Public.csv"), cols, 0.001
-        )  # mm -> m
-    else:
-        gauss: nimble.math.MultivariateGaussian = nimble.math.MultivariateGaussian.loadFromCSV(
-            os.path.join(model_path, "ANSUR_II_BOTH_Public.csv"), cols, 0.001
-        )  # mm -> m
-    observedValues = {
-        "Heightin": heightM * 39.37 * 0.001,
-        "Weightlbs": massKg * 2.204 * 0.001,
-    }
-    gauss = gauss.condition(observedValues)
-    anthropometrics.setDistribution(gauss)
-    fitter.setAnthropometricPrior(anthropometrics, 0.1)
+        # Create an anthropometric prior
+        anthropometrics: nimble.biomechanics.Anthropometrics = nimble.biomechanics.Anthropometrics.loadFromFile(
+            os.path.join(model_path, "ANSUR_metrics.xml")
+        )
+
+        cols = anthropometrics.getMetricNames()
+        cols.append("Heightin")
+        cols.append("Weightlbs")
+        if sex == "male":
+            gauss: nimble.math.MultivariateGaussian = nimble.math.MultivariateGaussian.loadFromCSV(
+                os.path.join(model_path, "ANSUR_II_MALE_Public.csv"), cols, 0.001
+            )  # mm -> m
+        elif sex == "female":
+            gauss: nimble.math.MultivariateGaussian = nimble.math.MultivariateGaussian.loadFromCSV(
+                os.path.join(model_path, "ANSUR_II_FEMALE_Public.csv"), cols, 0.001
+            )  # mm -> m
+        else:
+            gauss: nimble.math.MultivariateGaussian = nimble.math.MultivariateGaussian.loadFromCSV(
+                os.path.join(model_path, "ANSUR_II_BOTH_Public.csv"), cols, 0.001
+            )  # mm -> m
+        observedValues = {
+            "Heightin": heightM * 39.37 * 0.001,
+            "Weightlbs": massKg * 2.204 * 0.001,
+        }
+
+        gauss = gauss.condition(observedValues)
+        anthropometrics.setDistribution(gauss)
+        fitter.setAnthropometricPrior(anthropometrics, anthropomorphic_prior)
 
     results = fitter.runMultiTrialKinematicsPipeline(
         markers,

@@ -157,6 +157,7 @@ def convert_markers(key, trange=None):
         height = kp3d[:, joints.index("Nose")] - kp3d[:, joints.index("Right Heel")]
 
     height = np.median(np.linalg.norm(height[:, :3], axis=-1))
+    height = max(height, 1.0)
     print(f"height: {height}")
 
     lower_markers = predict_and_denormalize(kp3d, joints, lower_body_joints, height, 60, lower_model)
