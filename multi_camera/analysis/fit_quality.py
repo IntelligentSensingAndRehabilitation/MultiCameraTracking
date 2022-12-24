@@ -5,6 +5,9 @@ from .camera import project_distortion
 
 def reprojection_quality(keypoints3d, camera_params, keypoints2d):
 
+    if keypoints3d.shape[-1] == 4:
+        keypoints3d = keypoints3d[..., :3]
+
     keypoints2d_proj = jnp.array(
         [project_distortion(camera_params, i, keypoints3d) for i in range(camera_params["mtx"].shape[0])]
     )
@@ -15,7 +18,7 @@ def reprojection_quality(keypoints3d, camera_params, keypoints2d):
     def pck(x, c):
         return jnp.sum(jnp.logical_and(projection_error < x, keypoint_conf >= c)) / jnp.sum(keypoint_conf >= c)
 
-    thresh = jnp.linspace(0, 20.0, 100)
+    thresh = jnp.linspace(0, 200.0, 200)
     confidence = jnp.linspace(0, 0.9, 10)
 
     perf = lambda x: jnp.array([pck(x, c) for c in confidence])

@@ -67,6 +67,7 @@ class PersonKeypointReconstructionMethodLookup(dj.Lookup):
         {"reconstruction_method": 8, "reconstruction_method_name": "RobustTriangulationThresh0.3"},
         {"reconstruction_method": 9, "reconstruction_method_name": "ImplicitOptimizationHuber"},
         {"reconstruction_method": 10, "reconstruction_method_name": "ImplicitOptimizationRobustWeightThresh0.3"},
+        {"reconstruction_method": 11, "reconstruction_method_name": "ImplicitOptimizationRobustWeightsMaxHuber10"},
     ]
 
 
@@ -273,6 +274,24 @@ class PersonKeypointReconstruction(dj.Computed):
                 robust_camera_weights=True,
                 max_iters=50000,
             )
+
+        elif reconstruction_method_name == "ImplicitOptimizationRobustWeightsMaxHuber10":
+
+            from ..analysis.optimize_reconstruction import optimize_trajectory
+
+            points3d, camera_weights = optimize_trajectory(
+                points2d,
+                camera_calibration,
+                "implicit",
+                return_weights=True,
+                delta_weight=0.1,
+                skeleton_weight=0.1,
+                skeleton=skeleton,
+                huber_max=10,
+                robust_camera_weights=True,
+                max_iters=50000,
+            )
+
         else:
             raise ValueError("Unknown reconstruction method")
 
@@ -373,8 +392,12 @@ class PersonKeypointReprojectionQuality(dj.Computed):
     definition = """
     -> PersonKeypointReconstruction
     ---
-    reprojection_pck       : float
-    reprojection_metrics   : longblob
+    reprojection_pck_5       : float
+    reprojection_pck_10      : float
+    reprojection_pck_20      : float
+    reprojection_pck_50      : float
+    reprojection_pck_100      : float
+    reprojection_metrics     : longblob
     """
 
     def make(self, key):
@@ -402,7 +425,11 @@ class PersonKeypointReprojectionQuality(dj.Computed):
 
         metrics, thresh, confidence = fit_quality.reprojection_quality(kp3d, camera_params, kp2d)
 
-        key["reprojection_pck"] = metrics[np.argmin(np.abs(thresh - 5)), np.argmin(np.abs(confidence - 0.5))]
+        key["reprojection_pck_5"] = metrics[np.argmin(np.abs(thresh - 5)), np.argmin(np.abs(confidence - 0.5))]
+        key["reprojection_pck_10"] = metrics[np.argmin(np.abs(thresh - 10)), np.argmin(np.abs(confidence - 0.5))]
+        key["reprojection_pck_20"] = metrics[np.argmin(np.abs(thresh - 20)), np.argmin(np.abs(confidence - 0.5))]
+        key["reprojection_pck_50"] = metrics[np.argmin(np.abs(thresh - 50)), np.argmin(np.abs(confidence - 0.5))]
+        key["reprojection_pck_100"] = metrics[np.argmin(np.abs(thresh - 100)), np.argmin(np.abs(confidence - 0.5))]
         key["reprojection_metrics"] = {
             "metrics": np.array(metrics),
             "thresh": np.array(thresh),
