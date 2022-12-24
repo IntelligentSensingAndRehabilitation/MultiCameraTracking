@@ -289,14 +289,20 @@ class PersonKeypointReprojectionQuality(dj.Computed):
         camera_params, camera_names = (Calibration & key).fetch1("camera_calibration", "camera_names")
         assert camera_names == video_camera_name.tolist(), "Videos don't match cameras in calibration"
 
-        # to keep it comparable, only analyzing the first 27 joints, also need to exclude 3D confidence
-        # for projection to work properly
-        kp3d = kp3d[:, :27, :3]
-
         # handle cases where there are different numbers of frames
         N = min([k.shape[0] for k in kp2d])
         kp2d = np.stack([k[:N] for k in kp2d], axis=0)
-        kp2d = kp2d[:, :, : kp3d.shape[1]]
+
+        # to keep it comparable, only analyzing the first 27 joints, also need to exclude 3D confidence
+        # for projection to work properly
+        if (TopDownMethodLookup & key).fetch1("top_down_method_name") == "MMPoseHalpe":
+            idx = np.setdiff1d(np.arange(26), [17])
+            kp3d = kp3d[:, idx, :3]
+            kp2d = kp2d[:, :, idx]
+
+        if (TopDownMethodLookup & key).fetch1("top_down_method_name") == "MMPoseWholebody":
+            kp3d = kp3d[:, :23, :3]
+            kp2d = kp2d[:, :, :23]
 
         metrics, thresh, confidence = fit_quality.reprojection_quality(kp3d, camera_params, kp2d)
 

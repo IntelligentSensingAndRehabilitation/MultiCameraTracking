@@ -2,8 +2,7 @@ from typing import List, Dict
 
 from pose_pipeline import (
     PersonBbox,
-    TopDownPerson,
-    TopDownMethod,
+    Video,
     TopDownMethodLookup,
     TrackingBboxMethodLookup,
     OpenPosePerson,
@@ -22,6 +21,8 @@ def reconstruction_pipeline(
     tracking_method_name: str = "EasyMocap",
     reconstruction_method_name: str = "RobustTriangulation",
 ):
+
+    from pose_pipeline.utils import standard_pipelines as pose_pipelines
 
     if type(keys) == dict:
         keys = [keys]
@@ -44,11 +45,12 @@ def reconstruction_pipeline(
         print(f"Processing {len(video_keys)} videos with key: {k}")
 
         for v in video_keys:
-            v = {"top_down_method": top_down_method, **v}
-            TopDownMethod.insert1(v, skip_duplicates=True)
             if top_down_method_name == "OpenPose":
                 OpenPosePerson.populate(v, suppress_errors=True, reserve_jobs=True)
-            TopDownPerson.populate(v, suppress_errors=True, reserve_jobs=True)
+            v = (Video & v).fetch1("KEY")
+            pose_pipelines.top_down_pipeline(
+                v, tracking_method_name=tracking_method_name, top_down_method_name=top_down_method_name
+            )
 
         k["reconstruction_method"] = reconstruction_method
         k["top_down_method"] = top_down_method
