@@ -59,6 +59,14 @@ class PersonKeypointReconstructionMethodLookup(dj.Lookup):
         {"reconstruction_method": 0, "reconstruction_method_name": "RobustTriangulation"},
         {"reconstruction_method": 1, "reconstruction_method_name": "Optimization"},
         {"reconstruction_method": 2, "reconstruction_method_name": "ImplicitOptimization"},
+        {"reconstruction_method": 3, "reconstruction_method_name": "ImplicitOptimizationRobustWeights"},
+        {"reconstruction_method": 4, "reconstruction_method_name": "Triangulation"},
+        {"reconstruction_method": 5, "reconstruction_method_name": "RobustTriangulation100"},
+        {"reconstruction_method": 6, "reconstruction_method_name": "RobustTriangulation50"},
+        {"reconstruction_method": 7, "reconstruction_method_name": "OptimizationRobustWeights"},
+        {"reconstruction_method": 8, "reconstruction_method_name": "RobustTriangulationThresh0.3"},
+        {"reconstruction_method": 9, "reconstruction_method_name": "ImplicitOptimizationHuber"},
+        {"reconstruction_method": 10, "reconstruction_method_name": "ImplicitOptimizationRobustWeightThresh0.3"},
     ]
 
 
@@ -89,7 +97,7 @@ class PersonKeypointReconstruction(dj.Computed):
     def make(self, key):
 
         import numpy as np
-        from ..analysis.camera import robust_triangulate_points
+        from ..analysis.camera import robust_triangulate_points, triangulate_point
         from ..analysis.optimize_reconstruction import skeleton_loss, reprojection_loss, smoothness_loss
 
         calibration_key = (Calibration & key).fetch1("KEY")
@@ -148,9 +156,29 @@ class PersonKeypointReconstruction(dj.Computed):
         reconstruction_method_name = (PersonKeypointReconstructionMethodLookup & key).fetch1(
             "reconstruction_method_name"
         )
-        if reconstruction_method_name == "RobustTriangulation":
-            points3d, camera_weights = robust_triangulate_points(camera_calibration, points2d, return_weights=True)
 
+        if reconstruction_method_name == "Triangulation":
+            # downweight any views less than 0.5 confidence
+            conf = points2d[..., -1]
+            conf[conf < 0.5] = 0.0
+            points2d[..., -1] = conf
+            points3d = triangulate_point(camera_calibration, points2d, return_confidence=True)
+            camera_weights = []
+            print(points3d.shape)
+        elif reconstruction_method_name == "RobustTriangulation":
+            points3d, camera_weights = robust_triangulate_points(camera_calibration, points2d, return_weights=True)
+        elif reconstruction_method_name == "RobustTriangulation100":
+            points3d, camera_weights = robust_triangulate_points(
+                camera_calibration, points2d, return_weights=True, sigma=100
+            )
+        elif reconstruction_method_name == "RobustTriangulation50":
+            points3d, camera_weights = robust_triangulate_points(
+                camera_calibration, points2d, return_weights=True, sigma=50
+            )
+        elif reconstruction_method_name == "RobustTriangulationThresh0.3":
+            points3d, camera_weights = robust_triangulate_points(
+                camera_calibration, points2d, return_weights=True, threshold=0.3
+            )
         elif reconstruction_method_name == "Optimization":
             from ..analysis.optimize_reconstruction import optimize_trajectory
 
@@ -162,14 +190,45 @@ class PersonKeypointReconstruction(dj.Computed):
                 delta_weight=0.1,
                 skeleton_weight=0.1,
                 skeleton=skeleton,
+                huber_max=10,
+                robust_camera_weights=False,
                 max_iters=50000,
-                robust_loss=True,
+            )
+        elif reconstruction_method_name == "OptimizationRobustWeights":
+            from ..analysis.optimize_reconstruction import optimize_trajectory
+
+            points3d, camera_weights = optimize_trajectory(
+                points2d,
+                camera_calibration,
+                "explicit",
+                return_weights=True,
+                delta_weight=0.1,
+                skeleton_weight=0.1,
+                skeleton=skeleton,
+                huber_max=10000,
+                robust_camera_weights=True,
+                max_iters=50000,
             )
 
+        elif reconstruction_method_name == "ImplicitOptimizationRobustWeightThresh0.3":
+            from ..analysis.optimize_reconstruction import optimize_trajectory
+
+            points3d, camera_weights = optimize_trajectory(
+                points2d,
+                camera_calibration,
+                "explicit",
+                return_weights=True,
+                delta_weight=0.1,
+                skeleton_weight=0.1,
+                skeleton=skeleton,
+                huber_max=10000,
+                confidence_threshold=0.3,
+                robust_camera_weights=True,
+                max_iters=50000,
+            )
         elif reconstruction_method_name == "ImplicitOptimization":
             from ..analysis.optimize_reconstruction import optimize_trajectory
 
-            points2d = points2d[:, :, :27]
             points3d, camera_weights = optimize_trajectory(
                 points2d,
                 camera_calibration,
@@ -178,15 +237,52 @@ class PersonKeypointReconstruction(dj.Computed):
                 delta_weight=0.1,
                 skeleton_weight=0.1,
                 skeleton=skeleton,
+                huber_max=10,
+                robust_camera_weights=False,
                 max_iters=50000,
-                robust_loss=True,
             )
+
+        elif reconstruction_method_name == "ImplicitOptimizationHuber":
+            from ..analysis.optimize_reconstruction import optimize_trajectory
+
+            points3d, camera_weights = optimize_trajectory(
+                points2d,
+                camera_calibration,
+                "implicit",
+                return_weights=True,
+                delta_weight=0.1,
+                skeleton_weight=0.1,
+                skeleton=skeleton,
+                huber_max=10000,
+                robust_camera_weights=False,
+                max_iters=50000,
+            )
+
+        elif reconstruction_method_name == "ImplicitOptimizationRobustWeights":
+            from ..analysis.optimize_reconstruction import optimize_trajectory
+
+            points3d, camera_weights = optimize_trajectory(
+                points2d,
+                camera_calibration,
+                "implicit",
+                return_weights=True,
+                delta_weight=0.1,
+                skeleton_weight=0.1,
+                skeleton=skeleton,
+                huber_max=10000,
+                robust_camera_weights=True,
+                max_iters=50000,
+            )
+        else:
+            raise ValueError("Unknown reconstruction method")
 
         key["keypoints3d"] = np.array(points3d)
         key["camera_weights"] = np.array(camera_weights)
         key["reprojection_loss"] = reprojection_loss(camera_calibration, points2d, points3d[:, :, :3], huber_max=100)
         key["skeleton_loss"] = skeleton_loss(points3d[:, :, :3], skeleton)
         key["smoothness_loss"] = smoothness_loss(points3d[:, :, :3])
+        if np.isinf(key["smoothness_loss"]):
+            key["smoothness_loss"] = 1e10
 
         self.insert1(key, allow_direct_insert=True)
 

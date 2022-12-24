@@ -301,7 +301,15 @@ def skeleton_video(keypoints3d, filename, method, fps=30.0):
     return anim
 
 
-def make_reprojection_video(key: dict, portrait_width=288, dilate=1.1, return_results=False):
+def make_reprojection_video(
+    key: dict,
+    portrait_width=288,
+    dilate=1.1,
+    return_results=False,
+    detected_keypoint_size=4,
+    projected_keypoint_size=6,
+    visible_threshold=0.35,
+):
     """Create a video showing the cropped individual with the 2D keypoints project from each view"""
 
     from pose_pipeline import PersonBbox, BlurredVideo, TopDownPerson, Video, VideoInfo
@@ -317,7 +325,9 @@ def make_reprojection_video(key: dict, portrait_width=288, dilate=1.1, return_re
 
     recording_fn = (MultiCameraRecording & key).fetch1("video_base_filename")
     videos = TopDownPerson * MultiCameraRecording * PersonKeypointReconstruction * SingleCameraVideo & key
-    video_keys, video_camera_name = (TopDownPerson.proj() * SingleCameraVideo.proj() * videos).fetch("KEY", "camera_name")
+    video_keys, video_camera_name = (TopDownPerson.proj() * SingleCameraVideo.proj() * videos).fetch(
+        "KEY", "camera_name"
+    )
     keypoints3d = (PersonKeypointReconstruction & key).fetch1("keypoints3d")
     camera_params, camera_names = (Calibration & key).fetch1("camera_calibration", "camera_names")
     assert camera_names == video_camera_name.tolist(), "Videos don't match cameras in calibration"
@@ -350,7 +360,7 @@ def make_reprojection_video(key: dict, portrait_width=288, dilate=1.1, return_re
     # add low confidence when clipped
     keypoints2d = np.concatenate([keypoints2d, ~clipped[..., None] * 1.0], axis=-1)
 
-    total_frames = min(kp3d.shape[0], np.min((VideoInfo & video_keys).fetch('num_frames')))
+    total_frames = min(kp3d.shape[0], np.min((VideoInfo & video_keys).fetch("num_frames")))
 
     bbox_fns = [PersonBbox.get_overlay_fn(v) for v in video_keys]
     videos = [(BlurredVideo & v).fetch1("output_video") for v in video_keys]
@@ -376,15 +386,19 @@ def make_reprojection_video(key: dict, portrait_width=288, dilate=1.1, return_re
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
             frame = draw_keypoints(
-                frame, keypoints2d[video_idx, frame_idx], radius=6, color=(125, 125, 255), threshold=0.75
+                frame,
+                keypoints2d[video_idx, frame_idx],
+                radius=projected_keypoint_size,
+                color=(125, 125, 255),
+                threshold=visible_threshold,
             )
             frame = draw_keypoints(
                 frame,
                 kp2d_detected[video_idx, frame_idx],
-                radius=4,
+                radius=detected_keypoint_size,
                 color=(255, 80, 80),
                 border_color=(64, 20, 20),
-                threshold=0.75,
+                threshold=visible_threshold,
             )
             frame = bbox_fn(frame, frame_idx, width=2, color=(0, 0, 255))
             frame = crop_image_bbox(
@@ -426,8 +440,9 @@ def make_reprojection_video(key: dict, portrait_width=288, dilate=1.1, return_re
 
     from pose_pipeline.utils.video_format import compress
 
-    filename = compress(filename)
+    compressed_filename = compress(filename)
+    os.remove(filename)
 
     if return_results:
-        return filename, results
-    return filename
+        return compressed_filename, results
+    return compressed_filename

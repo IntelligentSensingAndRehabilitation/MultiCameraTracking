@@ -268,6 +268,8 @@ class GaitRiteRecordingStepLengthError(dj.Computed):
         ---
         step_length_error    : float
         stride_length_error  : float
+        gaitrite_step_length : float
+        computed_step_length : float
         """
 
     def make(self, key):
@@ -307,6 +309,8 @@ class GaitRiteRecordingStepLengthError(dj.Computed):
                 )
                 step_key["step_length_error"] = step_length - step["Step Length"] * 10.0  # convert to mm
                 step_key["stride_length_error"] = stride_length - step["Stride Length"] * 10.0
+                step_key["gaitrite_step_length"] = step["Step Length"] * 10.0
+                step_key["computed_step_length"] = step_length
 
                 if ~np.isnan(stride_length) and ~np.isnan(step_length):
                     # avoid nans when GaitRite timing doesn't overlap recording
@@ -605,6 +609,7 @@ def import_gaitrite_files(subject_id: int, filenames: List[str]):
 
         display(possible_matches)
     assert np.all(match_files == np.arange(len(filenames))), "Could not match all filenames to recordings"
+    filenames = [filenames[i] for i in match_files]
     keys = [keys[i] for i in match_keys]
 
     min_t0 = np.min(t0s)
@@ -622,7 +627,7 @@ def import_gaitrite_files(subject_id: int, filenames: List[str]):
             vid_timestamp = (MultiCameraRecording & vid_key).fetch1("recording_timestamps")
             dt = (t0 - vid_timestamp).total_seconds()
 
-            if np.abs(dt) > 30:
+            if np.abs(dt) > 60:
                 print(f"Skipping {filename} due to large time offset: {dt} seconds")
                 continue
 

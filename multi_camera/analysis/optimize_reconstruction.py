@@ -106,7 +106,7 @@ def huber(x, delta=5.0, max=10000, max_slope=0.1):
     return x
 
 
-def reprojection_loss(camera_params, points2d, points3d, huber_max=100):
+def reprojection_loss(camera_params, points2d, points3d, huber_max=10, threshold=0.5):
     """Compute reprojection loss between 3D keypoints and 2D keypoints."""
 
     conf = points2d[..., -1]
@@ -168,7 +168,9 @@ def optimize_trajectory(
     skeleton_weight=0.0,
     delta_weight=0.0,
     max_iters=2000,
-    robust_loss=False,
+    confidence_threshold=0.5,
+    robust_camera_weights=False,
+    huber_max=10,
     return_confidence=True,
     tolerance=1e-7,
     camera_weight_distance=20,
@@ -208,14 +210,18 @@ def optimize_trajectory(
     variables = model.init(jax.random.PRNGKey(seed), x)
 
     # use robust triangulation to determine weights
-    if not robust_loss:
-        _, camera_weights = robust_triangulate_points(camera_params, keypoints2d, return_weights=True)
+    if robust_camera_weights:
+        _, camera_weights = robust_triangulate_points(
+            camera_params, keypoints2d, return_weights=True, threshold=confidence_threshold
+        )
         keypoints2d = jnp.concatenate([keypoints2d[..., :-1], camera_weights[..., None]], axis=-1)
 
     @jax.jit
     def loss_fn(variables, delta_weight=delta_weight, skeleton_weight=skeleton_weight):
         pred = model.apply(variables, x)
-        l_repro = reprojection_loss(camera_params, keypoints2d, pred, huber_max=10 if robust_loss else 10000)
+        l_repro = reprojection_loss(
+            camera_params, keypoints2d, pred, huber_max=huber_max, threshold=confidence_threshold
+        )
         l_delta = smoothness_loss(pred)  # + relative_smoothness_loss(pred, 19) # pelvis
         if skeleton is None:
             l_skeleton = 0.0
@@ -229,7 +235,7 @@ def optimize_trajectory(
 
     @jax.jit
     def training_step(variables, opt_state, **kwargs):
-        loss_val, grads = loss_grad_fn(variables, **kwargs)  # , huber_max=100 if i > max_iters // 2 else 1000)
+        loss_val, grads = loss_grad_fn(variables, **kwargs)
         updates, opt_state = tx.update(grads, opt_state)
         variables = optax.apply_updates(variables, updates)
         return variables, opt_state, loss_val
@@ -247,14 +253,14 @@ def optimize_trajectory(
 
         if i % jnp.ceil(max_iters / 20) == 0:
             pred = model.apply(variables, x)
-            l_repro = reprojection_loss(camera_params, keypoints2d, pred, huber_max=100 if robust_loss else 10000)
+            l_repro = reprojection_loss(camera_params, keypoints2d, pred, huber_max=huber_max)
             l_delta = smoothness_loss(pred)
             l_skeleton = skeleton_loss(pred, skeleton)
 
             print(
                 f"Loss on step {i}: {loss_val:.3f} (repro: {l_repro:.3f}, delta: {l_delta:.3f}, skeleton: {l_skeleton:.3f})"
             )
-        if not robust_loss and i > 40000 and (jnp.abs(last_loss[i - 150] - loss_val) / loss_val) < tolerance:
+        if i > 40000 and (jnp.abs(last_loss[i - 150] - loss_val) / loss_val) < tolerance:
             print("Converged after {} steps".format(i))
             break
         last_loss.append(loss_val)
