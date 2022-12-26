@@ -80,6 +80,8 @@ def parse_gaitrite(filename: str):
     # get scaling from Heel X field to cm
     ratio = df.loc[2:, "Step Length"] / np.diff(df["Heel X"].iloc[1:])
     ratio = np.abs(ratio)
+    print(f"Ratio before: {ratio}")
+    ratio = 2.54 / 2  # seems to be an odd ratio related to inches to cm
 
     m_ratio = np.mean(ratio)
     assert np.std(m_ratio) < 0.01, "Scaling factor is not constant"
@@ -143,18 +145,23 @@ def procrustes(measurements, ground_truth):
     measurements_centered = measurements - m_mean
     ground_truth_centered = ground_truth - g_mean
 
-    A = measurements_centered
-    B = ground_truth_centered
+    # dividing by norm makes the trace (A*B') = 1 and the scale computed validly
+    norm_A = np.linalg.norm(measurements_centered)
+    norm_B = np.linalg.norm(ground_truth_centered)
+    A = measurements_centered / norm_A
+    B = ground_truth_centered / norm_B
     # from scipy.linalg.orthogonal_procrustes
     u, w, vt = scipy.linalg.svd(B.T.dot(A).T)
     R = u.dot(vt)
+
+    scale = w.sum() * norm_B / norm_A
 
     # Compute the translation vector by taking the difference
     # between the means of the centered matrices
     t = g_mean - np.dot(m_mean, R)
 
     # Return the rotation matrix and translation vector
-    return R, t
+    return R, t, scale
 
 
 def extract_traces(
@@ -323,16 +330,16 @@ def align_steps(timestamps: np.array, keypoints: np.array, gaitrite_df: pd.DataF
         axis=0,
     )
 
-    R, t = procrustes(measurements, gt)
+    R, t, s = procrustes(measurements, gt)
 
-    residuals = np.dot(measurements, R) + t - gt
+    residuals = np.dot(measurements, R) * s + t - gt
 
     stability = np.concatenate(
         [d["left_heel_range"], d["left_toe_range"], d["right_heel_range"], d["right_toe_range"]], axis=0
     )
     stability = np.mean(stability, axis=0)
 
-    return R, t, residuals, stability
+    return R, t, s, residuals, stability
 
 
 def align_steps_multiple_trials(data, t_offsets):
@@ -392,9 +399,9 @@ def align_steps_multiple_trials(data, t_offsets):
     confidence = np.concatenate(confidence)
     idxs = np.concatenate(idxs)
 
-    R, t = procrustes(measurements, gt)
+    R, t, s = procrustes(measurements, gt)
 
-    residuals = np.dot(measurements, R) + t - gt
+    residuals = np.dot(measurements, R) * s + t - gt
 
     score = np.nansum(np.abs(residuals) * confidence) / (1e-9 + np.nansum(confidence)) / 2  # two columns
 
@@ -405,7 +412,7 @@ def align_steps_multiple_trials(data, t_offsets):
         r = np.mean(np.abs(residuals[idxs == i, :]))
         grouped_residuals.append(r)
 
-    return R, t, residuals, np.array(grouped_residuals), score
+    return R, t, s, residuals, np.array(grouped_residuals), score
 
 
 def find_best_alignment(data: list, maxiters=10):
@@ -437,7 +444,7 @@ def find_best_alignment(data: list, maxiters=10):
 
         for _ in range(maxiters):
             test_offsets = [t[i] for t, i in zip(t_offsets, t_idx)]
-            _, _, _, grouped_residuals, score = align_steps_multiple_trials(data, test_offsets)
+            _, _, _, _, grouped_residuals, score = align_steps_multiple_trials(data, test_offsets)
 
             if score < best_score:
                 best_score = score
@@ -452,7 +459,7 @@ def find_best_alignment(data: list, maxiters=10):
                 test_offsets = [t[i] for t, i in zip(t_offsets, t_idx)]
                 for test_offset in t_offsets[trial]:
                     test_offsets[trial] = test_offset
-                    _, _, _, _, score = align_steps_multiple_trials(data, test_offsets)
+                    _, _, _, _, _, score = align_steps_multiple_trials(data, test_offsets)
                     scores.append(score)
 
                 t_idx[trial] = np.argmin(scores)
@@ -476,8 +483,8 @@ def find_best_alignment(data: list, maxiters=10):
             best_score = score
 
     test_offsets = [t[i] for t, i in zip(t_offsets, best_t_idx)]
-    R, t, residuals, _, best_score = align_steps_multiple_trials(data, test_offsets)
+    R, t, scale, residuals, _, best_score = align_steps_multiple_trials(data, test_offsets)
 
-    print(f"Residuals (mm): {np.mean(np.abs(residuals)):.2f}")
+    print(f"Residuals (mm): {np.mean(np.abs(residuals)):.2f}. Scale: {scale:.6f}. Score: {best_score:.2f}.")
 
-    return R, t, test_offsets, best_score
+    return R, t, scale, test_offsets, best_score

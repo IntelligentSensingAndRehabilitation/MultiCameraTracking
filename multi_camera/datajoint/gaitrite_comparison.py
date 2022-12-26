@@ -60,6 +60,7 @@ class GaitRiteCalibration(dj.Computed):
     ---
     r: longblob            # rotation matrix
     t: longblob            # translation vector
+    s: float               # scale
     t_offsets : longblob   # time offsets
     score : float          # score of the best alignment
     """
@@ -69,9 +70,9 @@ class GaitRiteCalibration(dj.Computed):
             GaitRiteRecording * PersonKeypointReconstruction & key & "reconstruction_method=0 and top_down_method=2"
         ).fetch("KEY")
         data = [fetch_data(k) for k in recording_keys]
-        R, t, t_offsets, best_score = find_best_alignment(data)
+        R, t, scale, t_offsets, best_score = find_best_alignment(data)
 
-        self.insert1(dict(**key, r=R, t=t, t_offsets=t_offsets, score=best_score))
+        self.insert1(dict(**key, r=R, t=t, s=scale, t_offsets=t_offsets, score=best_score))
 
     @property
     def key_source(self):
@@ -98,9 +99,9 @@ class GaitRiteRecordingAlignment(dj.Computed):
     def make(self, key):
         import scipy
 
-        R, t = (GaitRiteCalibration & key).fetch1("r", "t")
+        R, t, s = (GaitRiteCalibration & key).fetch1("r", "t", "s")
         dt, kp3d, df = fetch_data(key)
-        kp3d_aligned = kp3d[:, :, :3] @ R + t
+        kp3d_aligned = kp3d[:, :, :3] @ R * s + t
         kp3d_confidence = kp3d[..., -1:]
 
         def get_residuals(t_offset):
@@ -145,7 +146,7 @@ class GaitRiteRecordingAlignment(dj.Computed):
                 axis=0,
             )
 
-            confidence = np.clip(confidence, a_min=0.05, a_max=None)  # want to slightly count all steps
+            confidence = np.clip(confidence, a_min=0.5, a_max=None)  # want to slightly count all steps
 
             return np.nansum(np.abs(measurements - gt) * confidence) / (1e-9 + np.nansum(confidence)) + np.nansum(
                 noise * confidence
@@ -153,9 +154,24 @@ class GaitRiteRecordingAlignment(dj.Computed):
 
         present = np.mean(kp3d[:, :, 3], axis=1)
         present = scipy.signal.medfilt(present, 9) > 0.3
-        offset_range = get_offset_range(dt[present], df)
+        offset_range = None
+
+        # search around the offset found during calibration
+        offsets = (GaitRiteCalibration & key).fetch1("t_offsets")
+        trials = (GaitRiteRecording & (GaitRiteCalibration & key)).fetch("KEY")
+        match_key = (GaitRiteRecording & key).fetch1("KEY")
+        # technically this isn't very valid DJ behavior as it assumes the order the keys
+        # are returned from the database. however, we didn't store this data in the best
+        # format to do this "correctly" and these errors would show up when looking at results.
+        offset = [offset for trial, offset in zip(trials, offsets) if trial == match_key]
+        assert len(offset) == 1
+        offset_range = (offset[0] - 0.5, offset[0] + 0.5)
+        # offset_range = get_offset_range(dt[present], df)
+
+        print(offset_range)
         t_offsets = np.arange(offset_range[0], offset_range[1], 0.03)
         scores = [get_score(t) for t in t_offsets]
+        print(t_offsets, scores)
         t_offset = t_offsets[np.argmin(scores)]
         residuals = get_residuals(t_offset)
 
@@ -197,10 +213,10 @@ class GaitRiteRecordingStepPositionError(dj.Computed):
         t_offset = (GaitRiteRecordingAlignment & key).fetch1("t_offset")
 
         dt, kp3d, df = fetch_data(key)
-        R, t = (GaitRiteCalibration & key).fetch1("r", "t")
+        R, t, s = (GaitRiteCalibration & key).fetch1("r", "t", "s")
 
         conf = kp3d[:, :, 3]
-        kp3d = kp3d[:, :, :3] @ R + t
+        kp3d = kp3d[:, :, :3] @ R * s + t
 
         step_keys = []
         for i, step in df.iterrows():
@@ -226,7 +242,7 @@ class GaitRiteRecordingStepPositionError(dj.Computed):
                 toe_trace = kp3d[trace_idx, 3, :2]
                 toe_conf = conf[trace_idx, 3]
 
-            erf = lambda x: np.mean(np.abs(x))
+            erf = lambda x: np.mean(x)
             step_key["heel_forward_error"] = erf(heel_trace[:, 0] - step["Heel X"])
             step_key["heel_lateral_error"] = erf(heel_trace[:, 1] - step["Heel Y"])
             step_key["toe_forward_error"] = erf(toe_trace[:, 0] - step["Toe X"])
@@ -237,15 +253,24 @@ class GaitRiteRecordingStepPositionError(dj.Computed):
             step_key["toe_conf"] = np.mean(toe_conf)
             step_key["heel_x"] = step["Heel X"]
 
-            if np.sum(trace_idx) > 0 and ~np.isnan(step_key["heel_conf"]) and ~np.isnan(step_key["heel_forward_error"]):
+            if (
+                np.sum(trace_idx) > 0
+                and ~np.isnan(step_key["heel_conf"])
+                and ~np.isnan(step_key["toe_conf"])
+                and step_key["heel_conf"] > 0
+                and step_key["toe_conf"] > 0
+                and ~np.isnan(step_key["heel_forward_error"])
+            ):
                 # avoid nans when GaitRite timing doesn't overlap recording. this is also reflected
                 # in nan values in the confidence if the person isn't tracked at that time
                 step_keys.append(step_key)
 
-        key["mean_forward_heel_error"] = np.mean([k["heel_forward_error"] for k in step_keys])
-        key["mean_lateral_heel_error"] = np.mean([k["heel_lateral_error"] for k in step_keys])
-        key["mean_forward_toe_error"] = np.mean([k["toe_forward_error"] for k in step_keys])
-        key["mean_lateral_toe_error"] = np.mean([k["toe_lateral_error"] for k in step_keys])
+        print(len(step_keys))
+        erf = lambda x: np.mean(np.abs(x))
+        key["mean_forward_heel_error"] = erf([k["heel_forward_error"] for k in step_keys])
+        key["mean_lateral_heel_error"] = erf([k["heel_lateral_error"] for k in step_keys])
+        key["mean_forward_toe_error"] = erf([k["toe_forward_error"] for k in step_keys])
+        key["mean_lateral_toe_error"] = erf([k["toe_lateral_error"] for k in step_keys])
 
         self.insert1(key)
         self.Step.insert(step_keys)
@@ -277,10 +302,10 @@ class GaitRiteRecordingStepLengthError(dj.Computed):
         t_offset = (GaitRiteRecordingAlignment & key).fetch1("t_offset")
 
         dt, kp3d, df = fetch_data(key)
-        R, t = (GaitRiteCalibration & key).fetch1("r", "t")
+        R, t, s = (GaitRiteCalibration & key).fetch1("r", "t", "s")
 
         conf = kp3d[:, :, 3]
-        kp3d = kp3d[:, :, :3] @ R + t
+        kp3d = kp3d[:, :, :3] @ R * s + t
 
         last_left_heel = None
         last_right_heel = None
@@ -353,10 +378,10 @@ class GaitRiteRecordingStepWidthError(dj.Computed):
         t_offset = (GaitRiteRecordingAlignment & key).fetch1("t_offset")
 
         dt, kp3d, df = fetch_data(key)
-        R, t = (GaitRiteCalibration & key).fetch1("r", "t")
+        R, t, s = (GaitRiteCalibration & key).fetch1("r", "t", "s")
 
         conf = kp3d[:, :, 3]
-        kp3d = kp3d[:, :, :3] @ R + t
+        kp3d = kp3d[:, :, :3] @ R * s + t
 
         last_left_heel = None
         last_right_heel = None
@@ -507,17 +532,17 @@ def plot_data(key, t_offset=None, axis=0):
         t_offset = (GaitRiteRecordingAlignment & key).fetch1("t_offset")
 
     dt, kp3d, df = fetch_data(key)
-    R, t = (GaitRiteCalibration & key).fetch1("r", "t")
+    R, t, s = (GaitRiteCalibration & key).fetch1("r", "t", "s")
 
     if kp3d.shape[-1] == 4:
         conf = kp3d[:, :, 3]
     else:
         conf = np.ones_like(kp3d[:, :, 0])
     if R.shape[0] == 3:
-        kp3d = kp3d[:, :, :3] @ R + t
+        kp3d = kp3d[:, :, :3] @ R * s + t
     else:
         print(kp3d.shape, R.shape, t.shape)
-        kp3d = kp3d[:, :, :2] @ R + t
+        kp3d = kp3d[:, :, :2] @ R * s + t
 
     idx = df["Left Foot"]
 
