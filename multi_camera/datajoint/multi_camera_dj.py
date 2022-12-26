@@ -56,18 +56,18 @@ class PersonKeypointReconstructionMethodLookup(dj.Lookup):
     reconstruction_method_name : varchar(50)
     """
     contents = [
-        {"reconstruction_method": 0, "reconstruction_method_name": "RobustTriangulation"},
-        {"reconstruction_method": 1, "reconstruction_method_name": "Optimization"},
-        {"reconstruction_method": 2, "reconstruction_method_name": "ImplicitOptimization"},
-        {"reconstruction_method": 3, "reconstruction_method_name": "ImplicitOptimizationRobustWeights"},
+        {"reconstruction_method": 0, "reconstruction_method_name": "Robust Triangulation"},
+        {"reconstruction_method": 1, "reconstruction_method_name": "Explicit Optimization KP Conf, MaxHuber=10"},
+        {"reconstruction_method": 2, "reconstruction_method_name": "Implicit Optimization KP Conf, MaxHuber=10"},
+        {"reconstruction_method": 3, "reconstruction_method_name": "Implicit Optimization"},
         {"reconstruction_method": 4, "reconstruction_method_name": "Triangulation"},
-        {"reconstruction_method": 5, "reconstruction_method_name": "RobustTriangulation100"},
-        {"reconstruction_method": 6, "reconstruction_method_name": "RobustTriangulation50"},
-        {"reconstruction_method": 7, "reconstruction_method_name": "OptimizationRobustWeights"},
-        {"reconstruction_method": 8, "reconstruction_method_name": "RobustTriangulationThresh0.3"},
-        {"reconstruction_method": 9, "reconstruction_method_name": "ImplicitOptimizationHuber"},
-        {"reconstruction_method": 10, "reconstruction_method_name": "ImplicitOptimizationRobustWeightThresh0.3"},
-        {"reconstruction_method": 11, "reconstruction_method_name": "ImplicitOptimizationRobustWeightsMaxHuber10"},
+        {"reconstruction_method": 5, "reconstruction_method_name": r"Robust Triangulation $\\sigma=100$"},
+        {"reconstruction_method": 6, "reconstruction_method_name": r"Robust Triangulation $\\sigma=50$"},
+        {"reconstruction_method": 7, "reconstruction_method_name": "Explicit Optimization"},
+        {"reconstruction_method": 8, "reconstruction_method_name": r"Robust Triangulation $\\gamma=0.3$"},
+        {"reconstruction_method": 9, "reconstruction_method_name": "Implicit Optimization KP Conf"},
+        {"reconstruction_method": 10, "reconstruction_method_name": r"Implicit Optimization $\\gamma=0.3$"},
+        {"reconstruction_method": 11, "reconstruction_method_name": "Implicit Optimization, MaxHuber=10"},
     ]
 
 
@@ -166,21 +166,26 @@ class PersonKeypointReconstruction(dj.Computed):
             points3d = triangulate_point(camera_calibration, points2d, return_confidence=True)
             camera_weights = []
             print(points3d.shape)
-        elif reconstruction_method_name == "RobustTriangulation":
+
+        elif reconstruction_method_name == "Robust Triangulation":
             points3d, camera_weights = robust_triangulate_points(camera_calibration, points2d, return_weights=True)
-        elif reconstruction_method_name == "RobustTriangulation100":
+
+        elif reconstruction_method_name == "Robust Triangulation $\sigma=100$":
             points3d, camera_weights = robust_triangulate_points(
                 camera_calibration, points2d, return_weights=True, sigma=100
             )
-        elif reconstruction_method_name == "RobustTriangulation50":
+
+        elif reconstruction_method_name == "Robust Triangulation $\sigma=50$":
             points3d, camera_weights = robust_triangulate_points(
                 camera_calibration, points2d, return_weights=True, sigma=50
             )
-        elif reconstruction_method_name == "RobustTriangulationThresh0.3":
+
+        elif reconstruction_method_name == "Robust Triangulation $\gamma=0.3$":
             points3d, camera_weights = robust_triangulate_points(
                 camera_calibration, points2d, return_weights=True, threshold=0.3
             )
-        elif reconstruction_method_name == "Optimization":
+
+        elif reconstruction_method_name == "Explicit Optimization MaxHuber=10":
             from ..analysis.optimize_reconstruction import optimize_trajectory
 
             points3d, camera_weights = optimize_trajectory(
@@ -195,7 +200,7 @@ class PersonKeypointReconstruction(dj.Computed):
                 robust_camera_weights=False,
                 max_iters=50000,
             )
-        elif reconstruction_method_name == "OptimizationRobustWeights":
+        elif reconstruction_method_name == "Explicit Optimization":
             from ..analysis.optimize_reconstruction import optimize_trajectory
 
             points3d, camera_weights = optimize_trajectory(
@@ -211,7 +216,7 @@ class PersonKeypointReconstruction(dj.Computed):
                 max_iters=50000,
             )
 
-        elif reconstruction_method_name == "ImplicitOptimizationRobustWeightThresh0.3":
+        elif reconstruction_method_name == "Implicit Optimization $\lambda=0.3$":
             from ..analysis.optimize_reconstruction import optimize_trajectory
 
             points3d, camera_weights = optimize_trajectory(
@@ -227,7 +232,7 @@ class PersonKeypointReconstruction(dj.Computed):
                 robust_camera_weights=True,
                 max_iters=50000,
             )
-        elif reconstruction_method_name == "ImplicitOptimization":
+        elif reconstruction_method_name == "Implicit Optimization KP Conf, MaxHuber=10":
             from ..analysis.optimize_reconstruction import optimize_trajectory
 
             points3d, camera_weights = optimize_trajectory(
@@ -243,7 +248,7 @@ class PersonKeypointReconstruction(dj.Computed):
                 max_iters=50000,
             )
 
-        elif reconstruction_method_name == "ImplicitOptimizationHuber":
+        elif reconstruction_method_name == "Implicit Optimization KP Conf":
             from ..analysis.optimize_reconstruction import optimize_trajectory
 
             points3d, camera_weights = optimize_trajectory(
@@ -259,7 +264,7 @@ class PersonKeypointReconstruction(dj.Computed):
                 max_iters=50000,
             )
 
-        elif reconstruction_method_name == "ImplicitOptimizationRobustWeights":
+        elif reconstruction_method_name == "Implicit Optimization":
             from ..analysis.optimize_reconstruction import optimize_trajectory
 
             points3d, camera_weights = optimize_trajectory(
@@ -275,7 +280,7 @@ class PersonKeypointReconstruction(dj.Computed):
                 max_iters=50000,
             )
 
-        elif reconstruction_method_name == "ImplicitOptimizationRobustWeightsMaxHuber10":
+        elif reconstruction_method_name == "Implicit Optimization, MaxHuber=10":
 
             from ..analysis.optimize_reconstruction import optimize_trajectory
 

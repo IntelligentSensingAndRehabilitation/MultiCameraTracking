@@ -31,9 +31,12 @@ def reconstruction_pipeline(
     tracking_method = (TrackingBboxMethodLookup & f'tracking_method_name="{tracking_method_name}"').fetch1(
         "tracking_method"
     )
-    reconstruction_method = (
-        PersonKeypointReconstructionMethodLookup & f'reconstruction_method_name="{reconstruction_method_name}"'
-    ).fetch1("reconstruction_method")
+
+    r = {"reconstruction_method_name": reconstruction_method_name}
+    assert (
+        len(PersonKeypointReconstructionMethodLookup & r) == 1
+    ), f"Unable to find reconstruction method {reconstruction_method_name}"
+    reconstruction_method = (PersonKeypointReconstructionMethodLookup & r).fetch1("reconstruction_method")
 
     final_keys = []
 
