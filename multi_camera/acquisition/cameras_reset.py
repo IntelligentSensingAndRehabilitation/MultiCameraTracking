@@ -3,7 +3,7 @@ from simple_pyspin import Camera
 import yaml
 
 
-def reset(num_cams=1, config=""):
+def reset(num_cams=1, config="", verbose=False):
 
     # Get the available cameras
     camera_list = simple_pyspin.list_cameras()
@@ -24,18 +24,20 @@ def reset(num_cams=1, config=""):
         # First create list of first n cameras in camera_list where n=num_cams
         cams = [Camera(i, lock=True) for i in range(num_cams)]
 
-    print(f"List of cams: {cams}")
+    if verbose:
+        print(f"List of cams: {cams}")
 
     for c in cams:
         c.init()
-        print(f"Reset {c.DeviceSerialNumber}")
+
 
         # check if the current camera is in the list defined by config
         if config != "":
             if int(c.DeviceSerialNumber) not in camera_config["camera-info"].keys():
-                print(f"{c.DeviceSerialNumber} not listed in config file.")
+                if verbose:
+                    print(f"{c.DeviceSerialNumber} not listed in config file.")
                 continue
-
+            print(f"Reset {c.DeviceSerialNumber}")
             c.DeviceReset()
 
 
