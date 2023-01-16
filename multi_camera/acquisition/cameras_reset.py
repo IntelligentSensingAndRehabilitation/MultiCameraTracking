@@ -36,6 +36,7 @@ def reset(all_cams=True, config="", verbose=False):
         print(f"Reset {c.DeviceSerialNumber}")
         c.DeviceReset()
 
+
 if __name__ == "__main__":
     import argparse
 
@@ -45,6 +46,4 @@ if __name__ == "__main__":
     parser.add_argument("-v", "--verbose", default=False, action="store_true", help="Control verbosity of code")
     args = parser.parse_args()
 
-    reset(all_cams=args.all_cams,
-          config=args.config,
-          verbose=args.verbose)
+    reset(all_cams=args.all_cams, config=args.config, verbose=args.verbose)
