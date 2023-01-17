@@ -218,6 +218,11 @@ class GaitRiteRecordingStepPositionError(dj.Computed):
         conf = kp3d[:, :, 3]
         kp3d = kp3d[:, :, :3] @ R * s + t
 
+        # process the data as if they always walk one way to reverse the sign of the error.
+        # this means we get the actual offset of the heel and toe from the ground truth
+        backwards = (df.iloc[-1]["Heel X"] - df.iloc[0]["Heel X"]) < 0
+        sign = -1 if backwards else 1
+
         step_keys = []
         for i, step in df.iterrows():
             step_key = key.copy()
@@ -243,9 +248,9 @@ class GaitRiteRecordingStepPositionError(dj.Computed):
                 toe_conf = conf[trace_idx, 3]
 
             erf = lambda x: np.mean(x)
-            step_key["heel_forward_error"] = erf(heel_trace[:, 0] - step["Heel X"])
+            step_key["heel_forward_error"] = erf(heel_trace[:, 0] - step["Heel X"]) * sign
             step_key["heel_lateral_error"] = erf(heel_trace[:, 1] - step["Heel Y"])
-            step_key["toe_forward_error"] = erf(toe_trace[:, 0] - step["Toe X"])
+            step_key["toe_forward_error"] = erf(toe_trace[:, 0] - step["Toe X"]) * sign
             step_key["toe_lateral_error"] = erf(toe_trace[:, 1] - step["Toe Y"])
             step_key["heel_noise"] = np.std(heel_trace[:, 0])
             step_key["toe_noise"] = np.std(toe_trace[:, 0])
@@ -615,8 +620,14 @@ def import_gaitrite_files(subject_id: int, filenames: List[str]):
         dfs.append(df)
     t0s = np.array(t0s)
 
-    possible_matches = MultiCameraRecording & f'ABS(TIMESTAMP(recording_timestamps) - TIMESTAMP("{t0s[0]}")) < 60*60'
+    possible_matches = (
+        MultiCameraRecording & f'ABS(TIMESTAMP(recording_timestamps) - TIMESTAMP("{t0s[len(t0s) // 2]}")) < 60*90'
+    )
     keys, recording_times = possible_matches.fetch("KEY", "recording_timestamps")
+
+    from IPython.display import display
+
+    display(possible_matches)
 
     # perform a greedy hungarian match between the t0s and the recording times
     # to find the best match
@@ -648,25 +659,24 @@ def import_gaitrite_files(subject_id: int, filenames: List[str]):
 
         # insert the recordings
         for filename, t0, df, vid_key in zip(filenames, t0s[:, 0], dfs, keys):
-            print(vid_key)
             vid_timestamp = (MultiCameraRecording & vid_key).fetch1("recording_timestamps")
             dt = (t0 - vid_timestamp).total_seconds()
-
-            if np.abs(dt) > 60:
-                print(f"Skipping {filename} due to large time offset: {dt} seconds")
-                continue
 
             # update the key with the video key
             key.update(vid_key)
 
             # get the filename without extension without from the full path
             stripped_filename = os.path.split(os.path.splitext(filename)[0])[1]
-            print(stripped_filename)
 
             # convert the pandas dataframe to a list of dictionaries:
             df_dict = df.to_dict("records")
 
-            print(key)
+            print("Matched GaitRite filename: ", stripped_filename, " to ", vid_key)
+
+            if np.abs(dt) > 60:
+                print(f"Skipping {filename} due to large time offset: {dt} seconds\n")
+                continue
+            print("\n")
 
             GaitRiteRecording.insert1(
                 dict(**key, gaitrite_filename=stripped_filename, gaitrite_dataframe=df_dict, gaitrite_t0=t0),

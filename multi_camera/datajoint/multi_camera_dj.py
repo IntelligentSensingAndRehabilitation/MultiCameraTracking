@@ -185,7 +185,7 @@ class PersonKeypointReconstruction(dj.Computed):
                 camera_calibration, points2d, return_weights=True, threshold=0.3
             )
 
-        elif reconstruction_method_name == "Explicit Optimization MaxHuber=10":
+        elif reconstruction_method_name == "Explicit Optimization KP Conf, MaxHuber=10":
             from ..analysis.optimize_reconstruction import optimize_trajectory
 
             points3d, camera_weights = optimize_trajectory(
@@ -216,7 +216,7 @@ class PersonKeypointReconstruction(dj.Computed):
                 max_iters=50000,
             )
 
-        elif reconstruction_method_name == "Implicit Optimization $\lambda=0.3$":
+        elif reconstruction_method_name == "Implicit Optimization $\gamma=0.3$":
             from ..analysis.optimize_reconstruction import optimize_trajectory
 
             points3d, camera_weights = optimize_trajectory(
