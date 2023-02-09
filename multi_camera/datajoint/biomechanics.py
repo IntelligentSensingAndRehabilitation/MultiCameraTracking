@@ -41,6 +41,13 @@ class BiomechanicalReconstructionLookup(dj.Lookup):
         (2, 2, "Rajagopal2015_Halpe", 0, 0.0, 0.0, 0.0, 0.0, 0.0),
         (2, 2, "Rajagopal2015_Halpe", 1, 0.1, 0.1, 10.0, 0.0, 0.0),
         (2, 2, "Rajagopal2015_Halpe", 2, 0.05, 1.0, 50.0, 0.0, 0.0),
+        (2, 3, "Rajagopal2015_Halpe", 0, 0.0, 0.0, 0.0, 0.0, 0.0),
+        (2, 3, "Rajagopal2015_Halpe", 1, 0.1, 0.1, 10.0, 0.0, 0.0),
+        (2, 3, "Rajagopal2015_Halpe", 2, 0.05, 1.0, 50.0, 0.0, 0.0),
+        (12, 3, "Rajagopal_mbl_movi_87", 0, 0.0, 0.0, 0.0, 0.0, 0.0),
+        (12, 3, "Rajagopal_mbl_movi_87", 1, 0.05, 0.0, 10.0, 0.1, 0.0),
+        (12, 3, "Rajagopal_mbl_movi_87", 2, 0.05, 1.0, 50.0, 0.0, 0.0),
+        (12, 3, "Rajagopal_mbl_movi_87", 3, 0.05, 1.0, 50.0, 0.0, 0.01),
     ]
 
 

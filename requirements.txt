@@ -9,3 +9,4 @@ windows-curses
 pynput
 aniposelib
 pyyaml
+nimblephysics==0.8.73

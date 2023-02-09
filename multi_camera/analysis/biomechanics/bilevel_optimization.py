@@ -41,20 +41,36 @@ def fit_markers(
     fitter = nimble.biomechanics.MarkerFitter(customOsim.skeleton, customOsim.markersMap)
     fitter.setInitialIKSatisfactoryLoss(0.005)
     fitter.setInitialIKMaxRestarts(200)
-    fitter.setIterationLimit(1000)
+    fitter.setIterationLimit(300)
+
+    if len(customOsim.anatomicalMarkers) > 10:
+        fitter.setTrackingMarkers(customOsim.trackingMarkers)
+    else:
+        print(
+            "NOTE: The input *.osim file specified suspiciously few ("
+            + str(len(customOsim.anatomicalMarkers))
+            + ', less than the minimum 10) anatomical landmark markers (with <fixed>true</fixed>), so we will default to treating all markers as anatomical except triad markers with the suffix "1", "2", or "3"',
+            flush=True,
+        )
+        fitter.setTriadsToTracking()
 
     if regularize_joint_bounds > 0.0:
         fitter.setIgnoreJointLimits(True)  # this is detrimental without this upcoming feature
-        fitter.setRegularizeJointBounds(regularize_joint_bounds)
+        # fitter.setRegularizeJointBounds(regularize_joint_bounds)
     if max_marker_offset > 0.0:
         fitter.setMaxMarkerOffset(max_marker_offset)  # 0.1
     if regularize_all_body_scales > 0.0:
         fitter.setRegularizeAllBodyScales(regularize_all_body_scales)  # 1.0
     if regularize_anatomical_marker_offsets > 0.0:
         fitter.setRegularizeAnatomicalMarkerOffsets(regularize_anatomical_marker_offsets)  # 10.0
-    if anthropomorphic_prior > 0.0:
-        # this code starting crashing in more recent versions of nimble
 
+    fitter.setRegularizeTrackingMarkerOffsets(0.05)
+    fitter.setMinSphereFitScore(0.01)
+    fitter.setMinAxisFitScore(0.001)
+    # Default max joint weight is 0.5, so this is 2x the default value
+    fitter.setMaxJointWeight(1.0)
+
+    if anthropomorphic_prior > 0.0:
         # Create an anthropometric prior
         anthropometrics: nimble.biomechanics.Anthropometrics = nimble.biomechanics.Anthropometrics.loadFromFile(
             os.path.join(model_path, "ANSUR_metrics.xml")
@@ -169,11 +185,7 @@ def save_model(
     for i in range(skeleton.getNumBodyNodes()):
         bodyNode: nimble.dynamics.BodyNode = skeleton.getBodyNode(i)
         # Now that we adjust the markers BEFORE we rescale the body, we don't want to rescale the marker locations at all
-        bodyScalesMap[bodyNode.getName()] = [
-            1.0 / bodyNode.getScale()[0],
-            1.0 / bodyNode.getScale()[1],
-            1.0 / bodyNode.getScale()[2],
-        ]
+        bodyScalesMap[bodyNode.getName()] = [1, 1, 1]
 
     markerOffsetsMap: Dict[str, Tuple[str, np.ndarray]] = {}
     for n, k in zip(skeleton.getBodyNodes(), fitMarkers):
