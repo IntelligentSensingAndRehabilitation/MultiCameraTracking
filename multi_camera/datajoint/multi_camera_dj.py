@@ -232,6 +232,22 @@ class PersonKeypointReconstruction(dj.Computed):
                 robust_camera_weights=True,
                 max_iters=50000,
             )
+        elif reconstruction_method_name == "Implicit Optimization $\sigma=50$":
+            from ..analysis.optimize_reconstruction import optimize_trajectory
+
+            points3d, camera_weights = optimize_trajectory(
+                points2d,
+                camera_calibration,
+                "explicit",
+                return_weights=True,
+                delta_weight=0.1,
+                skeleton_weight=0.1,
+                skeleton=skeleton,
+                huber_max=10000,
+                sigma=50,
+                robust_camera_weights=True,
+                max_iters=50000,
+            )
         elif reconstruction_method_name == "Implicit Optimization KP Conf, MaxHuber=10":
             from ..analysis.optimize_reconstruction import optimize_trajectory
 

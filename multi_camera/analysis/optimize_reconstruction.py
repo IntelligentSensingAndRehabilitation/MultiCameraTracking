@@ -170,6 +170,7 @@ def optimize_trajectory(
     max_iters=2000,
     confidence_threshold=0.5,
     robust_camera_weights=False,
+    sigma=150,
     huber_max=10,
     return_confidence=True,
     tolerance=1e-7,
@@ -212,7 +213,7 @@ def optimize_trajectory(
     # use robust triangulation to determine weights
     if robust_camera_weights:
         _, camera_weights = robust_triangulate_points(
-            camera_params, keypoints2d, return_weights=True, threshold=confidence_threshold
+            camera_params, keypoints2d, return_weights=True, threshold=confidence_threshold, sigma=sigma
         )
         keypoints2d = jnp.concatenate([keypoints2d[..., :-1], camera_weights[..., None]], axis=-1)
 

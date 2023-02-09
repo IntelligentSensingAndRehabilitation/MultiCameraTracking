@@ -51,11 +51,20 @@ def reconstruction_pipeline(
             v = (Video & v).fetch1("KEY")
             if top_down_method_name == "OpenPose":
                 from pose_pipeline import OpenPosePerson
+
                 OpenPosePerson.populate(v)
-            if top_down_method_name in ["OpenPose", "OpenPose_LR", "OpenPose_HR"]:
+            if top_down_method_name in [
+                "OpenPose",
+                "OpenPose_LR",
+                "OpenPose_HR",
+                "Bridging_COCO_25",
+                "Bridging_bml_movi_87",
+            ]:
                 pose_pipelines.bottomup_to_topdown([v], top_down_method_name, tracking_method_name)
             else:
-                pose_pipelines.top_down_pipeline(v, tracking_method_name=tracking_method_name, top_down_method_name=top_down_method_name)
+                pose_pipelines.top_down_pipeline(
+                    v, tracking_method_name=tracking_method_name, top_down_method_name=top_down_method_name
+                )
 
         k["reconstruction_method"] = reconstruction_method
         k["top_down_method"] = top_down_method
