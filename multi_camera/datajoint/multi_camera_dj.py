@@ -68,6 +68,7 @@ class PersonKeypointReconstructionMethodLookup(dj.Lookup):
         {"reconstruction_method": 9, "reconstruction_method_name": "Implicit Optimization KP Conf"},
         {"reconstruction_method": 10, "reconstruction_method_name": r"Implicit Optimization $\\gamma=0.3$"},
         {"reconstruction_method": 11, "reconstruction_method_name": "Implicit Optimization, MaxHuber=10"},
+        {"reconstruction_method": 12, "reconstruction_method_name": r"Implicit Optimization $\\sigma=50$"},
     ]
 
 

@@ -15,40 +15,55 @@ schema = dj.schema("multicamera_tracking_biomechanics")
 
 
 @schema
-class BiomechanicalReconstructionLookup(dj.Lookup):
+class BilevelLookup(dj.Lookup):
     definition = """
-    top_down_method         : int 
-    reconstruction_method   : int
-    model_name              : varchar(255)
     bilevel_settings        : int
     ---
     max_marker_offset                    : float
     regularize_all_body_scales           : float
     regularize_anatomical_marker_offsets : float
+    regularize_tracking_marker_offsets   : float
     anthropomorphic_prior                : float
     regularize_joint_bounds              : float
+    set_min_sphere_fit_score             : float
+    set_min_axis_fit_score               : float
+    set_max_joint_weight                 : float
     """
     contents = [
-        # (2, 0, "Rajagopal2015_Halpe"),
-        # (2, 1, "Rajagopal2015_Halpe"),
-        # (2, 2, "Rajagopal2015_Halpe"),
-        # (2, 0, "Rajagopal2015_Augmenter"),
-        # (2, 1, "Rajagopal2015_Augmenter"),
-        # (2, 2, "Rajagopal2015_Augmenter"),
-        # (4, 0, "Rajagopal2015_Augmenter"),
-        # (4, 2, "Rajagopal2015_Augmenter"),
-        # last two should remain zero for now
-        (2, 2, "Rajagopal2015_Halpe", 0, 0.0, 0.0, 0.0, 0.0, 0.0),
-        (2, 2, "Rajagopal2015_Halpe", 1, 0.1, 0.1, 10.0, 0.0, 0.0),
-        (2, 2, "Rajagopal2015_Halpe", 2, 0.05, 1.0, 50.0, 0.0, 0.0),
-        (2, 3, "Rajagopal2015_Halpe", 0, 0.0, 0.0, 0.0, 0.0, 0.0),
-        (2, 3, "Rajagopal2015_Halpe", 1, 0.1, 0.1, 10.0, 0.0, 0.0),
-        (2, 3, "Rajagopal2015_Halpe", 2, 0.05, 1.0, 50.0, 0.0, 0.0),
-        (12, 3, "Rajagopal_mbl_movi_87", 0, 0.0, 0.0, 0.0, 0.0, 0.0),
-        (12, 3, "Rajagopal_mbl_movi_87", 1, 0.05, 0.0, 10.0, 0.1, 0.0),
-        (12, 3, "Rajagopal_mbl_movi_87", 2, 0.05, 1.0, 50.0, 0.0, 0.0),
-        (12, 3, "Rajagopal_mbl_movi_87", 3, 0.05, 1.0, 50.0, 0.0, 0.01),
+        (0, 0.05, 0.0, 10.0, 0.05, 0.1, 0.01, 0.01, 0.001, 1.0),
     ]
+
+
+@schema
+class BiomechanicalReconstructionLookup(dj.Lookup):
+    definition = """
+    -> BilevelLookup
+    top_down_method         : int 
+    reconstruction_method   : int
+    model_name              : varchar(255)
+    ---
+    """
+    contents = [
+        (0, 12, 0, "Rajagopal_mbl_movi_87"),
+        (0, 12, 1, "Rajagopal_mbl_movi_87"),
+        (0, 12, 2, "Rajagopal_mbl_movi_87"),
+        (0, 12, 3, "Rajagopal_mbl_movi_87"),
+        (0, 12, 11, "Rajagopal_mbl_movi_87"),
+    ]
+    # (2, 0, "Rajagopal2015_Halpe", 0),),
+    # (2, 1, "Rajagopal2015_Halpe", 0),),
+    # (2, 2, "Rajagopal2015_Halpe", 0),),
+    # (2, 0, "Rajagopal2015_Augmenter", 0),),
+    # (2, 1, "Rajagopal2015_Augmenter", 0),),
+    # (2, 2, "Rajagopal2015_Augmenter", 0),),
+    # (4, 0, "Rajagopal2015_Augmenter", 0),),
+    # (4, 2, "Rajagopal2015_Augmenter", 0),),
+    # (12, 0, "Rajagopal_mbl_movi_87", 0),
+    # (#12, 1, "Rajagopal_mbl_movi_87", 0),
+    # (#12, 2, "Rajagopal_mbl_movi_87", 0),
+    # (#12, 3, "Rajagopal_mbl_movi_87", 0),
+    # (#12, 11, "Rajagopal_mbl_movi_87", 0),
+    # ]
 
 
 @schema
@@ -113,7 +128,7 @@ class BiomechanicalReconstruction(dj.Computed):
             kps.append(kp)
             trial_timestamps.append(dt)
 
-        settings = (BiomechanicalReconstructionLookup & key).fetch1()
+        settings = (BilevelLookup & key).fetch1()
 
         # kps = [bilevel_optimization.fetch_formatted_markers(k) for k in trials]
         results, skeleton = bilevel_optimization.fit_markers(
@@ -122,8 +137,12 @@ class BiomechanicalReconstruction(dj.Computed):
             max_marker_offset=settings["max_marker_offset"],
             regularize_all_body_scales=settings["regularize_all_body_scales"],
             regularize_anatomical_marker_offsets=settings["regularize_anatomical_marker_offsets"],
+            regularize_tracking_marker_offsets=settings["regularize_tracking_marker_offsets"],
             anthropomorphic_prior=settings["anthropomorphic_prior"],
             regularize_joint_bounds=settings["regularize_joint_bounds"],
+            set_min_sphere_fit_score=settings["set_min_sphere_fit_score"],
+            set_min_axis_fit_score=settings["set_min_axis_fit_score"],
+            set_max_joint_weight=settings["set_max_joint_weight"],
         )
 
         print(f"Received {len(results)} results from {len(kps)} trials")
@@ -147,7 +166,7 @@ class BiomechanicalReconstruction(dj.Computed):
         skeleton_defintion = {
             "marker_offsets_map": marker_offsets_map,
             "marker_offsets": results[0].markerOffsets,
-            "group_scales": results[0].groupScales,
+            "group_scales": skeleton.getGroupScales(),
             "body_scale_map": body_scale_map,
         }
         self.insert1({"skeleton_definition": skeleton_defintion, **key})
@@ -180,9 +199,7 @@ class BiomechanicalReconstruction(dj.Computed):
         assert (len(self)) == 1, "Filter for single object"
 
         model_name, skeleton_def = self.fetch1("model_name", "skeleton_definition")
-        skeleton = bilevel_optimization.reload_skeleton(
-            model_name, skeleton_def["group_scales"], skeleton_def["marker_offsets"]
-        )
+        skeleton = bilevel_optimization.reload_skeleton(model_name, skeleton_def["group_scales"])
         bilevel_optimization.save_model(model_name, skeleton_def, output_dir)
 
         for key in (self.Trial & self).fetch("KEY"):
@@ -205,7 +222,6 @@ class BiomechanicalReconstruction(dj.Computed):
             bilevel_optimization.save_trial(poses, skeleton, kp, timestamps, trial, output_dir)
 
             if "Augmenter" in model_name:
-                print(f"here {key}")
                 import nimblephysics as nimble
                 import os
 

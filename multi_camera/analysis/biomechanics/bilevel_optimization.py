@@ -23,8 +23,12 @@ def fit_markers(
     max_marker_offset=0.0,
     regularize_all_body_scales=0.0,
     regularize_anatomical_marker_offsets=0.0,
-    anthropomorphic_prior=0.0,
+    regularize_tracking_marker_offsets=0.05,
+    anthropomorphic_prior=0.1,
     regularize_joint_bounds=0.0,
+    set_min_sphere_fit_score=0.01,
+    set_min_axis_fit_score=0.001,
+    set_max_joint_weight=1.0,  # Default max joint weight is 0.5, so this is 2x the default value
 ):  # -> Tuple(List[nimble.biomechanics.MarkerInitialization], nimble.dynamics.Skeleton):
 
     # get path to this file
@@ -37,11 +41,12 @@ def fit_markers(
     if customOsim.skeleton.getBodyNode("hand_r") is not None:
         customOsim.skeleton.setScaleGroupUniformScaling(customOsim.skeleton.getBodyNode("hand_r"))
     customOsim.skeleton.autogroupSymmetricPrefixes("ulna", "radius")
+    skeleton = customOsim.skeleton
 
-    fitter = nimble.biomechanics.MarkerFitter(customOsim.skeleton, customOsim.markersMap)
+    fitter = nimble.biomechanics.MarkerFitter(skeleton, customOsim.markersMap)
     fitter.setInitialIKSatisfactoryLoss(0.005)
     fitter.setInitialIKMaxRestarts(200)
-    fitter.setIterationLimit(300)
+    fitter.setIterationLimit(500)
 
     if len(customOsim.anatomicalMarkers) > 10:
         fitter.setTrackingMarkers(customOsim.trackingMarkers)
@@ -63,12 +68,14 @@ def fit_markers(
         fitter.setRegularizeAllBodyScales(regularize_all_body_scales)  # 1.0
     if regularize_anatomical_marker_offsets > 0.0:
         fitter.setRegularizeAnatomicalMarkerOffsets(regularize_anatomical_marker_offsets)  # 10.0
-
-    fitter.setRegularizeTrackingMarkerOffsets(0.05)
-    fitter.setMinSphereFitScore(0.01)
-    fitter.setMinAxisFitScore(0.001)
-    # Default max joint weight is 0.5, so this is 2x the default value
-    fitter.setMaxJointWeight(1.0)
+    if regularize_tracking_marker_offsets > 0.0:
+        fitter.setRegularizeTrackingMarkerOffsets(regularize_tracking_marker_offsets)
+    if set_min_sphere_fit_score > 0.0:
+        fitter.setMinSphereFitScore(set_min_sphere_fit_score)
+    if set_min_axis_fit_score > 0.0:
+        fitter.setMinAxisFitScore(set_min_axis_fit_score)
+    if set_max_joint_weight > 0.0:
+        fitter.setMaxJointWeight(set_max_joint_weight)
 
     if anthropomorphic_prior > 0.0:
         # Create an anthropometric prior
@@ -178,7 +185,7 @@ def save_model(
     model_file = os.path.join(model_path, model_name + ".osim")
 
     # Update custom skeleton
-    skeleton = reload_skeleton(model_name, skeleton_definition["group_scales"], skeleton_definition["marker_offsets"])
+    skeleton = reload_skeleton(model_name, skeleton_definition["group_scales"])
     fitMarkers = skeleton_definition["marker_offsets"]
 
     bodyScalesMap: Dict[str, np.ndarray] = {}
@@ -193,7 +200,7 @@ def save_model(
 
     nimble.biomechanics.OpenSimParser.moveOsimMarkers(
         model_file,
-        skeleton_definition["body_scale_map"],
+        bodyScalesMap,
         skeleton_definition["marker_offsets_map"],
         os.path.join(output_path, "Models", "unscaled_but_with_optimized_markers.osim"),
     )
@@ -263,15 +270,13 @@ def save_trial(
     )
 
 
-def reload_skeleton(model_name: str, body_scales_map, mass_kg=60, height_m=1.7):
+def reload_skeleton(model_name: str, body_scales_map: np.array = None, return_map: bool = False):
     """Reloads a skeleton from a model file
 
     Args:
         model_name (str): The name of the model
         body_scales_map (Dict[str, np.ndarray]): The body scales map
         marker_offset_map (Dict[str, Tuple[str, np.ndarray]]): The marker offset map
-        mass_kg (float): The mass of the model
-        height_m (float): The height of the model
 
     Returns:
         nimble.dynamics.Skeleton: The skeleton
@@ -282,9 +287,21 @@ def reload_skeleton(model_name: str, body_scales_map, mass_kg=60, height_m=1.7):
     model_file = os.path.join(model_path, model_name + ".osim")
 
     # Update custom skeleton
-    skeleton = nimble.biomechanics.OpenSimParser.parseOsim(model_file).skeleton
-    skeleton.setGroupScales(body_scales_map)
+    skeleton = nimble.biomechanics.OpenSimParser.parseOsim(model_file)
+    marker_map = skeleton.markersMap
+    skeleton = skeleton.skeleton
 
+    skeleton.autogroupSymmetricSuffixes()
+    if skeleton.getBodyNode("hand_r") is not None:
+        skeleton.setScaleGroupUniformScaling(skeleton.getBodyNode("hand_r"))
+    skeleton.autogroupSymmetricPrefixes("ulna", "radius")
+
+    if body_scales_map is not None:
+        skeleton.setGroupScales(body_scales_map)
+
+    if return_map:
+        return skeleton, marker_map
+    
     return skeleton
 
 
