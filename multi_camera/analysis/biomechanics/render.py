@@ -187,8 +187,8 @@ def overlay_video(key, cam_idx=0):
 
     from tqdm import tqdm
 
-    from pose_pipeline.pipeline import Video, VideoInfo, TopDownPerson
-    from multi_camera.analysis.camera import get_intrinsic, get_projection
+    from pose_pipeline.pipeline import Video, VideoInfo, BlurredVideo, TopDownPerson
+    from multi_camera.analysis.camera import get_intrinsic, get_projection, distort_3d, get_extrinsic
     from multi_camera.analysis.biomechanics import bilevel_optimization
     from multi_camera.datajoint.calibrate_cameras import Calibration
     from multi_camera.datajoint.multi_camera_dj import MultiCameraRecording, SingleCameraVideo, PersonKeypointReconstruction
@@ -233,7 +233,7 @@ def overlay_video(key, cam_idx=0):
     #poses = poses[150:]
     #timestamps = timestamps[150:]
 
-    vid_file = (Video & video_keys[cam_idx]).fetch1('video')
+    vid_file = (BlurredVideo & video_keys[cam_idx]).fetch1('output_video')
 
     frame_0 = int(timestamps[0] * fps)
     cap = cv2.VideoCapture(vid_file)
@@ -252,15 +252,23 @@ def overlay_video(key, cam_idx=0):
 
         scene = trimesh.Scene()
         for k, v in posed.items():
+            v = v.copy()
+            vertices = v.vertices[:, [2, 0, 1]]
+            # account for camera distortion. convert vertices to mm first.
+            vertices_distorted = np.array(distort_3d(camera_params, cam_idx, vertices * 1000.0))
+            # now transform back to world coordinates
+            extri = get_extrinsic(camera_params, cam_idx)
+            vertices_distorted = np.concatenate([vertices_distorted, np.ones((*vertices_distorted.shape[:-1], 1))], axis=-1)
+            # transform the points into the camera perspective
+            # last dimension ensures broadcasting works
+            transformed = (np.linalg.inv(extri) @ vertices_distorted[..., None])[..., 0]
+            # drop the last dimension
+            vertices_distorted = transformed[..., :-1]
+            # then back to meters
+            vertices_distorted = vertices_distorted / 1000.0
+            
+            v.vertices = vertices
             scene.add_geometry(v)
-
-        # switch Y and Z coordinates
-        rot = np.array([[1, 0, 0, 0], [0, 0, 1, 0], [0, 1, 0, 0], [0, 0, 0, 1]])
-        scene.apply_transform(rot)
-
-        # now switch X and Y coordinates
-        rot = np.array([[0, 1, 0, 0], [1, 0, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
-        scene.apply_transform(rot)
 
         objs = scene.dump()
 
