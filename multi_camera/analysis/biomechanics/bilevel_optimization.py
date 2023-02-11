@@ -305,6 +305,32 @@ def reload_skeleton(model_name: str, body_scales_map: np.array = None, return_ma
     return skeleton
 
 
+def get_markers(skeleton, skeleton_def, poses, original_format=False):
+    '''Get the markers for a set of poses'''
+
+    def get_body(body_name):
+        matches = [b for b in skeleton.getBodyNodes() if b.getName() == body_name]
+        assert len(matches) == 1
+        return matches[0]
+
+    marker_map = {k: (get_body(v[0]), v[1]) for k, v in skeleton_def['marker_offsets_map'].items()}
+
+    markers = []
+    for p in poses:
+        skeleton.setPositions(p)
+        m = skeleton.getMarkerMapWorldPositions(marker_map)
+        markers.append(m)
+
+    # convert list of dicts to dict of lists
+    markers = {k: np.array([m[k] for m in markers]) for k in markers[0].keys()}
+
+    if original_format:
+        # reorder outputs
+        markers = {k: v[:, [2, 0, 1]] for k, v in markers.items()}
+
+    return markers
+
+
 def process_reconstruction_keys(keys: List[dict], output_path: str):
     """Covert 3D reconstructions into OpenSim results
 

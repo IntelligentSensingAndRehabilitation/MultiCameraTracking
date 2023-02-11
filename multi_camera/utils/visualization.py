@@ -8,7 +8,6 @@ from tqdm import tqdm
 from mpl_toolkits.mplot3d import Axes3D
 from pose_pipeline import OpenPosePerson, TopDownPerson, LiftingPerson
 
-
 def center_skeleton(keypoints3d, joints):
     joints = [j.upper() for j in joints]
     pelvis = np.mean(
@@ -191,6 +190,36 @@ def skeleton_video(keypoints3d, filename, method, fps=30.0):
             "Right elbow",
             "Right wrist",
         ]
+    elif method in ["Bridging_COCO_25", "Bridging_bml_movi_87"]:
+        joints = TopDownPerson.joint_names(method)
+        left = [
+            "Left Ankle",
+            "Left Foot",
+            "Left Ankle",
+            "Left Heel",
+            "Left Ankle",
+            "Left Knee",
+            "Left Hip",
+            "Pelvis",
+            #"Neck",
+            "Left Shoulder",
+            "Left Elbow",
+            "Left Wrist",
+        ]
+        right = [
+            "Right Ankle",
+            "Right Foot",
+            "Right Ankle",
+            "Right Heel",
+            "Right Ankle",
+            "Right Knee",
+            "Right Hip",
+            "Pelvis",
+            #"Neck",
+            "Right Shoulder",
+            "Right Elbow",
+            "Right Wrist",
+        ]
     else:
         raise Exception(f"Unknown method: {method}")
 
@@ -301,6 +330,82 @@ def skeleton_video(keypoints3d, filename, method, fps=30.0):
     return anim
 
 
+def get_projected_keypoint_overlay(key: dict, cam_idx: int=0, radius=5, color=(255, 0, 0)):
+
+    from pose_pipeline import TopDownPerson, VideoInfo
+    from pose_pipeline.utils.bounding_box import crop_image_bbox
+    from multi_camera.datajoint.multi_camera_dj import (
+        MultiCameraRecording,
+        PersonKeypointReconstruction,
+        SingleCameraVideo,
+        Calibration,
+    )
+    from ..analysis.camera import project_distortion
+    from pose_pipeline.utils.visualization import draw_keypoints
+
+    videos = (TopDownPerson * MultiCameraRecording * PersonKeypointReconstruction * SingleCameraVideo & key).proj()
+    video_keys, video_camera_name = (TopDownPerson * SingleCameraVideo * videos).fetch("KEY", "camera_name")
+
+    keypoints3d = (PersonKeypointReconstruction & key).fetch1("keypoints3d")
+    camera_params, camera_names = (Calibration & key).fetch1("camera_calibration", "camera_names")
+    assert camera_names == video_camera_name.tolist(), "Videos don't match cameras in calibration"
+
+    # get video parameters
+    width = np.unique((VideoInfo & video_keys).fetch("width"))[0]
+    height = np.unique((VideoInfo & video_keys).fetch("height"))[0]
+
+    # compute keypoints from reprojection of SMPL fit
+    kp3d = keypoints3d[..., :-1]
+    conf3d = keypoints3d[..., -1]
+    keypoints2d = np.array([project_distortion(camera_params, i, kp3d) for i in range(camera_params["mtx"].shape[0])])
+
+    # handle any bad projections
+    valid_kp = np.tile((conf3d < 0.5)[None, ...], [keypoints2d.shape[0], 1, 1])
+    clipped = np.logical_or.reduce(
+        (
+            keypoints2d[..., 0] <= 0,
+            keypoints2d[..., 0] >= width,
+            keypoints2d[..., 1] <= 0,
+            keypoints2d[..., 1] >= height,
+            np.isnan(keypoints2d[..., 0]),
+            np.isnan(keypoints2d[..., 1]),
+            valid_kp,
+        )
+    )
+    keypoints2d[clipped, 0] = 0
+    keypoints2d[clipped, 1] = 0
+    # add low confidence when clipped
+    keypoints2d = np.concatenate([keypoints2d, ~clipped[..., None] * 1.0], axis=-1)
+
+    print(keypoints2d.shape)
+
+    def overlay(frame, idx):
+        frame = draw_keypoints(frame, keypoints2d[cam_idx, idx], radius=radius, color=color)
+        return frame
+    
+    return overlay
+
+
+bml_movi_87_skeleton = [[67, 70],
+       [68, 69],
+       [68, 73],
+       [68, 81],
+       [69, 70],
+       [70, 76],
+       [70, 84],
+       [71, 75],
+       [71, 78],
+       [72, 76],
+       [72, 77],
+       [73, 75],
+       [74, 77],
+       [79, 83],
+       [79, 86],
+       [80, 84],
+       [80, 85],
+       [81, 83],
+       [82, 85]]
+
 def make_reprojection_video(
     key: dict,
     portrait_width=288,
@@ -400,6 +505,18 @@ def make_reprojection_video(
                 border_color=(64, 20, 20),
                 threshold=visible_threshold,
             )
+
+            # TODO: make this more general
+            if kp2d_detected.shape[-1] == 87:
+                for e in bml_movi_87_skeleton:
+                    if np.all(keypoints2d[video_idx, frame_idx, e] > 0):
+                        cv2.line(
+                            frame,
+                            tuple(keypoints2d[video_idx, frame_idx, e[0], :2].astype(int)),
+                            tuple(keypoints2d[video_idx, frame_idx, e[1], :2].astype(int)),
+                            (125, 125, 255),
+                            2,
+                        )
             frame = bbox_fn(frame, frame_idx, width=2, color=(0, 0, 255))
             frame = crop_image_bbox(
                 frame, bbox[frame_idx], target_size=(portrait_width, int(portrait_width * 1920 / 1080)), dilate=dilate

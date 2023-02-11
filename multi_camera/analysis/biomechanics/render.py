@@ -179,17 +179,28 @@ def write_images_to_video(outfile, images, fps=30):
     out.release()
 
 
+def get_skeleton_mesh_overlay(key, cam_idx=0):
+    """
+    Get the function to overlay the skeleton mesh on the image
 
-def overlay_video(key, cam_idx=0):
-    import cv2
+    Args:
+        key: dict, the key to the MultiCameraRecording table
+        cam_idx: int, the camera index
+
+    Returns:
+        overlay: function, the function to overlay the skeleton mesh on the image
+
+    Note: this uses both jax and pytorch so should make sure neither consumes
+    all the GPU memory
+    """
+
     from jaxlie import SO3
     from jax import vmap, numpy as jnp
 
-    from tqdm import tqdm
-
-    from pose_pipeline.pipeline import Video, VideoInfo, BlurredVideo, TopDownPerson
-    from multi_camera.analysis.camera import get_intrinsic, get_projection, distort_3d, get_extrinsic
+    from multi_camera.analysis.camera import get_intrinsic, get_extrinsic, distort_3d
     from multi_camera.analysis.biomechanics import bilevel_optimization
+
+    from pose_pipeline.pipeline import VideoInfo, TopDownPerson
     from multi_camera.datajoint.calibrate_cameras import Calibration
     from multi_camera.datajoint.multi_camera_dj import MultiCameraRecording, SingleCameraVideo, PersonKeypointReconstruction
     from multi_camera.datajoint.biomechanics import BiomechanicalReconstruction
@@ -227,29 +238,22 @@ def overlay_video(key, cam_idx=0):
 
     # get the skeleton
     model_name, skeleton_def = (BiomechanicalReconstruction & key).fetch1('model_name', 'skeleton_definition')
-    skeleton, marker_map = bilevel_optimization.reload_skeleton(model_name, skeleton_def['group_scales'], return_map=True)
-    timestamps, poses, joint_centers = (BiomechanicalReconstruction.Trial & key).fetch1('timestamps', 'poses', 'joint_centers')
-
-    #poses = poses[150:]
-    #timestamps = timestamps[150:]
-
-    vid_file = (BlurredVideo & video_keys[cam_idx]).fetch1('output_video')
+    skeleton = bilevel_optimization.reload_skeleton(model_name, skeleton_def['group_scales'])
+    timestamps, poses = (BiomechanicalReconstruction.Trial & key).fetch1('timestamps', 'poses')
 
     frame_0 = int(timestamps[0] * fps)
-    cap = cv2.VideoCapture(vid_file)
-    cap.set(cv2.CAP_PROP_POS_FRAMES, frame_0)
+    frame_N = int(timestamps[-1] * fps)
 
-    imgs = []
-    for p in tqdm(poses):
+    def overlay(frame, idx):
 
-        res, frame = cap.read()
-        if not res or frame is None:
-            return imgs
-
-        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
+        if idx < frame_0 or idx >= frame_N:
+            return frame
+        
+        p = poses[idx - frame_0]
         posed = pose_skeleton(skeleton, p)
 
+        # use trimesh to compose the scene. account for the different coordinate convention
+        # between nimblephysics and our camera system
         scene = trimesh.Scene()
         for k, v in posed.items():
             v = v.copy()
@@ -280,8 +284,120 @@ def overlay_video(key, cam_idx=0):
         frame2[frame2 > 1.0] = 1.0
         frame2 = (frame2 * 255).astype(np.uint8)
 
-        #imgs.append((frame, img, frame2))
-        imgs.append(frame2)
+        return frame2
 
-    return imgs
+    return overlay
 
+
+def get_markers_overlay(key, cam_idx=0, radius=5, color=(0, 0, 255)):
+    '''
+    Get the overlay function for the markers
+    
+    Args:
+        key: dict, the key for the biomechanical reconstruction
+        cam_idx: int, the index of the camera to use
+        radius: int, the radius of the markers
+        color: tuple, the color of the markers
+
+    Returns:
+        overlay: function, the overlay function
+    '''
+
+    from pose_pipeline.pipeline import VideoInfo, TopDownPerson
+    from multi_camera.datajoint.multi_camera_dj import MultiCameraRecording, SingleCameraVideo, PersonKeypointReconstruction
+    from multi_camera.datajoint.calibrate_cameras import Calibration
+    from multi_camera.datajoint.biomechanics import BiomechanicalReconstruction
+
+    from pose_pipeline.utils.visualization import draw_keypoints
+    from multi_camera.analysis.camera import project_distortion
+    from .bilevel_optimization import get_markers, reload_skeleton
+
+    # set up the cameras
+    camera_params, camera_names = (Calibration & key).fetch1("camera_calibration", "camera_names")
+
+    # find the videos (to get the height and width)
+    videos = (TopDownPerson * MultiCameraRecording * PersonKeypointReconstruction * SingleCameraVideo & key).proj()
+    video_keys, video_camera_name = (TopDownPerson * SingleCameraVideo * videos).fetch( "KEY", "camera_name")
+    assert camera_names == video_camera_name.tolist(), "Videos don't match cameras in calibration"
+
+    # get video parameters
+    width = np.unique((VideoInfo & video_keys).fetch("width"))[0]
+    height = np.unique((VideoInfo & video_keys).fetch("height"))[0]
+    fps = np.unique((VideoInfo & video_keys).fetch("fps"))[0]
+
+    # load the skeleton
+    model_name, skeleton_def = (BiomechanicalReconstruction & key).fetch1('model_name', 'skeleton_definition')
+    skeleton = reload_skeleton(model_name, skeleton_def['group_scales'])
+    timestamps, poses = (BiomechanicalReconstruction.Trial & key).fetch1('timestamps', 'poses')
+
+    # get the markers
+    markers = get_markers(skeleton, skeleton_def, poses, original_format=True)
+    markers = np.stack(list(markers.values()), axis=1)  # drop the names
+    markers = markers * 1000.0 # convert to mm expected by the camera library
+
+    # project the markers into the image plane
+    markers_proj = project_distortion(camera_params, cam_idx, markers)
+    # append ones to the end to indicate high confidence
+    markers_proj = np.concatenate([markers_proj, np.ones((*markers_proj.shape[:-1], 1))], axis=-1)
+
+    # handle any bad projections off the edge of the frame
+    clipped = np.logical_or.reduce(
+        (
+            markers_proj[..., 0] <= 0,
+            markers_proj[..., 0] >= width,
+            markers_proj[..., 1] <= 0,
+            markers_proj[..., 1] >= height,
+        )
+    )
+    markers_proj[clipped, 0] = 0
+    markers_proj[clipped, 1] = 0
+    markers_proj[clipped, 2] = 0
+    
+    frame_0 = int(timestamps[0] * fps)
+    frame_N = int(timestamps[-1] * fps)
+
+    def overlay(image, idx):
+
+        if idx < frame_0 or idx >= frame_N:
+            return image
+        
+        return draw_keypoints(image, markers_proj[idx - frame_0], radius=radius, color=color)
+    
+    return overlay
+
+
+def create_overlay_video(key, cam_idx, out_file_name=None):
+    import cv2
+    import os
+    import tempfile
+    from pose_pipeline.utils.visualization import video_overlay
+    from pose_pipeline.pipeline import BlurredVideo, TopDownPerson
+    from multi_camera.utils.visualization import get_projected_keypoint_overlay
+    from multi_camera.datajoint.multi_camera_dj import MultiCameraRecording, SingleCameraVideo, PersonKeypointReconstruction
+
+    mesh_overlay = get_skeleton_mesh_overlay(key, cam_idx)
+    markers_overlay = get_markers_overlay(key, cam_idx, radius=7)
+    keypoints_overlay = get_projected_keypoint_overlay(key, cam_idx, radius=7)
+
+    def overlay(image, idx):
+        image = mesh_overlay(image, idx)
+        image = keypoints_overlay(image, idx,)
+        image = markers_overlay(image, idx)
+        return image
+    
+    if out_file_name is None:
+        fd, out_file_name = tempfile.mkstemp(suffix=".mp4")
+        os.close(fd)
+
+    # find the videos (to get the height and width)
+    videos = (TopDownPerson * MultiCameraRecording * PersonKeypointReconstruction * SingleCameraVideo & key).proj()
+    video_keys, video_camera_name = (TopDownPerson * SingleCameraVideo * videos).fetch( "KEY", "camera_name")
+
+    video_key = video_keys[cam_idx]
+
+    video = (BlurredVideo & video_key).fetch1("output_video")
+    video_overlay(video, out_file_name, overlay, max_frames=250, downsample=1, compress=True)
+
+    os.remove(video)
+    
+    return out_file_name
