@@ -2,6 +2,7 @@ import trimesh
 import torch
 import pytorch3d
 import pytorch3d.renderer
+import pytorch3d.utils
 import numpy as np
 
 
@@ -50,12 +51,13 @@ def pose_skeleton(skeleton, pose, meshes=None):
             name = s.getName()
             mesh = meshes[name]
             mesh = mesh.apply_transform(s.getWorldTransform().matrix())
+            # mesh.vertices = mesh.vertices * 1000
             posed_meshes[name] = mesh
 
     return posed_meshes
 
 
-def render_scene(meshes, focal_length, height, width, device='cpu'):
+def render_scene(meshes, focal_length=None, height=None, width=None, cameras=None, device='cpu'):
     ''' Render the mesh under camera coordinates
     meshes: list of trimesh.Trimesh
     focal_length: float, focal length of camera
@@ -79,24 +81,26 @@ def render_scene(meshes, focal_length, height, width, device='cpu'):
     mesh = pytorch3d.structures.join_meshes_as_scene(pytorch_meshes)
 
     # Initialize a camera.
-    cameras = pytorch3d.renderer.PerspectiveCameras(
-        focal_length=((2 * focal_length / min(height, width), 2 * focal_length / min(height, width)),),
-        device=device,
-    )
+    if cameras is None:
+        cameras = pytorch3d.renderer.PerspectiveCameras(
+            focal_length=((focal_length, focal_length),), # ((2 * focal_length / min(height, width), 2 * focal_length / min(height, width)),),
+            device=device,
+        )
 
     # Define the settings for rasterization and shading.
     raster_settings = pytorch3d.renderer.RasterizationSettings(
-        image_size=(height, width),   # (H, W)
-        # image_size=height,   # (H, W)
+        image_size=(height, width),
         blur_radius=0.0,
         faces_per_pixel=1,
+        max_faces_per_bin=100000,
+        bin_size=100
     )
 
     # Define the material
     materials = pytorch3d.renderer.Materials(
-        ambient_color=((1, 1, 1),),
-        diffuse_color=((1, 1, 1),),
-        specular_color=((1, 1, 1),),
+        ambient_color=((0, 1, 0),),
+        diffuse_color=((0, 1, 0),),
+        specular_color=((0, 1, 0),),
         shininess=64,
         device=device
     )
@@ -119,12 +123,23 @@ def render_scene(meshes, focal_length, height, width, device='cpu'):
     )
 
     # Do rendering
-    imgs = renderer(mesh)
+    if len(cameras) > 1:
+        imgs = renderer(mesh.extend(len(cameras)))
+    else:
+        imgs = renderer(mesh)[0]
     return imgs
 
 
 def render_poses(skeleton, poses, device='cuda:0'):
-    meshes = load_skeleton_meshes(skeleton)
+    ''' Render centered skeleton
+
+        Args:
+            skeleton: nimble.Skeleton already scaled
+            poses: np.array, shape (T, n_dofs)
+
+        Returns:
+            images: list of np.array, shape (T, H, W, 4) RGBA format
+    '''
 
     images = []
     for pose in poses:
@@ -140,9 +155,8 @@ def render_poses(skeleton, poses, device='cuda:0'):
 
         scene.apply_translation(offset)
         objs = scene.dump()
-        posed_meshes = pose_skeleton(skeleton, pose, meshes)
 
-        img = render_scene(objs, 2000, 640, 640, device=device).cpu().detach().numpy()[0]
+        img = render_scene(objs, 4, 640, 640, device=device).cpu().detach().numpy()
         images.append(img)
 
     return images
@@ -155,10 +169,111 @@ def write_images_to_video(outfile, images, fps=30):
 
     fourcc = cv2.VideoWriter_fourcc(*"XVID")
     out = cv2.VideoWriter(outfile, fourcc, fps, (w, h))
-
     for img in images:
-        img = 255 * img[..., :3]
-        img = img.astype(np.uint8)
+        if img.dtype != np.uint8:
+            img = 255 * img[..., :3]
+            img = img.astype(np.uint8)
+        img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
         out.write(img)
 
     out.release()
+
+
+
+def overlay_video(key, cam_idx=0):
+    import cv2
+    from jaxlie import SO3
+    from jax import vmap, numpy as jnp
+
+    from tqdm import tqdm
+
+    from pose_pipeline.pipeline import Video, VideoInfo, TopDownPerson
+    from multi_camera.analysis.camera import get_intrinsic, get_projection
+    from multi_camera.analysis.biomechanics import bilevel_optimization
+    from multi_camera.datajoint.calibrate_cameras import Calibration
+    from multi_camera.datajoint.multi_camera_dj import MultiCameraRecording, SingleCameraVideo, PersonKeypointReconstruction
+    from multi_camera.datajoint.biomechanics import BiomechanicalReconstruction
+
+    # set up the cameras
+    camera_params, camera_names = (Calibration & key).fetch1("camera_calibration", "camera_names")
+
+    videos = (TopDownPerson * MultiCameraRecording * PersonKeypointReconstruction * SingleCameraVideo & key).proj()
+    video_keys, video_camera_name = (TopDownPerson * SingleCameraVideo * videos).fetch( "KEY", "camera_name")
+    assert camera_names == video_camera_name.tolist(), "Videos don't match cameras in calibration"
+
+    width = int(np.unique((VideoInfo & video_keys).fetch("width"))[0])
+    height = int(np.unique((VideoInfo & video_keys).fetch("height"))[0])
+    fps = int(np.unique((VideoInfo & video_keys).fetch("fps"))[0])
+    N = camera_params['tvec'].shape[0]
+
+    def conv(x):
+        return torch.from_numpy(np.array(x))
+
+    camera_matrix = conv(vmap(get_intrinsic, (None, 0), 0)(camera_params, np.arange(N)))
+
+    def rotation_matrix(camera_params, i):
+        rvec = jnp.take(camera_params['rvec'], i, axis=0)
+        rot = SO3.exp(rvec)
+        return rot.as_matrix()
+
+    R = conv(vmap(rotation_matrix, (None, 0), 0)(camera_params, np.arange(N)))
+
+    image_size = conv((np.ones((N,2)) * np.array([height, width])).astype(int))
+
+    cameras = pytorch3d.utils.cameras_from_opencv_projection(R, conv(camera_params['tvec']), camera_matrix, image_size)
+
+    # select the desired one since we are only supporting a single camera for now
+    cameras = cameras[cam_idx]
+
+    # get the skeleton
+    model_name, skeleton_def = (BiomechanicalReconstruction & key).fetch1('model_name', 'skeleton_definition')
+    skeleton, marker_map = bilevel_optimization.reload_skeleton(model_name, skeleton_def['group_scales'], return_map=True)
+    timestamps, poses, joint_centers = (BiomechanicalReconstruction.Trial & key).fetch1('timestamps', 'poses', 'joint_centers')
+
+    #poses = poses[150:]
+    #timestamps = timestamps[150:]
+
+    vid_file = (Video & video_keys[cam_idx]).fetch1('video')
+
+    frame_0 = int(timestamps[0] * fps)
+    cap = cv2.VideoCapture(vid_file)
+    cap.set(cv2.CAP_PROP_POS_FRAMES, frame_0)
+
+    imgs = []
+    for p in tqdm(poses):
+
+        res, frame = cap.read()
+        if not res or frame is None:
+            return imgs
+
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+        posed = pose_skeleton(skeleton, p)
+
+        scene = trimesh.Scene()
+        for k, v in posed.items():
+            scene.add_geometry(v)
+
+        # switch Y and Z coordinates
+        rot = np.array([[1, 0, 0, 0], [0, 0, 1, 0], [0, 1, 0, 0], [0, 0, 0, 1]])
+        scene.apply_transform(rot)
+
+        # now switch X and Y coordinates
+        rot = np.array([[0, 1, 0, 0], [1, 0, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
+        scene.apply_transform(rot)
+
+        objs = scene.dump()
+
+        with torch.no_grad():
+            img = render_scene(objs, height=height, width=width, cameras=cameras.to('cuda:0'), device='cuda:0').cpu().detach().numpy()
+
+        alpha = img[..., -1:]
+        frame2 = frame / 255.0 * (1-alpha) * 0.5  + img[..., :-1] * alpha * 1.0
+        frame2[frame2 > 1.0] = 1.0
+        frame2 = (frame2 * 255).astype(np.uint8)
+
+        #imgs.append((frame, img, frame2))
+        imgs.append(frame2)
+
+    return imgs
+
