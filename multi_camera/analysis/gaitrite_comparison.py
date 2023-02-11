@@ -70,7 +70,7 @@ def parse_gaitrite(filename: str):
         # Parse the date and time component using the strptime method
         t0 = (datetime.strptime(date_time_string, "%Y%m%d_%H%M%S"), t0[1])
 
-        print(t0)
+    print("\n", filename, t0)
 
     df = df[columns]
     df["Left Foot"] = df["Left/Right Foot"] < 0.5
@@ -78,9 +78,6 @@ def parse_gaitrite(filename: str):
 
     # Convert to mm
     # get scaling from Heel X field to cm
-    ratio = df.loc[2:, "Step Length"] / np.diff(df["Heel X"].iloc[1:])
-    ratio = np.abs(ratio)
-    print(f"Ratio before: {ratio}")
     ratio = 2.54 / 2  # seems to be an odd ratio related to inches to cm
 
     m_ratio = np.mean(ratio)
@@ -267,8 +264,8 @@ def get_offset_range(dt, df):
     t_range = [dt[0] - t0, dt[-1] - tl]
     if True:  # t_range[0] > (t_range[1] - 1):
         # add a bit of slop
-        t_range[0] = t_range[0] - 3
-        t_range[1] = t_range[1] + 3
+        t_range[0] = t_range[0] - 4
+        t_range[1] = t_range[1] + 4
     return t_range
 
 

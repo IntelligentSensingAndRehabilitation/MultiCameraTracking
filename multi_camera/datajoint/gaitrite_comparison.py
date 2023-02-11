@@ -70,6 +70,14 @@ class GaitRiteCalibration(dj.Computed):
             GaitRiteRecording * PersonKeypointReconstruction & key & "reconstruction_method=0 and top_down_method=2"
         ).fetch("KEY")
         data = [fetch_data(k) for k in recording_keys]
+
+        def drop_steps(d):
+            dt, kp3d, df = d
+            df = df.iloc[3:-3]
+            return dt, kp3d, df
+
+        data = [drop_steps(d) for d in data]
+
         R, t, scale, t_offsets, best_score = find_best_alignment(data)
 
         self.insert1(dict(**key, r=R, t=t, s=scale, t_offsets=t_offsets, score=best_score))
