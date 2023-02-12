@@ -271,7 +271,7 @@ def get_skeleton_mesh_overlay(key, cam_idx=0):
             # then back to meters
             vertices_distorted = vertices_distorted / 1000.0
             
-            v.vertices = vertices
+            v.vertices = vertices_distorted
             scene.add_geometry(v)
 
         objs = scene.dump()
