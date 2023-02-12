@@ -49,7 +49,7 @@ def pose_skeleton(skeleton, pose, meshes=None):
     for b in skeleton.getBodyNodes():
         for s in b.getShapeNodes():
             name = s.getName()
-            mesh = meshes[name]
+            mesh = meshes[name].copy()
             mesh = mesh.apply_transform(s.getWorldTransform().matrix())
             # mesh.vertices = mesh.vertices * 1000
             posed_meshes[name] = mesh
@@ -91,8 +91,8 @@ def render_scene(meshes, focal_length=None, height=None, width=None, cameras=Non
     raster_settings = pytorch3d.renderer.RasterizationSettings(
         image_size=(height, width),
         blur_radius=0.0,
-        faces_per_pixel=1,
-        max_faces_per_bin=100000,
+        faces_per_pixel=10,
+        max_faces_per_bin=50000,
         bin_size=100
     )
 
@@ -244,13 +244,15 @@ def get_skeleton_mesh_overlay(key, cam_idx=0):
     frame_0 = int(timestamps[0] * fps)
     frame_N = int(timestamps[-1] * fps)
 
+    meshes = load_skeleton_meshes(skeleton)
+
     def overlay(frame, idx):
 
         if idx < frame_0 or idx >= frame_N:
             return frame
         
         p = poses[idx - frame_0]
-        posed = pose_skeleton(skeleton, p)
+        posed = pose_skeleton(skeleton, p, meshes)
 
         # use trimesh to compose the scene. account for the different coordinate convention
         # between nimblephysics and our camera system

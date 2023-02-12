@@ -377,7 +377,7 @@ class BiomechanicalReconstructionSkeletonOffsets(dj.Computed):
         skeleton_definition = BiomechanicalReconstruction.fetch('skeleton_definition')
         # convert list of dicts to dict of lists
         skeleton_definition = {k: [d[k] for d in skeleton_definition] for k in skeleton_definition[0]}
-        
+
         self.insert1(key)
 
 
