@@ -377,8 +377,6 @@ def get_projected_keypoint_overlay(key: dict, cam_idx: int=0, radius=5, color=(2
     # add low confidence when clipped
     keypoints2d = np.concatenate([keypoints2d, ~clipped[..., None] * 1.0], axis=-1)
 
-    print(keypoints2d.shape)
-
     def overlay(frame, idx):
         frame = draw_keypoints(frame, keypoints2d[cam_idx, idx], radius=radius, color=color)
         return frame
@@ -417,7 +415,7 @@ def make_reprojection_video(
 ):
     """Create a video showing the cropped individual with the 2D keypoints project from each view"""
 
-    from pose_pipeline import PersonBbox, BlurredVideo, TopDownPerson, Video, VideoInfo
+    from pose_pipeline import PersonBbox, BlurredVideo, TopDownPerson, TopDownMethodLookup, VideoInfo
     from pose_pipeline.utils.bounding_box import crop_image_bbox
     from multi_camera.datajoint.multi_camera_dj import (
         MultiCameraRecording,
@@ -469,8 +467,17 @@ def make_reprojection_video(
 
     bbox_fns = [PersonBbox.get_overlay_fn(v) for v in video_keys]
     videos = [(BlurredVideo & v).fetch1("output_video") for v in video_keys]
-    bboxes = [(PersonBbox & v).fetch1("bbox").astype(int) for v in video_keys]
+
+    # need to use as easymocap creation of bboxes uses np.nan when not present
+    def cast(x):
+        x = x.copy()
+        x[np.isnan(x)] = 0
+        return x.astype(int)
+    bboxes = [cast((PersonBbox & v).fetch1("bbox")) for v in video_keys]    
+
     kp2d_detected = np.array([(TopDownPerson & v).fetch1("keypoints")[:total_frames] for v in video_keys])
+
+    bml_movi_87 = (TopDownMethodLookup & key).fetch1('top_down_method_name') == 'Bridging_bml_movi_87'
 
     def make_frames(video_idx):
 
@@ -507,7 +514,7 @@ def make_reprojection_video(
             )
 
             # TODO: make this more general
-            if kp2d_detected.shape[-1] == 87:
+            if bml_movi_87:
                 for e in bml_movi_87_skeleton:
                     if np.all(keypoints2d[video_idx, frame_idx, e] > 0):
                         cv2.line(

@@ -7,6 +7,7 @@ fit together. Ultimately, need to have a general session schema for the
 multitrial reconstruction.
 """
 
+import numpy as np
 import datajoint as dj
 from multi_camera.datajoint.gaitrite_comparison import GaitRiteSession, GaitRiteRecording
 from multi_camera.datajoint.multi_camera_dj import PersonKeypointReconstruction
@@ -234,6 +235,167 @@ class BiomechanicalReconstruction(dj.Computed):
                     timestamps,
                     kp,
                 )
+
+
+@schema
+class BiomechanicalReconstructionTrialNoise(dj.Computed):
+    definition = """
+    -> BiomechanicalReconstruction.Trial
+    ---
+    pose_noise:  float
+    """
+
+    def make(self, key):
+        
+        poses = (BiomechanicalReconstruction.Trial & key).fetch1('poses')
+        poses = np.unwrap(poses, axis=0)
+
+        key['pose_noise'] = np.sqrt(np.mean(np.diff(poses, axis=0) ** 2))
+        self.insert1(key)
+
+
+@schema
+class BiomechanicalReconstructionReprojectionQuality(dj.Computed):
+    definition = """
+    -> BiomechanicalReconstruction.Trial
+    ---
+    reprojection_pck_5       : float
+    reprojection_pck_10      : float
+    reprojection_pck_20      : float
+    reprojection_pck_50      : float
+    reprojection_pck_100     : float
+    reprojection_metrics     : longblob
+    """
+
+    def make(self, key):
+
+        from pose_pipeline.pipeline import VideoInfo, TopDownPerson, TopDownMethodLookup
+        from multi_camera.datajoint.multi_camera_dj import MultiCameraRecording, SingleCameraVideo, PersonKeypointReconstruction
+        from multi_camera.datajoint.calibrate_cameras import Calibration
+        from multi_camera.datajoint.biomechanics import BiomechanicalReconstruction
+        from multi_camera.analysis.biomechanics.opensim import normalize_marker_names
+        from multi_camera.analysis.biomechanics.bilevel_optimization import get_markers, reload_skeleton
+        from multi_camera.analysis import fit_quality
+
+        # set up the cameras
+        camera_params, camera_names = (Calibration & key).fetch1("camera_calibration", "camera_names")
+
+        # find the videos (to get the height and width)
+        videos = (TopDownPerson * MultiCameraRecording * PersonKeypointReconstruction * SingleCameraVideo & key).proj()
+        video_keys, video_camera_name = (TopDownPerson * SingleCameraVideo * videos).fetch( "KEY", "camera_name")
+        assert camera_names == video_camera_name.tolist(), "Videos don't match cameras in calibration"
+
+        fps = np.unique((VideoInfo & video_keys).fetch("fps"))[0]
+
+        # load the skeleton
+        model_name, skeleton_def = (BiomechanicalReconstruction & key).fetch1('model_name', 'skeleton_definition')
+        skeleton = reload_skeleton(model_name, skeleton_def['group_scales'])
+        timestamps, poses = (BiomechanicalReconstruction.Trial & key).fetch1('timestamps', 'poses')
+
+        # get the markers
+        markers = get_markers(skeleton, skeleton_def, poses, original_format=True)
+        marker_names = list(markers.keys())
+
+        method_name = (TopDownMethodLookup & key).fetch1("top_down_method_name")
+        joint_names = TopDownPerson.joint_names(method_name)
+        joint_names = normalize_marker_names(joint_names)
+
+        def intersection(lst1, lst2):
+            lst3 = [value for value in lst1 if value in lst2]
+            return lst3
+        common_names = intersection(joint_names, marker_names)
+
+        # 3D markers ##########
+        # fetch the 3D markers and make them match the set and order of markers from the model
+        markers_ordered = np.array([markers[n] for n in common_names])
+        markers_ordered = markers_ordered.transpose([1, 0, 2])
+        markers_ordered = markers_ordered * 1000.0 # convert to mm
+
+        # 2D keypoints ##########
+        # fetch the 2D keypoints and make them match the set and order of markers from the model
+        kp2d, video_camera_name = (TopDownPerson * SingleCameraVideo & key).fetch("keypoints", "camera_name")
+        camera_params, camera_names = (Calibration & key).fetch1("camera_calibration", "camera_names")
+        assert camera_names == video_camera_name.tolist(), "Videos don't match cameras in calibration"
+
+        # handle cases where there are different numbers of frames
+        N = min([k.shape[0] for k in kp2d])
+        kp2d = np.stack([k[:N] for k in kp2d], axis=0)
+
+        def map_frame(kp2d):
+            return {j: k for j, k in zip(joint_names, kp2d)}
+
+        kp2d_named = [map_frame(k) for k in kp2d.transpose([1, 2, 0, 3])]
+        kp2d_ordered = np.array([[kp2d[n] for n in common_names] for kp2d in kp2d_named])
+        kp2d_ordered = kp2d_ordered.transpose([2, 0, 1, 3])  # expects camera x time x joint x axis
+
+        # only keep the ones that are in the time range
+        fps = int(np.unique((VideoInfo & video_keys).fetch("fps"))[0])
+        N = markers_ordered.shape[0]
+        frame_0 = int(timestamps[0] * fps)
+        kp2d = kp2d_ordered[:, frame_0-1:frame_0-1+N]
+
+        # compute the metrics
+        metrics, thresh, confidence = fit_quality.reprojection_quality(markers_ordered, camera_params, kp2d)
+
+        key["reprojection_pck_5"] = metrics[np.argmin(np.abs(thresh - 5)), np.argmin(np.abs(confidence - 0.5))]
+        key["reprojection_pck_10"] = metrics[np.argmin(np.abs(thresh - 10)), np.argmin(np.abs(confidence - 0.5))]
+        key["reprojection_pck_20"] = metrics[np.argmin(np.abs(thresh - 20)), np.argmin(np.abs(confidence - 0.5))]
+        key["reprojection_pck_50"] = metrics[np.argmin(np.abs(thresh - 50)), np.argmin(np.abs(confidence - 0.5))]
+        key["reprojection_pck_100"] = metrics[np.argmin(np.abs(thresh - 100)), np.argmin(np.abs(confidence - 0.5))]
+        key["reprojection_metrics"] = {
+            "metrics": np.array(metrics),
+            "thresh": np.array(thresh),
+            "confidence": np.array(confidence),
+        }
+        self.insert1(key)
+
+
+@schema
+class BiomechanicalReconstructionSkeletonOffsets(dj.Computed):
+    definition = """
+    -> BiomechanicalReconstruction.Trial
+    ---
+    average_offset       : float
+    ankle                : float
+    knee                 : float
+    hip                  : float
+    shoulder             : float
+    elbow                : float
+    """
+
+    def make(self, key):
+
+        offsets = (BiomechanicalReconstruction & key).fetch1('skeleton_definition')['marker_offsets']
+        offsets = {k: np.linalg.norm(v) for k, v in offsets.items()}
+        key['ankle'] = (offsets['LAnkle'] + offsets['RAnkle']) / 2
+        key['knee'] = (offsets['LKnee'] + offsets['RKnee']) / 2
+        key['hip'] = (offsets['LHip'] + offsets['RHip']) / 2
+        key['shoulder'] = (offsets['LShoulder'] + offsets['RShoulder']) / 2
+        key['elbow'] = (offsets['LElbow'] + offsets['RElbow']) / 2
+        key['average_offset'] = offsets = np.mean(list(offsets.values()))
+        
+        skeleton_definition = BiomechanicalReconstruction.fetch('skeleton_definition')
+        # convert list of dicts to dict of lists
+        skeleton_definition = {k: [d[k] for d in skeleton_definition] for k in skeleton_definition[0]}
+        
+        self.insert1(key)
+
+
+@schema
+class BiomechanicalReconstructionTrialNoise(dj.Computed):
+    definition = """
+    -> BiomechanicalReconstruction.Trial
+    ---
+    pose_noise:  float
+    """
+
+    def make(self, key):
+        
+        poses = (BiomechanicalReconstruction.Trial & key).fetch1('poses')
+        poses = np.unwrap(poses, axis=0)
+
+        key['pose_noise'] = np.sqrt(np.mean(np.diff(poses, axis=0) ** 2))
+        self.insert1(key)
 
 
 if __name__ == "__main__":
