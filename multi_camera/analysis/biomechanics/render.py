@@ -18,6 +18,7 @@ def pyvista_read_vtp(fn):
     
     faces_as_array = mesh.faces.reshape((mesh.n_faces, 4))[:, 1:] 
     tmesh = trimesh.Trimesh(mesh.points, faces_as_array) 
+    tmesh = tmesh.smoothed()
     return tmesh
 
 
@@ -29,10 +30,12 @@ def load_skeleton_meshes(skeleton):
         for s in b.getShapeNodes():
             name = s.getName()
             shape = s.getShape()
+            scale = shape.getScale()
             mesh = pyvista_read_vtp(shape.getMeshPath())
 
             # deferring transforms for now
             #mesh = mesh.apply_transform(s.getWorldTransform().matrix())
+            mesh.vertices = mesh.vertices * scale
             objects[name] = mesh
 
     return objects
@@ -57,7 +60,7 @@ def pose_skeleton(skeleton, pose, meshes=None):
     return posed_meshes
 
 
-def render_scene(meshes, focal_length=None, height=None, width=None, cameras=None, device='cpu'):
+def render_scene(meshes, focal_length=None, height=None, width=None, cameras=None, color=(0, 1, 0), device='cpu'):
     ''' Render the mesh under camera coordinates
     meshes: list of trimesh.Trimesh
     focal_length: float, focal length of camera
@@ -98,9 +101,9 @@ def render_scene(meshes, focal_length=None, height=None, width=None, cameras=Non
 
     # Define the material
     materials = pytorch3d.renderer.Materials(
-        ambient_color=((0, 1, 0),),
-        diffuse_color=((0, 1, 0),),
-        specular_color=((0, 1, 0),),
+        ambient_color=(color,),
+        diffuse_color=(color,),
+        specular_color=(color,),
         shininess=64,
         device=device
     )
@@ -156,7 +159,7 @@ def render_poses(skeleton, poses, device='cuda:0'):
         scene.apply_translation(offset)
         objs = scene.dump()
 
-        img = render_scene(objs, 4, 640, 640, device=device).cpu().detach().numpy()
+        img = render_scene(objs, 8, 320, 320, color=(0.5, 0.5, 0.5), device=device).cpu().detach().numpy()
         images.append(img)
 
     return images
