@@ -214,7 +214,6 @@ def get_skeleton_mesh_overlay(key, cam_idx=0):
 
     width = int(np.unique((VideoInfo & video_keys).fetch("width"))[0])
     height = int(np.unique((VideoInfo & video_keys).fetch("height"))[0])
-    fps = int(np.unique((VideoInfo & video_keys).fetch("fps"))[0])
     N = camera_params['tvec'].shape[0]
 
     def conv(x):
@@ -241,17 +240,22 @@ def get_skeleton_mesh_overlay(key, cam_idx=0):
     skeleton = bilevel_optimization.reload_skeleton(model_name, skeleton_def['group_scales'])
     timestamps, poses = (BiomechanicalReconstruction.Trial & key).fetch1('timestamps', 'poses')
 
-    frame_0 = int(timestamps[0] * fps)
-    frame_N = int(timestamps[-1] * fps)
-
     meshes = load_skeleton_meshes(skeleton)
+
+    # match timestamps
+    vid_timestamps = (VideoInfo & video_keys[0]).fetch_timestamps()
+    frame_idx = np.intersect1d(vid_timestamps, timestamps, return_indices=True)[1]
+    assert len(frame_idx) == len(timestamps)
+    frame_idx = frame_idx.tolist()
 
     def overlay(frame, idx):
 
-        if idx < frame_0 or idx >= frame_N:
+        try:
+            pose_idx = frame_idx.index(idx)
+        except ValueError:
             return frame
         
-        p = poses[idx - frame_0]
+        p = poses[pose_idx]
         posed = pose_skeleton(skeleton, p, meshes)
 
         # use trimesh to compose the scene. account for the different coordinate convention
@@ -282,7 +286,7 @@ def get_skeleton_mesh_overlay(key, cam_idx=0):
             img = render_scene(objs, height=height, width=width, cameras=cameras.to('cuda:0'), device='cuda:0').cpu().detach().numpy()
 
         alpha = img[..., -1:]
-        frame2 = frame / 255.0 * (1-alpha) * 0.5  + img[..., :-1] * alpha * 1.0
+        frame2 = frame / 255.0 * (1-alpha)  + img[..., :-1] * alpha
         frame2[frame2 > 1.0] = 1.0
         frame2 = (frame2 * 255).astype(np.uint8)
 
@@ -325,7 +329,6 @@ def get_markers_overlay(key, cam_idx=0, radius=5, color=(0, 0, 255)):
     # get video parameters
     width = np.unique((VideoInfo & video_keys).fetch("width"))[0]
     height = np.unique((VideoInfo & video_keys).fetch("height"))[0]
-    fps = np.unique((VideoInfo & video_keys).fetch("fps"))[0]
 
     # load the skeleton
     model_name, skeleton_def = (BiomechanicalReconstruction & key).fetch1('model_name', 'skeleton_definition')
@@ -355,15 +358,20 @@ def get_markers_overlay(key, cam_idx=0, radius=5, color=(0, 0, 255)):
     markers_proj[clipped, 1] = 0
     markers_proj[clipped, 2] = 0
     
-    frame_0 = int(timestamps[0] * fps)
-    frame_N = int(timestamps[-1] * fps)
+    # match timestamps
+    vid_timestamps = (VideoInfo & video_keys[0]).fetch_timestamps()
+    frame_idx = np.intersect1d(vid_timestamps, timestamps, return_indices=True)[1]
+    assert len(frame_idx) == len(timestamps)
+    frame_idx = frame_idx.tolist()
 
     def overlay(image, idx):
 
-        if idx < frame_0 or idx >= frame_N:
+        try:
+            pose_idx = frame_idx.index(idx)
+        except ValueError:
             return image
         
-        return draw_keypoints(image, markers_proj[idx - frame_0], radius=radius, color=color)
+        return draw_keypoints(image, markers_proj[pose_idx], radius=radius, color=color)
     
     return overlay
 
@@ -398,7 +406,7 @@ def create_overlay_video(key, cam_idx, out_file_name=None):
     video_key = video_keys[cam_idx]
 
     video = (BlurredVideo & video_key).fetch1("output_video")
-    video_overlay(video, out_file_name, overlay, max_frames=250, downsample=1, compress=True)
+    video_overlay(video, out_file_name, overlay, max_frames=None, downsample=1, compress=True)
 
     os.remove(video)
     

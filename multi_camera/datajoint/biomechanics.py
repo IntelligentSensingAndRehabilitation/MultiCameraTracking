@@ -105,6 +105,12 @@ class BiomechanicalReconstruction(dj.Computed):
         assert len(GaitRiteRecording & trials) == len(trials), "Not all trials have been reconstructed"
         assert len(trials) < 20, "WTF"
 
+        if key['bilevel_settings'] > 1:
+            from sensor_fusion.emgimu_session import Height
+            height = (Height & key).fetch1('height_mm') / 1000.0
+        else:
+            height = 1.7
+
         print(f"Processing {len(trials)} trials with key: {key}")
 
         kps = []
@@ -144,6 +150,7 @@ class BiomechanicalReconstruction(dj.Computed):
             set_min_sphere_fit_score=settings["set_min_sphere_fit_score"],
             set_min_axis_fit_score=settings["set_min_axis_fit_score"],
             set_max_joint_weight=settings["set_max_joint_weight"],
+            heightM=height
         )
 
         print(f"Received {len(results)} results from {len(kps)} trials")

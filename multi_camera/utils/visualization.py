@@ -378,6 +378,8 @@ def get_projected_keypoint_overlay(key: dict, cam_idx: int=0, radius=5, color=(2
     keypoints2d = np.concatenate([keypoints2d, ~clipped[..., None] * 1.0], axis=-1)
 
     def overlay(frame, idx):
+        if idx >= keypoints2d.shape[1]:
+            return frame
         frame = draw_keypoints(frame, keypoints2d[cam_idx, idx], radius=radius, color=color)
         return frame
     
