@@ -12,6 +12,14 @@ Modules:
 
 Acquisition is designed to perform simple multi-camera video acquisition with FLIR cameras. These use network synchronization and are tested on BFS-PGE-31S4C. Requires recent firmware to support IEEE1394 synchronization.
 
+# TODO and Warning
+
+This project is under active development and breaking changes may be introduced.
+
+- [ ] Develop a session management schema, ideally that is integrated into acquisition system
+- [ ] Migrate existing gaitrite_comparison code and biomechanics code to a validation module
+- [ ] Generalize biomechanical reconstructions to any acquisition session
+
 # Usage
 
 ## Installation:

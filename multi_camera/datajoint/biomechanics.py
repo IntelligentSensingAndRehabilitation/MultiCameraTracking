@@ -243,6 +243,11 @@ class BiomechanicalReconstruction(dj.Computed):
                     kp,
                 )
 
+    @property
+    def key_source(self):
+        """Only calibrate if all the reconstruction methods are computed"""
+        possible = GaitRiteSession * BiomechanicalReconstructionLookup
+        return possible - (possible - PersonKeypointReconstruction * possible).proj()
 
 @schema
 class BiomechanicalReconstructionTrialNoise(dj.Computed):
