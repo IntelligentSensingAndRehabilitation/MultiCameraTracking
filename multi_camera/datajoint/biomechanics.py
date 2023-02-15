@@ -10,7 +10,7 @@ multitrial reconstruction.
 import numpy as np
 import datajoint as dj
 from multi_camera.datajoint.gaitrite_comparison import GaitRiteSession, GaitRiteRecording
-from multi_camera.datajoint.multi_camera_dj import PersonKeypointReconstruction
+from multi_camera.datajoint.multi_camera_dj import PersonKeypointReconstruction,  SingleCameraVideo
 
 schema = dj.schema("multicamera_tracking_biomechanics")
 
@@ -243,11 +243,86 @@ class BiomechanicalReconstruction(dj.Computed):
                     kp,
                 )
 
+    def find_incomplete(self):
+        """
+        Find all the sessions that are missing some of the reconstruction methods
+
+        This shouldn't have occurred but was older code
+        """
+
+        incomplete = BiomechanicalReconstruction & (GaitRiteRecording * self - (BiomechanicalReconstruction.Trial * GaitRiteRecording * self).proj()).proj()
+        return incomplete
+
     @property
     def key_source(self):
         """Only calibrate if all the reconstruction methods are computed"""
         possible = GaitRiteSession * BiomechanicalReconstructionLookup
         return possible - (possible - PersonKeypointReconstruction * possible).proj()
+
+
+@schema
+class BiomechanicsGaitCycles(dj.Computed):
+    definition = """
+    -> BiomechanicalReconstruction.Trial
+    ---
+    left_gait_cycles  : longblob
+    right_gait_cycles : longblob
+    """
+
+    def make(self, key):
+        from multi_camera.datajoint.gaitrite_comparison import fetch_data, GaitRiteRecordingAlignment
+        from jax import vmap, numpy as jnp
+
+        # fetch data
+        timestamps, poses = (BiomechanicalReconstruction.Trial & key).fetch1('timestamps', 'poses')
+        _, _, df = fetch_data(key)
+
+        t_offset = (GaitRiteRecordingAlignment & key).fetch1("t_offset")
+
+        # get gait event times
+        left = df.loc[df['Left Foot']]
+        left_times = jnp.stack([left.iloc[:-1]['First Contact Time'].values, left.iloc[1:]['First Contact Time'].values], axis=1)
+        left_times = left_times + t_offset
+
+        right = df.loc[~df['Left Foot']]
+        right_times = jnp.stack([right.iloc[:-1]['First Contact Time'].values, right.iloc[1:]['First Contact Time'].values], axis=1)
+        right_times = right_times + t_offset
+
+        # interpolate poses to gait cycles
+        interp_array = vmap(jnp.interp, (None, None, 1), 1)
+        interp_windows = vmap(lambda t: interp_array(jnp.linspace(t[0], t[1], 100), timestamps, poses))
+
+        left_cycles = interp_windows(left_times)
+        right_cycles = interp_windows(right_times)
+
+        key['left_gait_cycles'] = np.array(left_cycles)
+        key['right_gait_cycles'] = np.array(right_cycles)
+        self.insert1(key)
+
+
+@schema
+class BiomechanicalTrialMeshOverlay(dj.Computed):
+    definition = """
+    -> BiomechanicalReconstruction.Trial
+    -> SingleCameraVideo
+    ---
+    output_video      : attach@localattach    # datajoint managed video file
+    """
+
+    def make(self, key):
+        from multi_camera.datajoint.calibrate_cameras import Calibration
+        from multi_camera.analysis.biomechanics.render import create_overlay_video
+
+        camera_name = (SingleCameraVideo & key).fetch1("camera_name")
+        camera_names = (Calibration & key).fetch1("camera_names")
+        N = camera_names.index(camera_name)
+        print(f"Creating overlay for {camera_name} ({N})")
+        
+        vid = create_overlay_video((BiomechanicalReconstruction.Trial & key).fetch1('KEY'), N)
+
+        key['output_video'] = vid
+        self.insert1(key)
+
 
 @schema
 class BiomechanicalReconstructionTrialNoise(dj.Computed):

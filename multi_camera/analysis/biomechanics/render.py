@@ -144,14 +144,16 @@ def render_poses(skeleton, poses, device='cuda:0'):
             images: list of np.array, shape (T, H, W, 4) RGBA format
     '''
 
+    from tqdm import tqdm
+
     images = []
-    for pose in poses:
+    for pose in tqdm(poses):
 
         posed = pose_skeleton(skeleton, pose)
 
         scene = trimesh.Scene()
         for k, v in posed.items():
-            scene.add_geometry(v)
+            scene.add_geometry(v, node_name=k)
 
         origin = np.mean(posed['pelvis_ShapeNode_0'].vertices, axis=0)
         offset = np.array([0, 0, 8]) - origin * 1.0
@@ -377,6 +379,28 @@ def get_markers_overlay(key, cam_idx=0, radius=5, color=(0, 0, 255)):
         return draw_keypoints(image, markers_proj[pose_idx], radius=radius, color=color)
     
     return overlay
+
+
+def create_centered_video(key, out_file_name=None):
+    import cv2
+    import os
+    import tempfile
+    from .bilevel_optimization import get_markers, reload_skeleton
+    from multi_camera.datajoint.biomechanics import BiomechanicalReconstruction
+
+    model_name, skeleton_def = (BiomechanicalReconstruction & key).fetch1('model_name', 'skeleton_definition')
+    skeleton = reload_skeleton(model_name, skeleton_def['group_scales'], return_map=False)
+    poses = (BiomechanicalReconstruction.Trial & key).fetch1('poses')
+
+    images = render_poses(skeleton, poses)
+
+    if out_file_name is None:
+        fd, out_file_name = tempfile.mkstemp(suffix=".mp4")
+        os.close(fd)
+
+    write_images_to_video(images, out_file_name)
+
+    return out_file_name
 
 
 def create_overlay_video(key, cam_idx, out_file_name=None):
