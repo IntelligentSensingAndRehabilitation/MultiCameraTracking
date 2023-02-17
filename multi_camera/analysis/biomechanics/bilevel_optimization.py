@@ -61,7 +61,8 @@ def fit_markers(
 
     if regularize_joint_bounds > 0.0:
         fitter.setIgnoreJointLimits(True)  # this is detrimental without this upcoming feature
-        # fitter.setRegularizeJointBounds(regularize_joint_bounds)
+        if regularize_joint_bounds > 0.01:
+            fitter.setRegularizeJointBounds(regularize_joint_bounds)
     if max_marker_offset > 0.0:
         fitter.setMaxMarkerOffset(max_marker_offset)  # 0.1
     if regularize_all_body_scales > 0.0:

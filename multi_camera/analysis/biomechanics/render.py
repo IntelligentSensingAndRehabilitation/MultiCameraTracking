@@ -398,7 +398,7 @@ def create_centered_video(key, out_file_name=None):
         fd, out_file_name = tempfile.mkstemp(suffix=".mp4")
         os.close(fd)
 
-    write_images_to_video(images, out_file_name)
+    write_images_to_video(out_file_name, images)
 
     return out_file_name
 

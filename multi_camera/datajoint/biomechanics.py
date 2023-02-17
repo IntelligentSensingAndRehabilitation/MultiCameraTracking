@@ -485,6 +485,54 @@ class BiomechanicalReconstructionTrialNoise(dj.Computed):
         self.insert1(key)
 
 
+@schema
+class BiomechanicalReconstructionJointLimits(dj.Computed):
+    definition = """
+    -> BiomechanicalReconstruction.Trial
+    ---
+    violation_fraction:     float
+    violation_50_fraction:  float
+    violation_100_fraction: float
+    under_fraction:         float
+    over_fraction:          float
+    per_joint:              longblob
+    """
+
+    def make(self, key):
+        from multi_camera.analysis.biomechanics.bilevel_optimization import reload_skeleton
+
+        # load the skeleton
+        model_name, skeleton_def = (BiomechanicalReconstruction & key).fetch1('model_name', 'skeleton_definition')
+        skeleton = reload_skeleton(model_name, skeleton_def['group_scales'])
+        poses = (BiomechanicalReconstruction.Trial & key).fetch1('poses')
+
+        # get the joint limits
+        limits = np.stack([skeleton.getPositionLowerLimits(), skeleton.getPositionUpperLimits()], axis=1)
+        limits50 = np.stack([skeleton.getPositionLowerLimits(), skeleton.getPositionUpperLimits()], axis=1) * 1.5
+        limits100 = np.stack([skeleton.getPositionLowerLimits(), skeleton.getPositionUpperLimits()], axis=1) * 2.0
+
+        # ignore ones with no allowed range, although really this includes clamped
+        # joints which we really should include
+        allowed = np.diff(limits, axis=1) > 0
+
+        # compute the violations
+        under = (poses < limits[None, :, 0]) * allowed.T
+        over = (poses > limits[None, :, 1]) * allowed.T
+        under50 = (poses < limits50[None, :, 0]) * allowed.T
+        over50 = (poses > limits50[None, :, 1]) * allowed.T
+        under100 = (poses < limits100[None, :, 0]) * allowed.T
+        over100 = (poses > limits100[None, :, 1]) * allowed.T
+
+        key['violation_fraction'] = np.mean(under | over)
+        key['violation_50_fraction'] = np.mean(under50 | over50)
+        key['violation_100_fraction'] = np.mean(under100 | over100)
+        key['under_fraction'] = np.mean(under)
+        key['over_fraction'] = np.mean(over)
+        key['per_joint'] = np.mean(under | over, axis=0)
+
+        self.insert1(key)
+
+
 if __name__ == "__main__":
     import multi_camera.datajoint.biomechanics
     from multi_camera.datajoint.biomechanics import BiomechanicalReconstruction
