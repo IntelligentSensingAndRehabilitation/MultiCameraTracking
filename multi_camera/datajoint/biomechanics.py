@@ -325,6 +325,23 @@ class BiomechanicalTrialMeshOverlay(dj.Computed):
 
 
 @schema
+class BiomechanicalReconstructionVideo(dj.Computed):
+    definition = """
+    -> BiomechanicalReconstruction.Trial
+    ---
+    output_video      : attach@localattach    # datajoint managed video file
+    """
+
+    def make(self, key):
+        from multi_camera.analysis.biomechanics.render import create_centered_video
+
+        vid = create_centered_video(key)
+
+        key['output_video'] = vid
+        self.insert1(key)
+
+
+@schema
 class BiomechanicalReconstructionTrialNoise(dj.Computed):
     definition = """
     -> BiomechanicalReconstruction.Trial

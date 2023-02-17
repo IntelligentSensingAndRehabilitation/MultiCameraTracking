@@ -161,7 +161,7 @@ def render_poses(skeleton, poses, device='cuda:0'):
         scene.apply_translation(offset)
         objs = scene.dump()
 
-        img = render_scene(objs, 8, 320, 320, color=(0.5, 0.5, 0.5), device=device).cpu().detach().numpy()
+        img = render_scene(objs, 8, 640, 640, color=(0.5, 0.5, 0.5), device=device).cpu().detach().numpy()
         images.append(img)
 
     return images
@@ -387,6 +387,7 @@ def create_centered_video(key, out_file_name=None):
     import tempfile
     from .bilevel_optimization import get_markers, reload_skeleton
     from multi_camera.datajoint.biomechanics import BiomechanicalReconstruction
+    from pose_pipeline.utils.video_format import compress
 
     model_name, skeleton_def = (BiomechanicalReconstruction & key).fetch1('model_name', 'skeleton_definition')
     skeleton = reload_skeleton(model_name, skeleton_def['group_scales'], return_map=False)
@@ -394,11 +395,17 @@ def create_centered_video(key, out_file_name=None):
 
     images = render_poses(skeleton, poses)
 
-    if out_file_name is None:
-        fd, out_file_name = tempfile.mkstemp(suffix=".mp4")
-        os.close(fd)
+    fd, file_name = tempfile.mkstemp(suffix=".mp4")
+    os.close(fd)
 
-    write_images_to_video(out_file_name, images)
+    write_images_to_video(file_name, images)
+    compressed = compress(file_name)
+    os.remove(file_name)
+
+    if out_file_name is not None:
+        os.rename(compressed, out_file_name)
+    else:
+        out_file_name = compressed
 
     return out_file_name
 
