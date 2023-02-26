@@ -4,8 +4,11 @@ from easymocap.dataset.base import MVBase
 from easymocap.dataset import CONFIG
 from easymocap.mytools.file_utils import get_bbox_from_pose
 
-from pose_pipeline import Video, VideoInfo, OpenPose
+from pose_pipeline import Video, VideoInfo, BottomUpPeople
 from .multi_camera_dj import schema, MultiCameraRecording, SingleCameraVideo, Calibration, CalibratedRecording
+
+# Hardcoding a selected method
+bottom_up = (BottomUpPeople & {'bottom_up_method_name': 'OpenPose_HR'})
 
 def _build_camera(params, index=0):
     from multi_camera.analysis.camera import get_intrinsic, get_extrinsic, get_projection
@@ -38,7 +41,7 @@ class MCTDataset(MVBase):
         self.images = images
 
         # TODO: should support general bottom up class and thus other types of keypoints
-        self.keypoints, self.cams = (OpenPose * SingleCameraVideo & key).fetch('keypoints', 'camera_name')
+        self.keypoints, self.cams = (bottom_up * SingleCameraVideo & key).fetch('keypoints', 'camera_name')
         self.calibration, calibration_cameras = (Calibration & key).fetch1('camera_calibration', 'camera_names')
 
         calibration_idx = np.array([calibration_cameras.index(c) for c in self.cams])
@@ -50,7 +53,7 @@ class MCTDataset(MVBase):
 
         if self.images:
             import pims
-            videos = (Video * OpenPose * SingleCameraVideo & key).fetch('video')
+            videos = (Video * bottom_up * SingleCameraVideo & key).fetch('video')
             self.caps = [pims.Video(v) for v in videos]
 
         self.frames = np.unique((VideoInfo * SingleCameraVideo & key).fetch('num_frames'))
@@ -117,7 +120,7 @@ class EasymocapTracking(dj.Computed):
     def make(self, key):
         from multi_camera.analysis.easymocap import mvmp_association_and_tracking
 
-        assert len((SingleCameraVideo & key) - OpenPose) == 0, f"Missing OpenPose computations for {key}"
+        assert len((SingleCameraVideo & key) - bottom_up) == 0, f"Missing OpenPose computations for {key}"
 
         dataset = MCTDataset(key)
         results = mvmp_association_and_tracking(dataset)
@@ -130,7 +133,7 @@ class EasymocapTracking(dj.Computed):
     @property
     def key_source(self):
         # awkward double negative is to ensure all OpenPose views were computed
-        return CalibratedRecording & MultiCameraRecording - (SingleCameraVideo - OpenPose).proj()
+        return CalibratedRecording & MultiCameraRecording - (SingleCameraVideo - bottom_up).proj()
 
     def create_bounding_boxes(self, subject_ids):
         """ Create bounding boxes based on Easymocap tracks

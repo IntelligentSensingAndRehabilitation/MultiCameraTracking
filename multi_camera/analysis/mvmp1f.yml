@@ -17,8 +17,8 @@ affinity:
     "easymocap.affinity.ray.Affinity":
       MAX_DIST: 0.1
   svt_args:
-    maxIter: 1000
-    w_sparse: 0.1
+    maxIter: 10000
+    w_sparse: 0.3
     w_rank: 50
 
 associate:

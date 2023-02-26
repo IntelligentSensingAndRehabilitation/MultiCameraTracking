@@ -70,7 +70,7 @@ def reconstruction_pipeline(
         k["top_down_method"] = top_down_method
         k["tracking_method"] = tracking_method
         PersonKeypointReconstructionMethod.insert1(k, skip_duplicates=True)
-        PersonKeypointReconstruction.populate(k)  # , suppress_errors=True, reserve_jobs=True)
+        PersonKeypointReconstruction.populate(k, suppress_errors=True, reserve_jobs=True)
 
         final_keys.append(k)
 
