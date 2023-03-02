@@ -389,8 +389,6 @@ class BiomechanicalReconstructionReprojectionQuality(dj.Computed):
         video_keys, video_camera_name = (TopDownPerson * SingleCameraVideo * videos).fetch( "KEY", "camera_name")
         assert camera_names == video_camera_name.tolist(), "Videos don't match cameras in calibration"
 
-        fps = np.unique((VideoInfo & video_keys).fetch("fps"))[0]
-
         # load the skeleton
         model_name, skeleton_def = (BiomechanicalReconstruction & key).fetch1('model_name', 'skeleton_definition')
         skeleton = reload_skeleton(model_name, skeleton_def['group_scales'])
@@ -433,10 +431,10 @@ class BiomechanicalReconstructionReprojectionQuality(dj.Computed):
         kp2d_ordered = kp2d_ordered.transpose([2, 0, 1, 3])  # expects camera x time x joint x axis
 
         # only keep the ones that are in the time range
-        fps = int(np.unique((VideoInfo & video_keys).fetch("fps"))[0])
+        vid_ts = (VideoInfo & video_keys[0]).fetch_timestamps()
         N = markers_ordered.shape[0]
-        frame_0 = int(timestamps[0] * fps)
-        kp2d = kp2d_ordered[:, frame_0-1:frame_0-1+N]
+        frame_0 = np.argmin(np.abs(vid_ts - timestamps[0]))
+        kp2d = kp2d_ordered[:, frame_0:frame_0+N]
 
         # compute the metrics
         metrics, thresh, confidence = fit_quality.reprojection_quality(markers_ordered, camera_params, kp2d)
