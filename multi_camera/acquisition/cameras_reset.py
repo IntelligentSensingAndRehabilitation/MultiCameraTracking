@@ -33,8 +33,9 @@ def reset(all_cams=True, config="", verbose=False):
                 if verbose:
                     print(f"{c.DeviceSerialNumber} not listed in config file.")
                 continue
-        print(f"Reset {c.DeviceSerialNumber}")
+
         c.DeviceReset()
+        print(f"Reset {c.DeviceSerialNumber}")
 
 
 if __name__ == "__main__":

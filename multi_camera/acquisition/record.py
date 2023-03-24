@@ -475,7 +475,7 @@ def record_dual(vid_file, max_frames=100, num_cams=4, preview=True, resize=0.5, 
     else:
         print(f"Timestamps showed a maximum spread of {np.max(spread) * 1000} ms")
 
-    return
+    return np.max(spread) * 1000
 
 
 if __name__ == "__main__":
