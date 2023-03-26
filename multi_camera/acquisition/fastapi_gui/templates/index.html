@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multi-camera Video Acquisition System</title>
+    <script src="https://cdn.socket.io/4.1.2/socket.io.min.js"></script>
+</head>
+
+<body>
+    <label for="participant_identifier">Participant Identifier:</label>
+    <input id="participant_identifier" type="text" />
+
+    <label for="recording_note">Recording Note:</label>
+    <input id="recording_note" type="text" />
+
+    <br />
+
+    <label for="channel">Select channel:</label>
+    <select id="channel">
+        <!-- Add options for each channel -->
+        <option value="0">Channel 0</option>
+        <option value="1">Channel 1</option>
+    </select>
+
+    <br />
+
+    <img id="video_stream" width="640">
+
+    <br />
+
+    <button id="start">Start</button>
+    <button id="stop">Stop</button>
+
+    <script>
+        const video = document.getElementById("video");
+        const channelSelector = document.getElementById("channel");
+        const startButton = document.getElementById("start");
+        const stopButton = document.getElementById("stop");
+        const participantIdentifierInput = document.getElementById("participant_identifier");
+        const recordingNoteInput = document.getElementById("recording_note");
+
+        async function sendData(url, data) {
+            const response = await fetch(url, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify(data),
+            });
+            return response.json();
+        }
+
+        startButton.addEventListener("click", () => {
+            console.log("start button click called");
+            sendData("/start", {
+                participant_identifier: participantIdentifierInput.value,
+                recording_note: recordingNoteInput.value,
+            });
+        });
+
+        stopButton.addEventListener("click", () => {
+            sendData("/stop", {});
+        });
+
+        const videoStream = document.getElementById("video_stream");
+
+        // Set the image source to the video stream endpoint
+        videoStream.src = "http://localhost:8000/video";
+    </script>
+</body>
+
+</html>
