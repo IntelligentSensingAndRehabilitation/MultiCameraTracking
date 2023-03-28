@@ -9,22 +9,19 @@
 </head>
 
 <body>
-    <label for="participant_identifier">Participant Identifier:</label>
-    <input id="participant_identifier" type="text" />
 
-    <label for="recording_note">Recording Note:</label>
-    <input id="recording_note" type="text" />
+    <div>
+        <label for="config">Config:</label>
+        <select id="config">
+            <!-- options will be added by the backend -->
+        </select>
+    </div>
 
-    <br />
+    <div>
+        <label for="participant_identifier">Participant Identifier:</label>
+        <input id="participant_identifier" type="text" />
+    </div>
 
-    <label for="channel">Select channel:</label>
-    <select id="channel">
-        <!-- Add options for each channel -->
-        <option value="0">Channel 0</option>
-        <option value="1">Channel 1</option>
-    </select>
-
-    <br />
 
     <div>
         <button id="new_session">New Session</button>
@@ -36,44 +33,63 @@
 
     <div>
         <button id="new_trial">New Trial</button>
-        <label for="status">Status:</label>
-        <input id="status" type="text" readonly />
         <button id="stop">Stop Recording</button>
+        <label for="file_name">File Name:</label>
+        <input id="file_name" type="text" readonly />
         <label for="comment">Comment:</label>
         <input id="comment" type="text" />
-        <label for="config">Recording Configuration:</label>
-        <select id="config">
-            <!-- options will be added by the backend -->
-        </select>
     </div>
 
-    <br />
+    <div>
+        <label for="status">Status:</label>
+        <input id="status" type="text" readonly />
+    </div>
 
-    <img id="video_stream" width="640">
 
-    <br />
+    <div>
+        <label for="channel">Select channel:</label>
+        <select id="channel">
+            <!-- Add options for each channel -->
+            <option value="0">Channel 0</option>
+            <option value="1">Channel 1</option>
+        </select>
+        <br />
+        <img id="video_stream" width="640">
+    </div>
 
-    <table id="previous_recordings">
-        <thead>
-            <tr>
-                <th>Participant</th>
-                <th>Filename</th>
-                <th>Comment</th>
-            </tr>
-        </thead>
-        <tbody>
-            <!-- rows will be added by the backend -->
-        </tbody>
+    <table>
+        <tr>
+            <td>
+                <h3>Prior Recordings:</h3>
+            </td>
+        </tr>
+        <tr>
+            <td>
+                <table id="previous_recordings">
+                    <thead>
+                        <tr>
+                            <th>Participant</th>
+                            <th>Filename</th>
+                            <th>Comment</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <!-- rows will be added by the backend -->
+                    </tbody>
+                </table>
+            </td>
+        </tr>
     </table>
 
 
     <script>
+        const API_ENDPOINT = "/api/v1"; // Define the API endpoint path
+
         const video = document.getElementById("video");
         const channelSelector = document.getElementById("channel");
         const startButton = document.getElementById("start");
         const stopButton = document.getElementById("stop");
         const participantIdentifierInput = document.getElementById("participant_identifier");
-        const recordingNoteInput = document.getElementById("recording_note");
         const sessionDirInput = document.getElementById("session_dir");
         const sessionFilenameInput = document.getElementById("session_filename");
         const newSessionButton = document.getElementById("new_session");
@@ -81,9 +97,10 @@
         const statusInput = document.getElementById("status");
         const commentInput = document.getElementById("comment");
         const configSelect = document.getElementById("config");
+        const fileNameInput = document.getElementById("file_name");
 
         async function sendData(url, data) {
-            const response = await fetch(url, {
+            const response = await fetch(`${API_ENDPOINT}${url}`, {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
@@ -104,10 +121,15 @@
             const config = configSelect.value;
             const sessionId = sessionDirInput.value;
             const trialFilename = `${sessionFilenameInput.value}_${new Date().toISOString().replace(/[-:.]/g, "")}`;
-            sendData("/start", { recording_dir: sessionId, recording_filename: trialFilename, config_file: config })
+            const comment = commentInput.value;
+
+            sendData("/start", {
+                recording_dir: sessionId, recording_filename: trialFilename, config_file: config,
+                comment: comment
+            })
                 .then(data => {
                     statusInput.value = "recording...";
-                    commentInput.value = "";
+                    fileNameInput.value = trialFilename;
                 });
         });
 
@@ -117,7 +139,7 @@
             });
         });
 
-        fetch("/configs")
+        fetch(`${API_ENDPOINT}/configs`)
             .then(response => response.json())
             .then(data => {
                 data.forEach(config => {
@@ -128,7 +150,7 @@
                 });
             });
 
-        fetch("/recordings")
+        fetch(`${API_ENDPOINT}/recordings`)
             .then(response => response.json())
             .then(data => {
                 const table = document.getElementById("previous_recordings");
@@ -147,7 +169,7 @@
         const videoStream = document.getElementById("video_stream");
 
         // Set the image source to the video stream endpoint
-        videoStream.src = "http://localhost:8000/video";
+        videoStream.src = `http://localhost:8000${API_ENDPOINT}/video`;
     </script>
 </body>
 
