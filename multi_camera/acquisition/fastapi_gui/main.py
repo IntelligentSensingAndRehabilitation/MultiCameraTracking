@@ -7,8 +7,11 @@ from pydantic import BaseModel
 from typing import List
 from typing_extensions import Annotated
 import concurrent.futures
+import numpy as np
+import logging
 import socketio
 import signal
+import math
 import datetime
 import cv2
 import os
@@ -32,12 +35,14 @@ else:
         return FileResponse(str(index_html), media_type="text/html")
 
 
+logger = logging.getLogger("uvicorn.server")
+
 # sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins="*")
 # app_asgi = socketio.ASGIApp(sio, app)
 preview_queue = asyncio.Queue()
 
 # Replace this with your actual acquisition library import
-from multi_camera.acquisition.flir_recording_api import FlirRecorder
+from multi_camera.acquisition.flir_recording_api import FlirRecorder, CameraStatus
 
 RECORDING_BASE = "data"
 CONFIG_PATH = "/home/cbm/MultiCameraTracking/multi_camera_configs/"
@@ -125,8 +130,6 @@ async def new_trial(data: NewTrialData):
     time_str = now.strftime("%Y%m%d_%H%M%S")
     recording_path = os.path.join(recording_dir, f"{recording_filename}_{time_str}")
 
-    print("Built recording path: ", recording_path)
-
     def receive_frames_wrapper(frames):
         if frames is not None:
             loop.create_task(receive_frames(frames))
@@ -169,7 +172,7 @@ async def reset_cameras():
 
 # create an endpoint that exposes the camera statuses
 @api_router.get("/camera_status")
-async def get_camera_status():
+async def get_camera_status() -> List[CameraStatus]:
     camera_status = acquisition.get_camera_status()
     return camera_status
 
@@ -201,12 +204,45 @@ def convert_rgb_to_jpeg(frame):
 
 
 async def receive_frames(frames):
-    frame = frames[channel_selector_value]
+    num_frames = len(frames)
+    grid_width = math.ceil(math.sqrt(num_frames))
+    grid_height = math.ceil(num_frames / grid_width)
 
-    # Convert to RGB
-    frame = cv2.cvtColor(frame, cv2.COLOR_BAYER_RG2RGB)
+    # Convert each frame to RGB and store in a list
+    rgb_frames = [cv2.cvtColor(frame, cv2.COLOR_BAYER_RG2RGB) for frame in frames]
 
-    downsampled_frame = downsample_image(frame, 640, 470)  # Downsample to 640x480
+    # Calculate the size of each frame to fit in the grid
+    frame_height, frame_width, _ = rgb_frames[0].shape
+    grid_frame_width = frame_width // grid_width
+    grid_frame_height = frame_height // grid_height
+
+    # Initialize an empty grid image
+    grid_image = np.zeros((frame_height, frame_width, 3), dtype=np.uint8)
+
+    # Fill the grid with the frames
+    for i, frame in enumerate(rgb_frames):
+        row = i // grid_width
+        col = i % grid_width
+
+        # Resize the frame to fit the grid
+        resized_frame = cv2.resize(frame, (grid_frame_width, grid_frame_height))
+
+        # Calculate the position in the grid
+        y_start = row * grid_frame_height
+        y_end = y_start + grid_frame_height
+        x_start = col * grid_frame_width
+        x_end = x_start + grid_frame_width
+
+        # Place the resized frame in the grid
+        grid_image[y_start:y_end, x_start:x_end] = resized_frame
+
+    # preserve aspect ratio of original images and make the total height 480 pixels
+    frame_ratio = frame_width / frame_height
+    grid_ratio = grid_width / grid_height
+    ratio = frame_ratio * grid_ratio
+    width = 480
+
+    downsampled_frame = downsample_image(grid_image, int(ratio * width), width)
     jpeg_image = convert_rgb_to_jpeg(downsampled_frame)
 
     await preview_queue.put(jpeg_image)
@@ -218,6 +254,8 @@ async def video_endpoint():
         while True:
             # Wait for the next frame to become available
             frame = await preview_queue.get()
+            if frame is None:
+                break
 
             # Write the boundary frame to the response
             yield (b"--frame\r\n" b"Content-Type: image/jpeg\r\n\r\n" + frame + b"\r\n\r\n")
@@ -225,23 +263,13 @@ async def video_endpoint():
     return StreamingResponse(generate_frames(), status_code=206, media_type="multipart/x-mixed-replace; boundary=frame")
 
 
+@app.on_event("shutdown")
+async def on_shutdown():
+    logger.info("Closing the video endpoint")
+    await preview_queue.put(None)
+
+
 app.include_router(api_router)
-
-if False:
-
-    @app.on_event("startup")
-    async def startup():
-        # Set up the signal handler for Ctrl-C
-        for signame in ("SIGINT", "SIGTERM"):
-            loop.add_signal_handler(getattr(signal, signame), lambda: asyncio.ensure_future(shutdown()))
-
-    async def shutdown():
-        print("Shutting down...")
-        tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
-        for task in tasks:
-            task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
-
 
 if __name__ == "__main__":
     import uvicorn

@@ -4,14 +4,30 @@ import numpy as np
 from tqdm import tqdm
 from datetime import datetime
 from queue import Queue
+from typing import List
+from pydantic import BaseModel
 import concurrent.futures
 import threading
+import asyncio
 import json
 import time
 import cv2
 import os
 import yaml
 
+
+# Data structures we will expose outside this library
+class CameraStatus(BaseModel):
+    # This contains the information from init_camera
+    SerialNumber: str
+    Status: str = "Not Initialized"
+    # PixelSize: float = 0.0
+    PixelFormat: str = ""
+    BinningHorizontal: int = 0
+    BinningVertical: int = 0
+    Width: int = 0
+    Height: int = 0
+    SyncOffset: float = 0.0
 
 
 def select_interface(interface, cameras):
@@ -47,7 +63,6 @@ def select_interface(interface, cameras):
         # If num_cams is passed, confirm it is less than or equal to
         # the size of interface_cams and return the correct num_cams
         if isinstance(cameras, int):
-
             # if num_cams is larger than the # cameras on current interface,
             # raise an error
             assert (
@@ -63,22 +78,27 @@ def select_interface(interface, cameras):
     return None
 
 
-def init_camera(c, jumbo_packet : bool = True, triggering : bool = True,
-                throughput_limit : int = 125000000, resend_enable : bool = False,
-                binning : int = 1):
-    '''
+def init_camera(
+    c,
+    jumbo_packet: bool = True,
+    triggering: bool = True,
+    throughput_limit: int = 125000000,
+    resend_enable: bool = False,
+    binning: int = 1,
+):
+    """
     Initialize camera with settings for recording
 
         Args:
             c (Camera): Camera object
             jumbo_packet (bool): Enable jumbo packets
             triggering (bool): Enable network triggering for start
-            throughput_limit (int): Throughput limit for camera. 
+            throughput_limit (int): Throughput limit for camera.
             resend_enable (bool): Enable packet resend
 
         Throughput should be limited for multiple cameras but reduces frame rate. Can use 125000000 for maximum
         frame rate or 85000000 when using more cameras with a 10GigE switch.
-    '''
+    """
 
     # Initialize each available camera
     c.init()
@@ -99,7 +119,7 @@ def init_camera(c, jumbo_packet : bool = True, triggering : bool = True,
 
     c.DeviceLinkThroughputLimit = throughput_limit
     c.GevSCPD = 25000
-    
+
     # c.StreamPacketResendEnable = resend_enable
 
     if triggering:
@@ -114,30 +134,25 @@ def init_camera(c, jumbo_packet : bool = True, triggering : bool = True,
         c.TriggerSource = "Action0"
         c.TriggerMode = "On"
 
-    ## Initializing an image queue for each camera
-    #image_queue_dict[c.DeviceSerialNumber] = Queue(max_frames)
-
-    print(
-        c.DeviceSerialNumber,
-        c.PixelSize,
-        c.PixelColorFilter,
-        c.PixelFormat,
-        c.Width,
-        c.Height,
-        c.WidthMax,
-        c.HeightMax,
-        c.BinningHorizontal,
-        c.BinningVertical,
+    status = CameraStatus(
+        SerialNumber=c.DeviceSerialNumber,
+        Status="Initialized",
+        # PixelSize=c.PixelSize,
+        PixelFormat=c.PixelFormat,
+        BinningHorizontal=c.BinningHorizontal,
+        BinningVertical=c.BinningVertical,
+        Width=c.Width,
+        Height=c.Height,
     )
+    return status
 
 
-def write_queue(vid_file : str, time_str : str, image_queue : Queue, json_queue : Queue, serial, pixel_format : str):
-    '''
+def write_queue(vid_file: str, image_queue: Queue, json_queue: Queue, serial, pixel_format: str):
+    """
     Write images from the queue to a video file
-    
+
     Args:
         vid_file (str): Path to video file
-        time_str (str): Timestamp string
         image_queue (Queue): Queue to read images from
         json_queue (Queue): Queue to write the json information about timestamps to
         serial (str): Camera serial number
@@ -146,9 +161,9 @@ def write_queue(vid_file : str, time_str : str, image_queue : Queue, json_queue 
     Filename is determine by the vid_file and time_str. The serial number is appended to the end of the filename.
 
     This is expected to be called from a standalone thread and will autoamtically terminate when the image_queue is empty.
-    '''
+    """
 
-    vid_file = os.path.splitext(vid_file)[0] + f"_{time_str}.{serial}.mp4"
+    vid_file = os.path.splitext(vid_file)[0] + f".{serial}.mp4"
 
     print(vid_file)
 
@@ -158,7 +173,6 @@ def write_queue(vid_file : str, time_str : str, image_queue : Queue, json_queue 
     out_video = None
 
     for frame in iter(image_queue.get, None):
-
         if frame is None:
             break
         timestamps.append(frame["timestamps"])
@@ -174,7 +188,6 @@ def write_queue(vid_file : str, time_str : str, image_queue : Queue, json_queue 
             last_im = im
 
         elif out_video is None and len(real_times) > 1:
-
             ts = np.asarray(timestamps)
             delta = np.mean(np.diff(ts, axis=0)) * 1e-9
             fps = 1.0 / delta
@@ -206,10 +219,32 @@ def write_queue(vid_file : str, time_str : str, image_queue : Queue, json_queue 
 
 
 class FlirRecorder:
-
-    def __init__(self, config_file : str = None, num_cams : int = None, trigger : bool = True):
-
+    def __init__(
+        self,
+    ):
         self.system = PySpin.System.GetInstance()
+
+        # Set up thread safe semaphore to stop recording from a different thread
+        self.stop_recording = threading.Event()
+
+        self.preview_callback = None
+        self.cams = None
+        self.image_queue_dict = {}
+
+    def configure_cameras(
+        self, config_file: str = None, num_cams: int = None, trigger: bool = True
+    ) -> List[CameraStatus]:
+        """
+        Configure cameras for recording
+
+        Args:
+            config_file (str): Path to config file
+            num_cams (int): Number of cameras to configure (if not using config file)
+            trigger (bool): Enable network synchronized triggering
+        """
+
+        self.config_file = config_file
+
         iface_list = self.system.GetInterfaces()
 
         if config_file is not None:
@@ -224,11 +259,9 @@ class FlirRecorder:
             self.iface_cameras = num_cams
             self.camera_config = {}
 
-
         # Identify the interface we are going to send a command for synchronous recording
         iface = None
         for current_iface in iface_list:
-
             current_iface_cams = select_interface(current_iface, self.iface_cameras)
 
             # If the value returned from select_interface is not None,
@@ -238,25 +271,13 @@ class FlirRecorder:
                 iface_cams = current_iface_cams
                 # Break out of the loop after finding the interface and cameras
                 break
-        
+
         # Confirm that cameras were found on an interface
         assert iface is not None, "Unable to find valid interface."
         self.iface = iface
         self.iface_cameras = iface_cams
 
-        self.trigger = True
-
-        # Set up thread safe semaphore to stop recording from a different thread
-        self.stop_recording = threading.Event()
-
-        self.preview_callback = None
-        self.cams = None
-        self.image_queue_dict = {}
-
-
-    def configure(self, recording_path=None, preview_callback : callable = None):
-
-        self.preview_callback = preview_callback
+        self.trigger = trigger
 
         self.iface.TLInterface.GevActionDeviceKey.SetValue(0)
         self.iface.TLInterface.GevActionGroupKey.SetValue(1)
@@ -278,15 +299,7 @@ class FlirRecorder:
         }
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(self.cams)) as executor:
-            l = list(executor.map(lambda c: init_camera(c, **config_params), self.cams))
-
-
-        self.cams.sort(key=lambda x: x.DeviceSerialNumber)
-
-        # Initializing an image queue for each camera
-        self.image_queue_dict = {c.DeviceSerialNumber: Queue(100) for c in self.cams}
-
-        self.pixel_format = self.cams[0].PixelFormat
+            self.camera_status = list(executor.map(lambda c: init_camera(c, **config_params), self.cams))
 
         if not all([c.GevIEEE1588 for c in self.cams]):
             print("Cameras not synchronized. Enabling IEEE1588 (takes 10 seconds)")
@@ -298,21 +311,33 @@ class FlirRecorder:
         for c in self.cams:
             c.GevIEEE1588DataSetLatch()
             print(
-                "Primary" if c.GevIEEE1588StatusLatched == "Master" else "Secondary", c.GevIEEE1588OffsetFromMasterLatched
+                "Primary" if c.GevIEEE1588StatusLatched == "Master" else "Secondary",
+                c.GevIEEE1588OffsetFromMasterLatched,
             )
 
+            # set the corresponding camera status
+            for cs in self.camera_status:
+                if cs.SerialNumber == c.DeviceSerialNumber:
+                    cs.SyncOffset = c.GevIEEE1588OffsetFromMasterLatched
+
+        self.cams.sort(key=lambda x: x.DeviceSerialNumber)
+        self.camera_status.sort(key=lambda x: x.SerialNumber)
+        self.pixel_format = self.cams[0].PixelFormat
+
+        return self.camera_status
+
+    def get_camera_status(self) -> List[CameraStatus]:
+        return self.camera_status
+
+    async def start_acquisition(self, recording_path=None, preview_callback: callable = None, max_frames: int = 100):
+        self.preview_callback = preview_callback
         self.video_base_file = recording_path
 
-
-    def start_acquisition(self, max_frames : int = 100):
-
-        # Get the timestamp that should be used for the file names
-        now = datetime.now()
-        time_str = now.strftime("%Y%m%d_%H%M%S")
+        # Initializing an image queue for each camera
+        self.image_queue_dict = {c.DeviceSerialNumber: Queue(100) for c in self.cams}
 
         # set up the threads to write videos to disk, if requested
         if self.video_base_file is not None:
-
             json_queue = {}
 
             # Start a writing thread for each camera
@@ -324,14 +349,13 @@ class FlirRecorder:
                     target=write_queue,
                     kwargs={
                         "vid_file": self.video_base_file,
-                        "time_str": time_str,
                         "image_queue": self.image_queue_dict[serial],
                         "json_queue": json_queue[c.DeviceSerialNumber],
                         "serial": serial,
                         "pixel_format": self.pixel_format,
                     },
                 ).start()
-                    
+
         def start_cam(i):
             # this won't truly start them until command is send below
             self.cams[i].start()
@@ -350,7 +374,6 @@ class FlirRecorder:
         self.iface.TLInterface.ActionCommand()
 
         for _ in tqdm(range(max_frames)):
-
             # Use thread safe checking of semaphore to determine whether to stop recording
             if self.stop_recording.is_set():
                 print("Stopping recording")
@@ -396,7 +419,6 @@ class FlirRecorder:
             self.image_queue_dict[c.DeviceSerialNumber].put(None)
 
         if self.video_base_file is not None:
-
             # to allow each queue to be processed before moving on
             for c in self.cams:
                 self.image_queue_dict[c.DeviceSerialNumber].join()
@@ -411,7 +433,7 @@ class FlirRecorder:
                 all_json[json_queue[j].queue[0]["serial"]] = json_queue[j].queue[0]
 
             # defining the filename for the json file
-            json_file = os.path.splitext(self.video_base_file)[0] + f"_{time_str}.json"
+            json_file = os.path.splitext(self.video_base_file)[0] + ".json"
 
             # combining the json information from each camera's queue
             all_serials = [all_json[key]["serial"] for key in all_json]
@@ -439,6 +461,15 @@ class FlirRecorder:
     def stop_acquisition(self):
         self.stop_recording.set()
 
+    def reset_cameras(self):
+        for c in self.cams:
+            print("Resetting camera", c.DeviceSerialNumber)
+            c.DeviceReset()
+
+        time.sleep(15)
+
+        self.configure_cameras(self.config_file)
+
 
 if __name__ == "__main__":
     import argparse
@@ -447,6 +478,7 @@ if __name__ == "__main__":
     parser.add_argument("vid_file", help="Video file to write")
     parser.add_argument("-m", "--max_frames", type=int, default=100, help="Maximum frames to record")
     parser.add_argument("-n", "--num_cams", type=int, default=4, help="Number of input cameras")
+    parser.add_argument("-r", "--reset", default=False, action="store_true", help="Reset cameras first")
     parser.add_argument(
         "-p", "--preview", default=False, action="store_true", help="Allow real-time visualization of video"
     )
@@ -461,7 +493,26 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     print(args.config)
-    acquistion = FlirRecorder(config_file=args.config, num_cams=args.num_cams)
-    acquistion.configure(recording_path=args.vid_file)
-    acquistion.start_acquisition(max_frames=args.max_frames)
-    
+    acquistion = FlirRecorder()
+    acquistion.configure_cameras(config_file=args.config, num_cams=args.num_cams)
+
+    if args.reset:
+        print("reset")
+        acquistion.reset_cameras()
+
+    # Get the timestamp that should be used for the file names
+    now = datetime.now()
+    time_str = now.strftime("%Y%m%d_%H%M%S")
+    filename = f"{args.vid_file}_{time_str}.mp4"
+
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(acquistion.start_acquisition(recording_path=filename, max_frames=args.max_frames))
+
+    acquistion.reset_cameras()
+
+    now = datetime.now()
+    time_str = now.strftime("%Y%m%d_%H%M%S")
+    filename = f"{args.vid_file}_{time_str}.mp4"
+
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(acquistion.start_acquisition(recording_path=filename, max_frames=args.max_frames))
