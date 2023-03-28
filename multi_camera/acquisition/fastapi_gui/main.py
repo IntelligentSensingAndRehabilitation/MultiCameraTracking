@@ -1,29 +1,48 @@
-from fastapi import FastAPI, Request
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi import FastAPI, Request, HTTPException, APIRouter
+from fastapi.staticfiles import StaticFiles
+from pathlib import Path
+from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 import concurrent.futures
 import socketio
-import glob
+import signal
 from datetime import datetime
 import cv2
 import os
 import asyncio
-import queue
 
 app = FastAPI()
-templates = Jinja2Templates(directory="templates")
-sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins="*")
-app_asgi = socketio.ASGIApp(sio, app)
-preview_queue = queue.Queue()
+api_router = APIRouter(prefix="/api/v1")
+
+if True:
+    templates = Jinja2Templates(directory="templates")
+else:
+    # Possibly in future move to react frontend, but for now just use the static files
+    app.mount("/static", StaticFiles(directory="multi-camera-video-acquisition/build/static"), name="static")
+
+    @app.get("/")
+    async def serve_frontend():
+        build_dir = Path("multi-camera-video-acquisition/build")
+        index_html = build_dir / "index.html"
+        if not index_html.is_file():
+            raise HTTPException(status_code=404, detail="Index file not found")
+        return FileResponse(str(index_html), media_type="text/html")
+
+
+# sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins="*")
+# app_asgi = socketio.ASGIApp(sio, app)
+preview_queue = asyncio.Queue()
 
 # Replace this with your actual acquisition library import
 from multi_camera.acquisition.flir_recording_api import FlirRecorder
 
+CONFIG_PATH = "/home/cbm/MultiCameraTracking/multi_camera_configs/"
 acquisition = FlirRecorder("/home/cbm/MultiCameraTracking/multi_camera_configs/cotton_lab_config_20221109.yaml")
 
 # Create a thread pool executor with 1 thread
 executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+loop = asyncio.get_event_loop()
 
 channel_selector_value = 2
 
@@ -37,23 +56,22 @@ class StartData(BaseModel):
     recording_dir: str
     recording_filename: str
     config_file: str
+    comment: str
 
 
 class ChannelData(BaseModel):
     value: int
 
 
-@app.post("/set_channel")
+@api_router.post("/set_channel")
 async def set_channel(data: ChannelData):
     global channel_selector_value
     channel_selector_value = data.value
 
 
-@app.post("/start")
+@api_router.post("/start")
 async def start_recording(data: StartData):
-    print(f"Starting recording {data.recording_dir} {data.recording_filename} {data.config_file}")
-
-    loop = asyncio.get_event_loop()
+    print(f"Starting recording {data.recording_dir} {data.recording_filename} {data.config_file} {data.comment}")
 
     def receive_frames_wrapper(frames):
         if frames is not None:
@@ -64,13 +82,13 @@ async def start_recording(data: StartData):
     return {"status": "success"}
 
 
-@app.post("/stop")
+@api_router.post("/stop")
 async def stop_recording():
     acquisition.stop_acquisition()
     return {"status": "recording_stopped"}
 
 
-@app.post("/set_channel")
+@api_router.post("/set_channel")
 async def set_channel(value: int):
     global channel_selector_value
     channel_selector_value = value
@@ -78,7 +96,7 @@ async def set_channel(value: int):
     return {"status": "channel_set"}
 
 
-@app.post("/new_session")
+@api_router.post("/new_session")
 async def new_session(subject_id: str):
     date = datetime.date.today().strftime("%Y%m%d")
     session_dir = f"{subject_id}/{date}"
@@ -86,10 +104,9 @@ async def new_session(subject_id: str):
     return {"recording_dir": session_dir, "recording_filename": f"{subject_id}_{date}"}
 
 
-@app.post("/new_trial")
+@api_router.post("/new_trial")
 async def new_trial(recording_dir: str, recording_filename: str, config_file: str):
     acquisition.configure(config_file, os.path.join("./data", recording_dir, recording_filename))
-    loop = asyncio.get_event_loop()
 
     def receive_frames_wrapper(frames):
         if frames is not None:
@@ -99,14 +116,14 @@ async def new_trial(recording_dir: str, recording_filename: str, config_file: st
     return {"status": "recording_started"}
 
 
-@app.get("/configs")
+@api_router.get("/configs")
 async def get_configs():
-    config_files = glob.glob("/home/cbm/MultiCameraTracking/multi_camera_configs/*.yaml")
-    print(config_files)
+    config_files = os.listdir(CONFIG_PATH)
+    config_files = [f for f in config_files if f.endswith(".yaml")]
     return JSONResponse(content=config_files)
 
 
-@app.get("/recordings")
+@api_router.get("/recordings")
 async def get_recordings():
     recordings = []
     for root, dirs, files in os.walk("./data"):
@@ -141,19 +158,35 @@ async def receive_frames(frames):
     downsampled_frame = downsample_image(frame, 640, 470)  # Downsample to 640x480
     jpeg_image = convert_rgb_to_jpeg(downsampled_frame)
 
-    preview_queue.put(jpeg_image)
+    await preview_queue.put(jpeg_image)
 
 
-@app.get("/video")
+@api_router.get("/video")
 async def video_endpoint():
-    def generate_frames():
-        print("starting to generate frames")
+    async def generate_frames():
         while True:
             # Wait for the next frame to become available
-            frame = preview_queue.get()
+            frame = await preview_queue.get()
 
             # Write the boundary frame to the response
             yield (b"--frame\r\n" b"Content-Type: image/jpeg\r\n\r\n" + frame + b"\r\n\r\n")
-        print("finished generating frames")
 
     return StreamingResponse(generate_frames(), status_code=206, media_type="multipart/x-mixed-replace; boundary=frame")
+
+
+app.include_router(api_router)
+
+if False:
+
+    @app.on_event("startup")
+    async def startup():
+        # Set up the signal handler for Ctrl-C
+        for signame in ("SIGINT", "SIGTERM"):
+            loop.add_signal_handler(getattr(signal, signame), lambda: asyncio.ensure_future(shutdown()))
+
+    async def shutdown():
+        print("Shutting down...")
+        tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
