@@ -1,13 +1,15 @@
-from fastapi import FastAPI, Request, HTTPException, APIRouter
+from fastapi import FastAPI, Request, HTTPException, APIRouter, Body
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
+from typing import List
+from typing_extensions import Annotated
 import concurrent.futures
 import socketio
 import signal
-from datetime import datetime
+import datetime
 import cv2
 import os
 import asyncio
@@ -37,8 +39,12 @@ preview_queue = asyncio.Queue()
 # Replace this with your actual acquisition library import
 from multi_camera.acquisition.flir_recording_api import FlirRecorder
 
+RECORDING_BASE = "data"
 CONFIG_PATH = "/home/cbm/MultiCameraTracking/multi_camera_configs/"
-acquisition = FlirRecorder("/home/cbm/MultiCameraTracking/multi_camera_configs/cotton_lab_config_20221109.yaml")
+DEFAULT_CONFIG = os.path.join(CONFIG_PATH, "cotton_lab_config_20221109.yaml")
+
+acquisition = FlirRecorder()
+camera_status = acquisition.configure_cameras(DEFAULT_CONFIG)
 
 # Create a thread pool executor with 1 thread
 executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
@@ -52,15 +58,26 @@ async def read_root(request: Request):
     return templates.TemplateResponse("index.html", context={"request": request})
 
 
-class StartData(BaseModel):
+class NewTrialData(BaseModel):
     recording_dir: str
     recording_filename: str
-    config_file: str
     comment: str
 
 
 class ChannelData(BaseModel):
     value: int
+
+
+class ConfigFileData(BaseModel):
+    config: str
+
+
+class PriorRecordings(BaseModel):
+    filename: str
+    comment: str
+
+
+prior_recordings = []
 
 
 @api_router.post("/set_channel")
@@ -69,17 +86,10 @@ async def set_channel(data: ChannelData):
     channel_selector_value = data.value
 
 
-@api_router.post("/start")
-async def start_recording(data: StartData):
-    print(f"Starting recording {data.recording_dir} {data.recording_filename} {data.config_file} {data.comment}")
-
-    def receive_frames_wrapper(frames):
-        if frames is not None:
-            loop.create_task(receive_frames(frames))
-
-    acquisition.configure(recording_path="./data/test_app_video", preview_callback=receive_frames_wrapper)
-    await loop.run_in_executor(executor, acquisition.start_acquisition)
-    return {"status": "success"}
+@api_router.get("/camera_status")
+async def get_camera_status():
+    camera_status = acquisition.get_camera_status()
+    return camera_status
 
 
 @api_router.post("/stop")
@@ -99,21 +109,42 @@ async def set_channel(value: int):
 @api_router.post("/new_session")
 async def new_session(subject_id: str):
     date = datetime.date.today().strftime("%Y%m%d")
-    session_dir = f"{subject_id}/{date}"
-    os.makedirs(f"./data/{session_dir}", exist_ok=True)
-    return {"recording_dir": session_dir, "recording_filename": f"{subject_id}_{date}"}
+    session_dir = os.path.join(RECORDING_BASE, subject_id, date)
+    os.makedirs(session_dir, exist_ok=True)
+    return {"recording_dir": session_dir, "recording_filename": f"{subject_id}"}
 
 
 @api_router.post("/new_trial")
-async def new_trial(recording_dir: str, recording_filename: str, config_file: str):
-    acquisition.configure(config_file, os.path.join("./data", recording_dir, recording_filename))
+async def new_trial(data: NewTrialData):
+    recording_dir = data.recording_dir
+    recording_filename = data.recording_filename
+    comment = data.comment
+
+    # Build the recording file name from the components
+    now = datetime.datetime.now()
+    time_str = now.strftime("%Y%m%d_%H%M%S")
+    recording_path = os.path.join(recording_dir, f"{recording_filename}_{time_str}")
+
+    print("Built recording path: ", recording_path)
 
     def receive_frames_wrapper(frames):
         if frames is not None:
             loop.create_task(receive_frames(frames))
 
-    await loop.run_in_executor(executor, acquisition.start_acquisition)
-    return {"status": "recording_started"}
+    routine = acquisition.start_acquisition(recording_path=recording_path, preview_callback=receive_frames_wrapper)
+
+    loop = asyncio.get_event_loop()
+    loop.create_task(routine)
+
+    # add this recording entry to the list of prior recordings
+    prior_recordings.append(PriorRecordings(filename=recording_path, comment=comment))
+
+    return {"status": "Recording Started", "recording_file_name": recording_path}
+
+
+@api_router.get("/prior_recordings")
+async def get_prior_recordings() -> List[PriorRecordings]:
+    return prior_recordings
 
 
 @api_router.get("/configs")
@@ -121,6 +152,26 @@ async def get_configs():
     config_files = os.listdir(CONFIG_PATH)
     config_files = [f for f in config_files if f.endswith(".yaml")]
     return JSONResponse(content=config_files)
+
+
+@api_router.post("/update_config")
+async def update_config(config: ConfigFileData):
+    print("Received config: ", config.config)
+    acquisition.configure_cameras(os.path.join(CONFIG_PATH, config.config))
+    return {"status": "success", "config": config.config}
+
+
+@api_router.post("/reset_cameras")
+async def reset_cameras():
+    acquisition.reset_cameras()
+    return {"status": "success"}
+
+
+# create an endpoint that exposes the camera statuses
+@api_router.get("/camera_status")
+async def get_camera_status():
+    camera_status = acquisition.get_camera_status()
+    return camera_status
 
 
 @api_router.get("/recordings")
@@ -190,3 +241,10 @@ if False:
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    # Start the server
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

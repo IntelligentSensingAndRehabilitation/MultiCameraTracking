@@ -12,9 +12,10 @@
 
     <div>
         <label for="config">Config:</label>
-        <select id="config">
+        <select id="config" onchange="configChanged()">
             <!-- options will be added by the backend -->
         </select>
+        <button id="reset_cameras" onclick="resetCameras()">Reset Cameras</button>
     </div>
 
     <div>
@@ -24,7 +25,7 @@
 
 
     <div>
-        <button id="new_session">New Session</button>
+        <button id="new_session" onclick="newSession()">New Session</button>
         <label for="session_dir">Recording Directory:</label>
         <input id="session_dir" type="text" />
         <label for="session_filename">Base Filename:</label>
@@ -32,7 +33,7 @@
     </div>
 
     <div>
-        <button id="new_trial">New Trial</button>
+        <button id="new_trial" onclick="newTrial()">New Trial</button>
         <button id="stop">Stop Recording</button>
         <label for="file_name">File Name:</label>
         <input id="file_name" type="text" readonly />
@@ -54,8 +55,12 @@
             <option value="1">Channel 1</option>
         </select>
         <br />
-        <img id="video_stream" width="640">
+        <div style="border: 5px solid black;">
+            <img id="video_stream" width="640">
+        </div>
     </div>
+
+    <hr style="border-top: 3px solid black;">
 
     <table>
         <tr>
@@ -68,7 +73,6 @@
                 <table id="previous_recordings">
                     <thead>
                         <tr>
-                            <th>Participant</th>
                             <th>Filename</th>
                             <th>Comment</th>
                         </tr>
@@ -100,6 +104,7 @@
         const fileNameInput = document.getElementById("file_name");
 
         async function sendData(url, data) {
+            console.log("Sending data:", data, "to", url);
             const response = await fetch(`${API_ENDPOINT}${url}`, {
                 method: "POST",
                 headers: {
@@ -110,34 +115,68 @@
             return response.json();
         }
 
-        newSessionButton.addEventListener("click", () => {
-            const date = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-            const sessionId = `${participantIdentifierInput.value}/${date}`;
-            sessionDirInput.value = sessionId;
-            sessionFilenameInput.value = `${participantIdentifierInput.value}_${date}`;
-        });
+        async function updateStatus(status) {
+            statusInput.value = status;
+        }
 
-        newTrialButton.addEventListener("click", () => {
-            const config = configSelect.value;
-            const sessionId = sessionDirInput.value;
-            const trialFilename = `${sessionFilenameInput.value}_${new Date().toISOString().replace(/[-:.]/g, "")}`;
-            const comment = commentInput.value;
+        async function newSession() {
 
-            sendData("/start", {
-                recording_dir: sessionId, recording_filename: trialFilename, config_file: config,
-                comment: comment
+            fetch(`${API_ENDPOINT}/new_session?subject_id=${participantIdentifierInput.value}`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                }
             })
+                .then(response => response.json())
                 .then(data => {
-                    statusInput.value = "recording...";
-                    fileNameInput.value = trialFilename;
+                    console.log(data);
+                    // Parse the recording_dir and recording_filename fields and show the results in the UI
+                    const recordingDir = data.recording_dir;
+                    const recordingFilename = data.recording_filename;
+                    sessionDirInput.value = recordingDir;
+                    sessionFilenameInput.value = recordingFilename;
+                }
+                )
+                .catch(error => console.error(error));
+
+        }
+
+        async function newTrial() {
+            const recordingDir = sessionDirInput.value;
+
+            sendData("/new_trial", { recording_dir: sessionDirInput.value, recording_filename: sessionFilenameInput.value, comment: commentInput.value })
+                .then(data => {
+                    console.log(data);
+                    updateStatus(data.status);
+                    fileNameInput.value = data.recording_file_name;
+
+                    updatePriorRecordingsTable();
                 });
-        });
+        }
 
         stopButton.addEventListener("click", () => {
             sendData("/stop", {}).then(data => {
                 statusInput.value = "recording stopped";
             });
         });
+
+        async function updatePriorRecordingsTable() {
+            const response = await fetch(`${API_ENDPOINT}/prior_recordings`);
+            const priorRecordings = await response.json();
+
+            // Clear the current table
+            const table = document.getElementById("previous_recordings").getElementsByTagName('tbody')[0];
+            table.innerHTML = '';
+
+            // Add new rows to the table
+            priorRecordings.forEach(recording => {
+                const row = table.insertRow();
+                const filenameCell = row.insertCell(0);
+                const commentCell = row.insertCell(1);
+                filenameCell.innerHTML = recording.filename;
+                commentCell.innerHTML = recording.comment;
+            });
+        }
 
         fetch(`${API_ENDPOINT}/configs`)
             .then(response => response.json())
@@ -149,6 +188,22 @@
                     configSelect.add(option);
                 });
             });
+
+        async function configChanged() {
+            sendData("/update_config", { config: configSelect.value });
+
+            /*fetch(`${API_ENDPOINT}/update_config`, {
+                method: "POST",
+                body: JSON.stringify(configSelect.value),
+                headers: {
+                    "Content-Type": "text/plain"
+                }
+            });*/
+        }
+
+        async function resetCameras() {
+            sendData("/reset_cameras", {});
+        }
 
         fetch(`${API_ENDPOINT}/recordings`)
             .then(response => response.json())
