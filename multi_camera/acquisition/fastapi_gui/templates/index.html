@@ -26,12 +26,46 @@
 
     <br />
 
+    <div>
+        <button id="new_session">New Session</button>
+        <label for="session_dir">Recording Directory:</label>
+        <input id="session_dir" type="text" />
+        <label for="session_filename">Base Filename:</label>
+        <input id="session_filename" type="text" />
+    </div>
+
+    <div>
+        <button id="new_trial">New Trial</button>
+        <label for="status">Status:</label>
+        <input id="status" type="text" readonly />
+        <button id="stop">Stop Recording</button>
+        <label for="comment">Comment:</label>
+        <input id="comment" type="text" />
+        <label for="config">Recording Configuration:</label>
+        <select id="config">
+            <!-- options will be added by the backend -->
+        </select>
+    </div>
+
+    <br />
+
     <img id="video_stream" width="640">
 
     <br />
 
-    <button id="start">Start</button>
-    <button id="stop">Stop</button>
+    <table id="previous_recordings">
+        <thead>
+            <tr>
+                <th>Participant</th>
+                <th>Filename</th>
+                <th>Comment</th>
+            </tr>
+        </thead>
+        <tbody>
+            <!-- rows will be added by the backend -->
+        </tbody>
+    </table>
+
 
     <script>
         const video = document.getElementById("video");
@@ -40,6 +74,13 @@
         const stopButton = document.getElementById("stop");
         const participantIdentifierInput = document.getElementById("participant_identifier");
         const recordingNoteInput = document.getElementById("recording_note");
+        const sessionDirInput = document.getElementById("session_dir");
+        const sessionFilenameInput = document.getElementById("session_filename");
+        const newSessionButton = document.getElementById("new_session");
+        const newTrialButton = document.getElementById("new_trial");
+        const statusInput = document.getElementById("status");
+        const commentInput = document.getElementById("comment");
+        const configSelect = document.getElementById("config");
 
         async function sendData(url, data) {
             const response = await fetch(url, {
@@ -52,18 +93,57 @@
             return response.json();
         }
 
-        startButton.addEventListener("click", () => {
-            console.log("start button click called");
-            sendData("/start", {
-                participant_identifier: participantIdentifierInput.value,
-                recording_note: recordingNoteInput.value,
-            });
+        newSessionButton.addEventListener("click", () => {
+            const date = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+            const sessionId = `${participantIdentifierInput.value}/${date}`;
+            sessionDirInput.value = sessionId;
+            sessionFilenameInput.value = `${participantIdentifierInput.value}_${date}`;
+        });
+
+        newTrialButton.addEventListener("click", () => {
+            const config = configSelect.value;
+            const sessionId = sessionDirInput.value;
+            const trialFilename = `${sessionFilenameInput.value}_${new Date().toISOString().replace(/[-:.]/g, "")}`;
+            sendData("/start", { recording_dir: sessionId, recording_filename: trialFilename, config_file: config })
+                .then(data => {
+                    statusInput.value = "recording...";
+                    commentInput.value = "";
+                });
         });
 
         stopButton.addEventListener("click", () => {
-            sendData("/stop", {});
+            sendData("/stop", {}).then(data => {
+                statusInput.value = "recording stopped";
+            });
         });
 
+        fetch("/configs")
+            .then(response => response.json())
+            .then(data => {
+                data.forEach(config => {
+                    const option = document.createElement("option");
+                    option.value = config;
+                    option.text = config;
+                    configSelect.add(option);
+                });
+            });
+
+        fetch("/recordings")
+            .then(response => response.json())
+            .then(data => {
+                const table = document.getElementById("previous_recordings");
+                data.forEach(recording => {
+                    const row = table.insertRow();
+                    const participantCell = row.insertCell(0);
+                    const filenameCell = row.insertCell(1);
+                    const commentCell = row.insertCell(2);
+                    participantCell.innerHTML = recording.participant;
+                    filenameCell.innerHTML = recording.filename;
+                    commentCell.innerHTML = recording.comment;
+                });
+            });
+
+        // Connect up for recording
         const videoStream = document.getElementById("video_stream");
 
         // Set the image source to the video stream endpoint
