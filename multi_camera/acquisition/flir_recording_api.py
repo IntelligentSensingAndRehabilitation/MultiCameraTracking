@@ -79,7 +79,7 @@ def select_interface(interface, cameras):
 
 
 def init_camera(
-    c,
+    c: Camera,
     jumbo_packet: bool = True,
     triggering: bool = True,
     throughput_limit: int = 125000000,
@@ -228,7 +228,8 @@ class FlirRecorder:
         self.stop_recording = threading.Event()
 
         self.preview_callback = None
-        self.cams = None
+        self.cams = []
+        self.camera_status = []
         self.image_queue_dict = {}
 
     def configure_cameras(
@@ -310,10 +311,10 @@ class FlirRecorder:
 
         for c in self.cams:
             c.GevIEEE1588DataSetLatch()
-            print(
-                "Primary" if c.GevIEEE1588StatusLatched == "Master" else "Secondary",
-                c.GevIEEE1588OffsetFromMasterLatched,
-            )
+            # print(
+            #    "Primary" if c.GevIEEE1588StatusLatched == "Master" else "Secondary",
+            #    c.GevIEEE1588OffsetFromMasterLatched,
+            # )
 
             # set the corresponding camera status
             for cs in self.camera_status:
@@ -329,7 +330,7 @@ class FlirRecorder:
     def get_camera_status(self) -> List[CameraStatus]:
         return self.camera_status
 
-    async def start_acquisition(self, recording_path=None, preview_callback: callable = None, max_frames: int = 100):
+    def start_acquisition(self, recording_path=None, preview_callback: callable = None, max_frames: int = 100):
         self.preview_callback = preview_callback
         self.video_base_file = recording_path
 
@@ -470,6 +471,15 @@ class FlirRecorder:
 
         self.configure_cameras(self.config_file)
 
+    def close(self):
+        for c in self.cams:
+            print("Closing camera", c.DeviceSerialNumber)
+            c.close()
+        self.cams = []
+
+        #    Release the PySpin system
+        self.system.ReleaseInstance()
+
 
 if __name__ == "__main__":
     import argparse
@@ -505,14 +515,18 @@ if __name__ == "__main__":
     time_str = now.strftime("%Y%m%d_%H%M%S")
     filename = f"{args.vid_file}_{time_str}.mp4"
 
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(acquistion.start_acquisition(recording_path=filename, max_frames=args.max_frames))
+    # loop = asyncio.get_event_loop()
+    # loop.run_until_complete(acquistion.start_acquisition(recording_path=filename, max_frames=args.max_frames))
+    acquistion.start_acquisition(recording_path=filename, max_frames=args.max_frames)
 
-    acquistion.reset_cameras()
+    # acquistion.reset_cameras()
 
     now = datetime.now()
     time_str = now.strftime("%Y%m%d_%H%M%S")
     filename = f"{args.vid_file}_{time_str}.mp4"
 
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(acquistion.start_acquisition(recording_path=filename, max_frames=args.max_frames))
+    # loop = asyncio.get_event_loop()
+    # loop.run_until_complete(acquistion.start_acquisition(recording_path=filename, max_frames=args.max_frames))
+    # acquistion.start_acquisition(recording_path=filename, max_frames=args.max_frames)
+
+    acquistion.close()
