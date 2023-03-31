@@ -1,4 +1,5 @@
-from fastapi import FastAPI, Request, HTTPException, APIRouter, Body
+from fastapi import FastAPI, Request, HTTPException, APIRouter, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
@@ -19,23 +20,10 @@ import os
 import asyncio
 
 
-if True:
-    # file templates directory, which is located relative to this file location
-    templates = os.path.split(__file__)[0]
-    templates = os.path.join(templates, "templates")
-    templates = Jinja2Templates(directory=templates)
-else:
-    # Possibly in future move to react frontend, but for now just use the static files
-    app.mount("/static", StaticFiles(directory="multi-camera-video-acquisition/build/static"), name="static")
-
-    @app.get("/")
-    async def serve_frontend():
-        build_dir = Path("multi-camera-video-acquisition/build")
-        index_html = build_dir / "index.html"
-        if not index_html.is_file():
-            raise HTTPException(status_code=404, detail="Index file not found")
-        return FileResponse(str(index_html), media_type="text/html")
-
+# file templates directory, which is located relative to this file location
+templates = os.path.split(__file__)[0]
+templates = os.path.join(templates, "templates")
+templates = Jinja2Templates(directory=templates)
 
 logger = logging.getLogger("uvicorn.server")
 
@@ -57,16 +45,26 @@ camera_status = []
 executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
 loop = asyncio.get_event_loop()
 
-channel_selector_value = 2
+recording_status = ""
+recording_status_queue = asyncio.Queue()
 
 
-@asynccontextmanager
+def receive_status(status):
+    global recording_status
+    recording_status = status
+
+    print(f"Status: {status}")
+    # Put the status in the queue using asyncio from a synchronous function
+    loop.call_soon_threadsafe(recording_status_queue.put_nowait, {"status": status})
+
+
+# @asynccontextmanager
 async def lifespan(app: FastAPI):
     global acquisition
     global camera_status
 
     # Perform startup tasks
-    acquisition = FlirRecorder()
+    acquisition = FlirRecorder(receive_status)
     camera_status = acquisition.configure_cameras(DEFAULT_CONFIG)
 
     yield
@@ -78,6 +76,16 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 api_router = APIRouter(prefix="/api/v1")
+
+
+# Add a middleware to handle CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.get("/")
@@ -170,7 +178,28 @@ async def new_trial(data: NewTrialData):
     return {"status": "Recording Started", "recording_file_name": recording_path}
 
 
-@api_router.get("/prior_recordings")
+@api_router.post("/preview")
+async def preview():
+    def receive_frames_wrapper(frames):
+        loop.create_task(receive_frames(frames))
+
+    # run acquisition in a separate thread
+    import threading
+    from functools import partial
+
+    start_acquisition = partial(acquisition.start_acquisition, preview_callback=receive_frames_wrapper)
+    threading.Thread(target=start_acquisition).start()
+
+    return {"status": "Preview Started"}
+
+
+@api_router.post("/stop")
+async def stop():
+    acquisition.stop_acquisition()
+    return {"status": "Acquisition Stopped"}
+
+
+@api_router.get("/prior_recordings", response_model=List[PriorRecordings])
 async def get_prior_recordings() -> List[PriorRecordings]:
     return prior_recordings
 
@@ -178,8 +207,13 @@ async def get_prior_recordings() -> List[PriorRecordings]:
 @api_router.get("/configs")
 async def get_configs():
     config_files = os.listdir(CONFIG_PATH)
-    config_files = [f for f in config_files if f.endswith(".yaml")]
+    config_files = [""] + [f for f in config_files if f.endswith(".yaml")]
     return JSONResponse(content=config_files)
+
+
+@api_router.get("/current_config", response_model=str)
+async def get_current_config() -> str:
+    return os.path.split(acquisition.config_file)[-1]
 
 
 @api_router.post("/update_config")
@@ -202,21 +236,24 @@ async def get_camera_status() -> List[CameraStatus]:
     return camera_status
 
 
-@api_router.get("/recordings")
-async def get_recordings():
-    recordings = []
-    for root, dirs, files in os.walk("./data"):
-        for file in files:
-            if file.endswith(".avi"):
-                recording_path = os.path.join(root, file)
-                participant, date = os.path.basename(os.path.dirname(recording_path)).split("/")
-                comment_path = recording_path[:-4] + ".txt"
-                comment = ""
-                if os.path.exists(comment_path):
-                    with open(comment_path) as f:
-                        comment = f.read()
-                recordings.append({"participant": participant, "filename": file, "comment": comment})
-    return JSONResponse(content=recordings)
+@api_router.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    print("Websocket connected")
+    try:
+        while True:
+            # You can replace this with your own logic to send updates
+            # about the status of your FlirRecorder
+            status = await recording_status_queue.get()
+            print("Sending status: ", status)
+            await websocket.send_json(status)
+    except WebSocketDisconnect:
+        print("Websocket disconnected")
+
+
+@api_router.get("/recording_status", response_model=str)
+async def get_recording_status() -> str:
+    return recording_status
 
 
 def downsample_image(image, new_width, new_height):
@@ -304,40 +341,6 @@ async def video_endpoint():
     return StreamingResponse(generate_frames(), status_code=206, media_type="multipart/x-mixed-replace; boundary=frame")
 
 
-@app.on_event("shutdown")
-async def on_shutdown():
-    logger.info("Shutdown event detected. Closing the video endpoint")
-    print("MAHHH")
-    await preview_queue.put(None)
-
-
-def install_handler():
-    """
-    Install a signal handler for SIGINT and SIGTERM.
-
-    This is needed because we need to terminate any ongoing StreamingResponse to get the
-    client to close the connection and allow uvicorn to shut down.
-    """
-
-    print("Installing")
-    HANDLED_SIGNALS = (
-        signal.SIGINT,  # Unix signal 2. Sent by Ctrl+C.
-        signal.SIGTERM,  # Unix signal 15. Sent by `kill <pid>`.
-    )
-
-    def handle_exit(sig, frame):
-        print("Caught signal", sig)
-
-        # now run await preview_queue.put(None) on loop
-        loop.create_task(preview_queue.put(None))
-
-    loop = asyncio.get_event_loop()
-    for sig in HANDLED_SIGNALS:
-        loop.add_signal_handler(sig, handle_exit, sig, None)
-
-
-install_handler()
-
 app.include_router(api_router)
 
 if __name__ == "__main__":
@@ -345,5 +348,5 @@ if __name__ == "__main__":
 
     # Start the server
     uvicorn.run(
-        "multi_camera.acquisition.fastapi_gui.main:app", host="0.0.0.0", port=8000, reload=False, log_level="trace"
+        "multi_camera.acquisition.fastapi_gui.main:app", host="0.0.0.0", port=8000, reload=True, log_level="trace"
     )
