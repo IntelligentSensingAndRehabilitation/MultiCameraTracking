@@ -4,7 +4,7 @@ import numpy as np
 from tqdm import tqdm
 from datetime import datetime
 from queue import Queue
-from typing import List
+from typing import List, Callable
 from pydantic import BaseModel
 import concurrent.futures
 import threading
@@ -221,6 +221,7 @@ def write_queue(vid_file: str, image_queue: Queue, json_queue: Queue, serial, pi
 class FlirRecorder:
     def __init__(
         self,
+        status_callback: Callable[[str], None] = None,
     ):
         self.system = PySpin.System.GetInstance()
 
@@ -231,6 +232,17 @@ class FlirRecorder:
         self.cams = []
         self.camera_status = []
         self.image_queue_dict = {}
+        self.status_callback = status_callback
+        self.set_status("Uninitialized")
+
+    def get_acquisition_status(self):
+        return self.status
+
+    def set_status(self, status):
+        print("setting status: ", status)
+        self.status = status
+        if self.status_callback is not None:
+            self.status_callback(status)
 
     def configure_cameras(
         self, config_file: str = None, num_cams: int = None, trigger: bool = True
@@ -325,12 +337,16 @@ class FlirRecorder:
         self.camera_status.sort(key=lambda x: x.SerialNumber)
         self.pixel_format = self.cams[0].PixelFormat
 
+        self.set_status("Idle")
+
         return self.camera_status
 
     def get_camera_status(self) -> List[CameraStatus]:
         return self.camera_status
 
     def start_acquisition(self, recording_path=None, preview_callback: callable = None, max_frames: int = 100):
+        self.set_status("Recording")
+
         self.preview_callback = preview_callback
         self.video_base_file = recording_path
 
@@ -417,11 +433,11 @@ class FlirRecorder:
 
         for c in self.cams:
             c.stop()
-            self.image_queue_dict[c.DeviceSerialNumber].put(None)
 
         if self.video_base_file is not None:
             # to allow each queue to be processed before moving on
             for c in self.cams:
+                self.image_queue_dict[c.DeviceSerialNumber].put(None)
                 self.image_queue_dict[c.DeviceSerialNumber].join()
 
             # Creating a dictionary to hold the contents of each camera's json queue
@@ -459,10 +475,14 @@ class FlirRecorder:
             else:
                 print(f"Timestamps showed a maximum spread of {np.max(spread) * 1000} ms")
 
+        self.set_status("Idle")
+
     def stop_acquisition(self):
         self.stop_recording.set()
 
     def reset_cameras(self):
+        self.set_status("Reseting")
+
         for c in self.cams:
             print("Resetting camera", c.DeviceSerialNumber)
             c.DeviceReset()
