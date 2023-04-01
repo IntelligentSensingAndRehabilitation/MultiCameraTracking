@@ -1,6 +1,7 @@
 import React from 'react';
 import { Navbar, Nav } from 'react-bootstrap';
 import { LinkContainer } from 'react-router-dom';
+
 function NavigationBar() {
     return (
         <Navbar bg="dark" expand="lg" variant="dark">
@@ -15,4 +16,5 @@ function NavigationBar() {
         </Navbar>
     );
 }
+
 export default NavigationBar;

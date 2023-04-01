@@ -7,6 +7,7 @@ from datetime import date
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
 from typing import List
+from dataclasses import dataclass, field
 import numpy as np
 import logging
 import math
@@ -51,9 +52,6 @@ streamHandler = logging.StreamHandler()
 streamHandler.setFormatter(log_format)
 acquisition_logger.addHandler(streamHandler)
 acquisition_logger.setLevel(logging.DEBUG)
-
-from dataclasses import dataclass, field
-from typing import List
 
 
 class Session(BaseModel):
@@ -114,11 +112,7 @@ async def lifespan(app: FastAPI):
     acquisition_logger.info("Starting acquisition system")
     state.acquisition = FlirRecorder(receive_status)
 
-    print("state.acquisition", state.acquisition)
-
     state = get_global_state()
-    print("state.acquisition", state.acquisition)
-    # global_state.camera_status = global_state.acquisition.configure_cameras(DEFAULT_CONFIG)
 
     yield
 
@@ -315,8 +309,12 @@ async def get_prior_recordings(db=Depends(db_dependency)) -> List[PriorRecording
 
     # reverse the list before returning to put in chronological order
     prior_recordings.reverse()
-    print("Returning prior recordings: ", prior_recordings)
     return prior_recordings
+
+
+@api_router.get("/recording_db", response_model=List[ParticipantOut])
+async def get_recording_db(db=Depends(db_dependency)) -> List[ParticipantOut]:
+    return get_recordings(db)
 
 
 @api_router.get("/configs")

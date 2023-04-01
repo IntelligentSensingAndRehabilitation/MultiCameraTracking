@@ -35,7 +35,7 @@ const RecordingControl = () => {
                             >Stop</Button>
                         </Col>
                         <Col md="auto">
-                            {recordingSystemStatus == "Recording" ? <Spinner animation="border" role="recording" /> : null}
+                            {recordingSystemStatus === "Recording" ? <Spinner animation="border" role="status" /> : null}
                         </Col>
                     </Row>
                 </Container>
