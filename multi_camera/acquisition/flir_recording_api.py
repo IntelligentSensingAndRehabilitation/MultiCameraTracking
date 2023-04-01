@@ -232,6 +232,7 @@ class FlirRecorder:
         self.cams = []
         self.camera_status = []
         self.image_queue_dict = {}
+        self.config_file = None
         self.status_callback = status_callback
         self.set_status("Uninitialized")
 
@@ -499,6 +500,8 @@ class FlirRecorder:
 
         #    Release the PySpin system
         self.system.ReleaseInstance()
+
+        self.config_file = None
 
 
 if __name__ == "__main__":

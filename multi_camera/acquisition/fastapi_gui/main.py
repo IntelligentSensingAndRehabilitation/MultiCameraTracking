@@ -65,7 +65,7 @@ async def lifespan(app: FastAPI):
 
     # Perform startup tasks
     acquisition = FlirRecorder(receive_status)
-    camera_status = acquisition.configure_cameras(DEFAULT_CONFIG)
+    # camera_status = acquisition.configure_cameras(DEFAULT_CONFIG)
 
     yield
 
@@ -213,7 +213,10 @@ async def get_configs():
 
 @api_router.get("/current_config", response_model=str)
 async def get_current_config() -> str:
-    return os.path.split(acquisition.config_file)[-1]
+    config = acquisition.config_file
+    if config is None:
+        return ""
+    return os.path.split(config)[-1]
 
 
 @api_router.post("/update_config")
@@ -238,16 +241,25 @@ async def get_camera_status() -> List[CameraStatus]:
 
 @api_router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
+    print("Websocket request received")
     await websocket.accept()
     print("Websocket connected")
     try:
         while True:
-            # You can replace this with your own logic to send updates
-            # about the status of your FlirRecorder
-            status = await recording_status_queue.get()
-            print("Sending status: ", status)
-            await websocket.send_json(status)
-    except WebSocketDisconnect:
+            try:
+                status = await asyncio.wait_for(recording_status_queue.get(), timeout=2.5)
+                print("Sending status: ", status)
+                await websocket.send_json(status)
+            except asyncio.TimeoutError:
+                print("timeout: ", websocket.client_state)
+
+                try:
+                    await asyncio.wait_for(websocket.receive_text(), 0.0001)
+                except asyncio.TimeoutError:
+                    pass
+
+                print(websocket.client_state)
+    except (WebSocketDisconnect, ConnectionClosedError):
         print("Websocket disconnected")
 
 
@@ -317,7 +329,7 @@ async def receive_frames(frames):
     await preview_queue.put(jpeg_image)
 
 
-@api_router.get("/video")
+# @api_router.get("/video")
 async def video_endpoint():
     async def generate_frames():
         while True:
@@ -341,12 +353,67 @@ async def video_endpoint():
     return StreamingResponse(generate_frames(), status_code=206, media_type="multipart/x-mixed-replace; boundary=frame")
 
 
+@api_router.websocket("/video_ws")
+async def video_websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    logger.info("Video Websocket connected")
+    try:
+        while True:
+            try:
+                frame = await asyncio.wait_for(preview_queue.get(), timeout=2.5)
+                print("Sending frame")
+                if frame is None:
+                    break
+                await websocket.send_bytes(frame)
+            except asyncio.TimeoutError:
+                print("No frame")
+    except WebSocketDisconnect:
+        logger.info("Websocket disconnected")
+
+
 app.include_router(api_router)
+
+
+def websocket_test():
+    # web socket testing code
+    import aiohttp
+    import asyncio
+    import threading
+
+    async def socket_test():
+        await asyncio.sleep(10)
+        print("Testing")
+        conn = aiohttp.TCPConnector(ssl=False)
+        async with aiohttp.ClientSession(connector=conn) as session:
+            print("Connected to server")
+            async with session.ws_connect("ws://localhost:8000/api/v1/ws") as ws:
+                print("Connected to server WebSocket")
+                # await for messages and send messages
+                async for msg in ws:
+                    if msg.type == aiohttp.WSMsgType.TEXT:
+                        print(f"SERVER says - {msg.data}")
+                        text = input("Enter a message: ")
+                        await ws.send_str(text)
+                    elif msg.type == aiohttp.WSMsgType.ERROR:
+                        break
+
+    def wrapper():
+        asyncio.run(socket_test())
+
+    # run websocket_test in a new thread
+    threading.Thread(target=wrapper).start()
+
 
 if __name__ == "__main__":
     import uvicorn
 
     # Start the server
     uvicorn.run(
-        "multi_camera.acquisition.fastapi_gui.main:app", host="0.0.0.0", port=8000, reload=True, log_level="trace"
+        "multi_camera.acquisition.fastapi_gui.main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=True,
+        log_level="trace",
+        ws_ping_interval=1,
+        ws_ping_timeout=1,
     )
