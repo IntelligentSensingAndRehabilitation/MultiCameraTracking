@@ -27,7 +27,7 @@ const RecordingInfo = () => {
                             ref={recordingDirRef}
                             type="text"
                             placeholder="Recording Dir (Autosets)"
-                            defaultvalue={recordingDir}
+                            defaultValue={recordingDir}
                         >
                         </Form.Control>
                     </Col>

@@ -1,20 +1,51 @@
-import { useState, useContext } from "react";
+import { useState, useEffect, useContext, useRef } from "react";
 import { Row, Image } from "react-bootstrap";
 import { AcquisitionState } from "../AcquistionApi";
 
 
 const Video = () => {
     const { videoUrl } = useContext(AcquisitionState);
+    const [imageSrc, setImageSrc] = useState("");
+    const ws = useRef(null);
 
-    // Set the image source to the video stream endpoint
-    const videostream_src = `{API_BASE_URL}/video`;
+    useEffect(() => {
+
+        console.log('Connecting to video websocket...');
+
+        ws.current = new WebSocket(videoUrl);
+
+        ws.current.onopen = () => {
+            console.log("Video WebSocket connected");
+        };
+
+        ws.current.onmessage = (event) => {
+            console.log("new image")
+            const data = event.data;
+            const blob = new Blob([data], { type: "image/jpeg" });
+            const url = URL.createObjectURL(blob);
+            setImageSrc(url);
+        };
+
+        ws.current.onclose = () => {
+            console.log("Video WebSocket disconnected");
+        };
+
+        ws.current.onerror = (event) => {
+            console.log("Video WebSocket error observed:", event);
+        }
+
+        return () => {
+            if (ws.current) {
+                ws.current.close();
+            }
+        };
+    }, []);
 
     return (
         <Row md={10} className="g-4 p-2">
-            <Image id="video_stream" src={videoUrl} rounded responsive />
+            <Image id="video_stream" src={imageSrc} rounded />
         </Row>
     );
-
 };
 
 export default Video;

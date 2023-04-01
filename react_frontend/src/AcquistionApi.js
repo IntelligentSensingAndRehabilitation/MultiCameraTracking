@@ -1,8 +1,9 @@
 import { useState, useEffect, createContext } from 'react';
 import axios from 'axios';
 
-const API_BASE_URL = 'http://localhost:8000/api/v1';
-const WS_BASE_URL = 'ws://localhost:8000/api/v1/ws';
+const BASE_URL = 'localhost:8000/api/v1';
+const API_BASE_URL = `http://${BASE_URL}`;
+const WS_BASE_URL = `ws://${BASE_URL}/ws`;
 
 const initialState = {
     partipant: "",
@@ -19,25 +20,32 @@ export const AquisitionApi = (props) => {
     const [cameraStatusList, setCameraStatusList] = useState([]);
     const [availableConfigs, setAvailableConfigs] = useState([]);
     const [currentConfig, setCurrentConfig] = useState('');
-    const [selectedConfig, setSelectedConfig] = useState('');
     const [priorRecordings, setPriorRecordings] = useState([]);
     const [recordingSystemStatus, setRecordingSystemStatus] = useState(null);
     const [recordingDir, setRecordingDir] = useState('');
     const [recordingFileBase, setRecordingFileBase] = useState('');
     const [recordingFilename, setRecordingFilename] = useState('');
 
-    axios.interceptors.request.use(request => {
-        console.log('Starting Request', JSON.stringify(request, null, 2))
-        return request
-    })
+    useEffect(() => {
+        axios.interceptors.request.use(request => {
+            console.log('Starting Request', JSON.stringify(request, null, 2))
+            return request
+        })
 
-    axios.interceptors.response.use(response => {
-        console.log('Response:', JSON.stringify(response, null, 2))
-        return response
-    })
+        axios.interceptors.response.use(response => {
+            console.log('Response:', JSON.stringify(response, null, 2))
+            return response
+        })
+    }, []);
 
     useEffect(() => {
+
+        var client_id = Date.now()
+
+        //const socket = new WebSocket(`${WS_BASE_URL}/${client_id}`);
         const socket = new WebSocket(WS_BASE_URL);
+
+        console.log("Connecting to websocket...")
 
         socket.onopen = (event) => {
             console.log("WebSocket connection established", event);
@@ -52,6 +60,13 @@ export const AquisitionApi = (props) => {
         socket.onclose = (event) => {
             console.log("WebSocket connection closed", event);
         };
+
+        socket.onerror = (event) => {
+            console.log("WebSocket error observed:", event);
+        }
+
+        //clean up function when we close page
+        return () => socket.close();
     }, []);
 
     useEffect(() => {
@@ -130,11 +145,11 @@ export const AquisitionApi = (props) => {
     }
 
     async function previewVideo() {
-        const response = await axios.post(`${API_BASE_URL}/preview`);
+        await axios.post(`${API_BASE_URL}/preview`);
     }
 
     async function stopAcquisition() {
-        const response = await axios.post(`${API_BASE_URL}/preview`);
+        await axios.post(`${API_BASE_URL}/preview`);
     }
 
     const fetchCameraStatus = async () => {
@@ -183,16 +198,16 @@ export const AquisitionApi = (props) => {
         fetchCameraStatus();
     };
 
-    useEffect(() => {
-        //Implementing the setInterval method
-        const interval = setInterval(() => {
-            fetchCameraStatus()
-            fetchRecordings()
-        }, 5000);
+    // useEffect(() => {
+    //     //Implementing the setInterval method
+    //     const interval = setInterval(() => {
+    //         fetchCameraStatus()
+    //         fetchRecordings()
+    //     }, 60000);
 
-        //Clearing the interval
-        return () => clearInterval(interval);
-    }, []);
+    //     //Clearing the interval
+    //     return () => clearInterval(interval);
+    // }, []);
 
     return (<AcquisitionState.Provider value={{
         partipant: participant,
@@ -203,7 +218,7 @@ export const AquisitionApi = (props) => {
         currentConfig: currentConfig,
         cameraStatusList: cameraStatusList,
         priorRecordings: priorRecordings,
-        videoUrl: `${API_BASE_URL}/video`,
+        videoUrl: `ws://${BASE_URL}/video_ws`,
         recordingSystemStatus: recordingSystemStatus,
         setCurrentConfig,
         resetCameras,

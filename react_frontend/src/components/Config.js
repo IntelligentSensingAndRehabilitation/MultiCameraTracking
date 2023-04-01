@@ -26,8 +26,6 @@ const Config = () => {
                             value={currentConfig}
                             onChange={handleConfigChange}
                             className="flex-grow-1"
-                            column sm={6}
-
                         >
                             {availableConfigs.map((config) => (
                                 <option value={config} key={config}>

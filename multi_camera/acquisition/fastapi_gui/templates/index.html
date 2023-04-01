@@ -253,7 +253,7 @@
             sendData("/reset_cameras", {});
         }
 
-        fetch(`${API_ENDPOINT}/recordings`)
+        fetch(`${API_ENDPOINT}/prior_recordings`)
             .then(response => response.json())
             .then(data => {
                 const table = document.getElementById("previous_recordings");
@@ -293,11 +293,27 @@
         // Fetch the camera status every 5 seconds (5000 ms)
         // setInterval(updateCameraStatus, 5000);
 
+        // Handle incoming WebSocket messages
+        function setupWebSocket() {
+            const wsUrl = "ws://localhost:8000/api/v1/ws";
+
+            console.log("Setting up WebSocket connection:" + wsUrl);
+            const ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => console.log("WebSocket connected");
+            ws.onclose = () => console.log("WebSocket disconnected");
+            ws.onerror = (error) => console.log("WebSocket error:", error);
+            ws.onmessage = (event) => console.log("WebSocket message:", event.data);
+        }
+
+        // Call the setupWebSocket function to initialize the WebSocket connection
+        setupWebSocket();
+
         // Connect up for recording
         const videoStream = document.getElementById("video_stream");
 
         // Set the image source to the video stream endpoint
-        videoStream.src = `http://localhost:8000${API_ENDPOINT}/video`;
+        // videoStream.src = `http://localhost:8000${API_ENDPOINT}/video`;
     </script>
 </body>
 
