@@ -10,6 +10,7 @@ import { Navbar, Nav } from 'react-bootstrap';
 import { LinkContainer } from 'react-router-bootstrap';
 import AcquisitionHome from './AcquisitionHome';
 import AnalysisHome from './AnalysisHome';
+import { AquisitionApi } from './AcquistionApi';
 import Container from "react-bootstrap/Container";
 
 function App() {
@@ -31,10 +32,12 @@ function App() {
         </Container>
       </Navbar>
 
-      <Routes>
-        <Route path="/" element={<AcquisitionHome />} />
-        <Route path="/analysis" element={<AnalysisHome />} />
-      </Routes>
+      <AquisitionApi>
+        <Routes>
+          <Route path="/" element={<AcquisitionHome />} />
+          <Route path="/analysis" element={<AnalysisHome />} />
+        </Routes>
+      </AquisitionApi>
 
     </div>
 

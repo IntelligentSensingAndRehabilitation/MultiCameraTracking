@@ -27,17 +27,17 @@ export const AquisitionApi = (props) => {
     const [recordingFileBase, setRecordingFileBase] = useState('');
     const [recordingFilename, setRecordingFilename] = useState('');
 
-    useEffect(() => {
-        axios.interceptors.request.use(request => {
-            console.log('Starting Request', JSON.stringify(request, null, 2))
-            return request
-        })
+    // useEffect(() => {
+    //     axios.interceptors.request.use(request => {
+    //         console.log('Starting Request', JSON.stringify(request, null, 2))
+    //         return request
+    //     })
 
-        axios.interceptors.response.use(response => {
-            console.log('Response:', JSON.stringify(response, null, 2))
-            return response
-        })
-    }, []);
+    //     axios.interceptors.response.use(response => {
+    //         console.log('Response:', JSON.stringify(response, null, 2))
+    //         return response
+    //     })
+    // }, []);
 
     useEffect(() => {
 
@@ -170,10 +170,14 @@ export const AquisitionApi = (props) => {
 
     const fetchRecordings = async () => {
         const response = await axios.get(`${API_BASE_URL}/prior_recordings`);
-        console.log("Prior recordings: ", response.data)
         setPriorRecordings(response.data);
     };
 
+    async function fetchRecordingDb() {
+        const response = await axios.get(`${API_BASE_URL}/recording_db`);
+        console.log("Recording DB: ", response.data)
+        return response.data;
+    };
 
     // Camera configuration settings
 
@@ -231,7 +235,8 @@ export const AquisitionApi = (props) => {
         newTrial,
         previewVideo,
         calibrationVideo,
-        stopAcquisition
+        stopAcquisition,
+        fetchRecordingDb
     }}> {props.children} </AcquisitionState.Provider >)
     //return (<div> {children} </div>)
 };
