@@ -1,8 +1,5 @@
-import { useContext, useState, useEffect } from 'react';
-import axios from 'axios';
-import { Table } from 'react-bootstrap';
-import ToggleButton from 'react-bootstrap/ToggleButton';
-import Accordion from 'react-bootstrap/Accordion';
+import React, { useContext } from 'react';
+import { Table, ToggleButton, Accordion } from 'react-bootstrap';
 import { AcquisitionState } from "../AcquistionApi";
 
 const PriorRecordingsTable = ({ api }) => {

@@ -1,3 +1,4 @@
+import React from 'react';
 import { Container } from 'react-bootstrap';
 import Config from './components/Config';
 import Participant from './components/Participant';
