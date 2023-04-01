@@ -1,5 +1,5 @@
 import { useContext, useState } from "react";
-import { Row, Col, Form, Button } from "react-bootstrap";
+import { Container, Row, Col, Form, Button } from "react-bootstrap";
 import { AcquisitionState } from "../AcquistionApi";
 import Spinner from 'react-bootstrap/Spinner';
 
@@ -12,19 +12,32 @@ const RecordingControl = () => {
         <div >
             <Form className="p-2 border">
 
-                <Form.Group as={Col} md={6}>
-                    <Button id="preview" className="btn btn-secondary"
-                        onClick={() => previewVideo()}
-                    >Preview</Button>{' '}
-                    <Button id="calibration" className="btn btn-secondary"
-                        onClick={() => calibrationVideo()}
-                    >Calibration</Button>{' '}{' '}{' '}
-                    <Button id="new_trial" onClick={() => newTrial(comment)}
-                        className="btn btn-primary">New Trial</Button>{' '}
-                    <Button id="stop" className="btn btn-danger float-right"
-                        onClick={() => stopAcquisition()}
-                    >Stop</Button>
-                </Form.Group>
+                <Container>
+                    <Row className="justify-content-md-left">
+                        <Col md="auto">
+                            <Button id="preview" className="btn btn-secondary"
+                                onClick={() => previewVideo()}
+                            >Preview</Button>
+                        </Col>
+                        <Col md="auto">
+                            <Button id="calibration" className="btn btn-secondary"
+                                onClick={() => calibrationVideo()}
+                            >Calibration</Button>
+                        </Col>
+                        <Col md="auto">
+                            <Button id="new_trial" onClick={() => newTrial(comment)}
+                                className="btn btn-primary">New Trial</Button>
+                        </Col>
+                        <Col md="auto">
+                            <Button id="stop" className="btn btn-danger float-right"
+                                onClick={() => stopAcquisition()}
+                            >Stop</Button>
+                        </Col>
+                        <Col md="auto">
+                            {recordingSystemStatus == "Recording" ? <Spinner animation="border" role="recording" /> : null}
+                        </Col>
+                    </Row>
+                </Container>
 
                 <Form.Group as={Row} className="p-2">
                     <Form.Label column sm={3}>Comment:</Form.Label>
@@ -43,10 +56,7 @@ const RecordingControl = () => {
 
                 {/* Show the spinner when recordingSystemStatus=Recording */}
 
-                <Row>
-                    <Col>
-                        {recordingSystemStatus == "Recording" ? <Spinner animation="border" /> : null}
-                    </Col>
+                <Row className="justify-content-md-left">
                     <Col>
                         <h1> Recording Status: {recordingSystemStatus} </h1>
                     </Col>

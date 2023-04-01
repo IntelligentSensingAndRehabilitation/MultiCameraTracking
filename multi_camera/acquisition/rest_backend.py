@@ -1,25 +1,29 @@
-from fastapi import FastAPI, Request, HTTPException, APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, APIRouter, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from starlette.applications import Starlette
 from uvicorn.main import Server
-from pathlib import Path
-from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
+from datetime import date
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
 from typing import List
-from typing_extensions import Annotated
 import concurrent.futures
 import numpy as np
 import logging
-import socketio
-import signal
 import math
 import datetime
 import cv2
 import os
 import asyncio
+
+from multi_camera.acquisition.recording_db import (
+    get_db,
+    add_recording,
+    get_recordings,
+    ParticipantOut,
+    SessionOut,
+    RecordingOut,
+)
 
 
 # file templates directory, which is located relative to this file location
@@ -28,6 +32,25 @@ templates = os.path.join(templates, "templates")
 templates = Jinja2Templates(directory=templates)
 
 logger = logging.getLogger("uvicorn.server")
+
+import colorlog
+
+# Create a custom log format with colors
+log_colors_config = {
+    "DEBUG": "cyan",
+    "INFO": "green",
+    "WARNING": "yellow",
+    "ERROR": "red",
+    "CRITICAL": "red,bg_white",
+}
+log_format = colorlog.ColoredFormatter(
+    "%(log_color)s%(levelname)s (%(name)s):%(reset)s  %(message)s", log_colors=log_colors_config
+)
+acquisition_logger = logging.getLogger("acquisition")
+streamHandler = logging.StreamHandler()
+streamHandler.setFormatter(log_format)
+acquisition_logger.addHandler(streamHandler)
+acquisition_logger.setLevel(logging.DEBUG)
 
 # sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins="*")
 # app_asgi = socketio.ASGIApp(sio, app)
@@ -43,6 +66,17 @@ DEFAULT_CONFIG = os.path.join(CONFIG_PATH, "cotton_lab_config_20221109.yaml")
 acquisition = None
 camera_status = []
 
+
+class Session(BaseModel):
+    participant_name: str
+    session_date: date
+    recording_path: str
+
+
+current_session = None
+
+recording_db = get_db()
+
 # Create a thread pool executor with 1 thread
 executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
 loop = asyncio.get_event_loop()
@@ -55,7 +89,7 @@ def receive_status(status):
     global recording_status
     recording_status = status
 
-    print(f"Status: {status}")
+    acquisition_logger.info(f"Status: {status}")
     # Put the status in the queue using asyncio from a synchronous function
     loop.call_soon_threadsafe(recording_status_queue.put_nowait, {"status": status})
 
@@ -66,6 +100,7 @@ async def lifespan(app: FastAPI):
     global camera_status
 
     # Perform startup tasks
+    acquisition_logger.info("Starting acquisition system")
     acquisition = FlirRecorder(receive_status)
     # camera_status = acquisition.configure_cameras(DEFAULT_CONFIG)
 
@@ -73,7 +108,7 @@ async def lifespan(app: FastAPI):
 
     # Perform shutdown tasks
     acquisition.close()
-    logger.info("Acquisition system closed")
+    acquisition_logger.info("Acquisition system closed")
 
 
 app = FastAPI(lifespan=lifespan)
@@ -90,8 +125,9 @@ class AppStatus:
 
     @staticmethod
     def handle_exit(*args, **kwargs):
-        print("Exiting!!!")
-        AppStatus.should_exit = True
+        if not AppStatus.should_exit:
+            logger.info("Exit signal detected: " + str(args) + " " + str(kwargs))
+            AppStatus.should_exit = True
         original_handler(*args, **kwargs)
 
 
@@ -118,10 +154,6 @@ class NewTrialData(BaseModel):
     comment: str
 
 
-class ChannelData(BaseModel):
-    value: int
-
-
 class ConfigFileData(BaseModel):
     config: str
 
@@ -129,15 +161,6 @@ class ConfigFileData(BaseModel):
 class PriorRecordings(BaseModel):
     filename: str
     comment: str
-
-
-prior_recordings = []
-
-
-@api_router.post("/set_channel")
-async def set_channel(data: ChannelData):
-    global channel_selector_value
-    channel_selector_value = data.value
 
 
 @api_router.get("/camera_status")
@@ -152,19 +175,13 @@ async def stop_recording():
     return {"status": "recording_stopped"}
 
 
-@api_router.post("/set_channel")
-async def set_channel(value: int):
-    global channel_selector_value
-    channel_selector_value = value
-    print(f"Setting channel to {value}")
-    return {"status": "channel_set"}
-
-
 @api_router.post("/new_session")
 async def new_session(subject_id: str):
+    global current_session
     date = datetime.date.today().strftime("%Y%m%d")
     session_dir = os.path.join(RECORDING_BASE, subject_id, date)
     os.makedirs(session_dir, exist_ok=True)
+    current_session = Session(participant_name=subject_id, session_date=date, recording_path=session_dir)
     return {"recording_dir": session_dir, "recording_filename": f"{subject_id}"}
 
 
@@ -191,10 +208,16 @@ async def new_trial(data: NewTrialData):
     )
     threading.Thread(target=start_acquisition).start()
 
-    # add this recording entry to the list of prior recordings
-    prior_recordings.append(PriorRecordings(filename=recording_path, comment=comment))
+    add_recording(
+        recording_db,
+        participant_name=current_session.participant_name,
+        session_date=current_session.session_date,
+        session_path=current_session.recording_path,
+        filename=recording_path,
+        comment=comment,
+    )
 
-    return {"status": "Recording Started", "recording_file_name": recording_path}
+    return {"recording_file_name": recording_path}
 
 
 @api_router.post("/preview")
@@ -209,17 +232,28 @@ async def preview():
     start_acquisition = partial(acquisition.start_acquisition, preview_callback=receive_frames_wrapper)
     threading.Thread(target=start_acquisition).start()
 
-    return {"status": "Preview Started"}
+    return {}
 
 
 @api_router.post("/stop")
 async def stop():
     acquisition.stop_acquisition()
-    return {"status": "Acquisition Stopped"}
+    return {}
 
 
 @api_router.get("/prior_recordings", response_model=List[PriorRecordings])
 async def get_prior_recordings() -> List[PriorRecordings]:
+    prior_recordings = []
+    db_recordings: ParticipantOut = get_recordings(recording_db)
+    for recording in db_recordings:
+        recording: SessionOut = recording
+        for session in recording.sessions:
+            session: SessionOut = session
+            for recording in session.recordings:
+                recording: RecordingOut = recording
+                prior_recordings.append(PriorRecordings(filename=recording.filename, comment=recording.comment))
+
+    print("Returning prior recordings: ", prior_recordings)
     return prior_recordings
 
 
@@ -267,7 +301,7 @@ async def websocket_endpoint(websocket: WebSocket):
         while not AppStatus.should_exit:
             try:
                 status = await asyncio.wait_for(recording_status_queue.get(), timeout=0.5)
-                print("Sending status: ", status)
+                logger.info("Sending status: ", status)
                 await websocket.send_json(status)
             except asyncio.TimeoutError:
                 # need this to monitor for exit
