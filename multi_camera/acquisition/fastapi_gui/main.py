@@ -1,6 +1,8 @@
 from fastapi import FastAPI, Request, HTTPException, APIRouter, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.applications import Starlette
+from uvicorn.main import Server
 from pathlib import Path
 from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
 from fastapi.templating import Jinja2Templates
@@ -77,6 +79,23 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 api_router = APIRouter(prefix="/api/v1")
 
+# ugly patch, but the websocket user space code doesn't know when
+# they are closed (even though they are in response to sigterm)
+# so we need them to monitor this flag to exit
+original_handler = Server.handle_exit
+
+
+class AppStatus:
+    should_exit = False
+
+    @staticmethod
+    def handle_exit(*args, **kwargs):
+        print("Exiting!!!")
+        AppStatus.should_exit = True
+        original_handler(*args, **kwargs)
+
+
+Server.handle_exit = AppStatus.handle_exit
 
 # Add a middleware to handle CORS
 app.add_middleware(
@@ -245,21 +264,16 @@ async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     print("Websocket connected")
     try:
-        while True:
+        while not AppStatus.should_exit:
             try:
-                status = await asyncio.wait_for(recording_status_queue.get(), timeout=2.5)
+                status = await asyncio.wait_for(recording_status_queue.get(), timeout=0.5)
                 print("Sending status: ", status)
                 await websocket.send_json(status)
             except asyncio.TimeoutError:
-                print("timeout: ", websocket.client_state)
-
-                try:
-                    await asyncio.wait_for(websocket.receive_text(), 0.0001)
-                except asyncio.TimeoutError:
-                    pass
-
-                print(websocket.client_state)
-    except (WebSocketDisconnect, ConnectionClosedError):
+                # need this to monitor for exit
+                pass
+        print("Exit flag detected")
+    except WebSocketDisconnect:
         print("Websocket disconnected")
 
 
@@ -358,7 +372,7 @@ async def video_websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     logger.info("Video Websocket connected")
     try:
-        while True:
+        while not AppStatus.should_exit:
             try:
                 frame = await asyncio.wait_for(preview_queue.get(), timeout=2.5)
                 print("Sending frame")
@@ -414,6 +428,4 @@ if __name__ == "__main__":
         port=8000,
         reload=True,
         log_level="trace",
-        ws_ping_interval=1,
-        ws_ping_timeout=1,
     )
