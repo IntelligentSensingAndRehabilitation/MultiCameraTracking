@@ -10,3 +10,5 @@ pynput
 aniposelib
 pyyaml
 nimblephysics==0.8.73
+sqlalchemy
+fastapi[all]

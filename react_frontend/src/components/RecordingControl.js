@@ -10,7 +10,7 @@ const RecordingControl = () => {
 
     return (
         <div >
-            <Form className="p-2 border">
+            <Form className="g-4 p-2 border">
 
                 <Container>
                     <Row className="justify-content-md-left">

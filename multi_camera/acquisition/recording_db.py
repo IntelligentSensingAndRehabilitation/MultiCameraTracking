@@ -35,6 +35,7 @@ class Recording(Base):
     session_id = Column(Integer, ForeignKey("sessions.id"))
     filename = Column(String)
     comment = Column(String, nullable=True)  # Add comment field
+    config_file = Column(String, nullable=True)  # Add config_file field
     should_process = Column(Boolean, default=True)  # Add should_process field with a default value of True
 
     session = relationship("Session", back_populates="recordings")
@@ -46,6 +47,7 @@ def add_recording(
     session_date: Date,
     session_path: str,
     filename: str,
+    config_file: Optional[str] = None,
     comment: Optional[str] = None,
     should_process: Optional[bool] = True,
 ):
@@ -56,6 +58,7 @@ def add_recording(
         session_path,
         filename,
         comment,
+        config_file,
         should_process,
     )
 
@@ -86,6 +89,7 @@ def add_recording(
         session_id=session.id,
         filename=filename,
         comment=comment,
+        config_file=config_file,
         should_process=should_process,
     )
     db.add(new_recording)
@@ -100,6 +104,7 @@ def add_recording(
 class RecordingOut(BaseModel):
     filename: str
     comment: Optional[str]
+    config_file: Optional[str]
     should_process: bool
 
 

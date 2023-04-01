@@ -1,18 +1,24 @@
-import { useState, useContext } from "react";
+import ReactDOM from 'react-dom';
+import { useState, useRef, useEffect, useContext } from "react";
 import { Row, Col, Form, Button } from "react-bootstrap";
 import { AcquisitionState } from "../AcquistionApi";
 
 const Participant = () => {
-    const { setParticipant } = useContext(AcquisitionState);
+    const { participant, newSession } = useContext(AcquisitionState);
 
+    const participantRef = useRef(null);
 
+    useEffect(() => {
+        const particpantField = ReactDOM.findDOMNode(participantRef.current);
+        particpantField.value = participant;
+    }, [participant]);
 
     const [validated, setValidated] = useState(false);
 
     const handleSubmit = (event) => {
         console.log("handleSubmit", event.target.elements.participant.value);
         event.preventDefault();
-        setParticipant(event.target.elements.participant.value);
+        newSession(event.target.elements.participant.value);
         setValidated(true)
     };
 
@@ -23,6 +29,7 @@ const Participant = () => {
                 <Col sm={6}>
                     <Form.Control
                         required
+                        ref={participantRef}
                         type="text"
                         placeholder="Participant identifier"
                         defaultValue=""
