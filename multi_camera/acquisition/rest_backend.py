@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request, APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Depends, Request, APIRouter, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from uvicorn.main import Server
 from fastapi.responses import StreamingResponse, JSONResponse
@@ -7,7 +7,9 @@ from datetime import date
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
 from typing import List
-import concurrent.futures
+from typing import Optional
+from contextvars import ContextVar
+from starlette.types import ASGIApp, Receive, Scope, Send
 import numpy as np
 import logging
 import math
@@ -16,6 +18,7 @@ import cv2
 import os
 import asyncio
 
+from multi_camera.acquisition.flir_recording_api import FlirRecorder, CameraStatus
 from multi_camera.acquisition.recording_db import (
     get_db,
     add_recording,
@@ -52,19 +55,8 @@ streamHandler.setFormatter(log_format)
 acquisition_logger.addHandler(streamHandler)
 acquisition_logger.setLevel(logging.DEBUG)
 
-# sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins="*")
-# app_asgi = socketio.ASGIApp(sio, app)
-preview_queue = asyncio.Queue()
-
-# Replace this with your actual acquisition library import
-from multi_camera.acquisition.flir_recording_api import FlirRecorder, CameraStatus
-
-RECORDING_BASE = "data"
-CONFIG_PATH = "/home/cbm/MultiCameraTracking/multi_camera_configs/"
-DEFAULT_CONFIG = os.path.join(CONFIG_PATH, "cotton_lab_config_20221109.yaml")
-
-acquisition = None
-camera_status = []
+from dataclasses import dataclass, field
+from typing import List
 
 
 class Session(BaseModel):
@@ -73,41 +65,68 @@ class Session(BaseModel):
     recording_path: str
 
 
-current_session = None
+@dataclass
+class GlobalState:
+    preview_queue: asyncio.Queue = field(default_factory=asyncio.Queue)
+    recording_status_queue: asyncio.Queue = field(default_factory=asyncio.Queue)
+    current_session: Session = None
+    recording_status: str = ""
+    acquisition = None
 
-recording_db = get_db()
 
-# Create a thread pool executor with 1 thread
-executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+_global_state = GlobalState()
+
+
+def get_global_state() -> GlobalState:
+    # print("Getting global state: ", _global_state)
+    return _global_state
+
+
+def db_dependency():
+    db = get_db()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+RECORDING_BASE = "data"
+CONFIG_PATH = "/home/cbm/MultiCameraTracking/multi_camera_configs/"
+DEFAULT_CONFIG = os.path.join(CONFIG_PATH, "cotton_lab_config_20221109.yaml")
+
+
 loop = asyncio.get_event_loop()
-
-recording_status = ""
-recording_status_queue = asyncio.Queue()
 
 
 def receive_status(status):
-    global recording_status
-    recording_status = status
+    global_state = get_global_state()
+    global_state.recording_status = status
+    recording_status_queue = global_state.recording_status_queue
 
     acquisition_logger.info(f"Status: {status}")
+
     # Put the status in the queue using asyncio from a synchronous function
     loop.call_soon_threadsafe(recording_status_queue.put_nowait, {"status": status})
 
 
-# @asynccontextmanager
+@asynccontextmanager
 async def lifespan(app: FastAPI):
-    global acquisition
-    global camera_status
+    state: GlobalState = get_global_state()
 
     # Perform startup tasks
     acquisition_logger.info("Starting acquisition system")
-    acquisition = FlirRecorder(receive_status)
-    # camera_status = acquisition.configure_cameras(DEFAULT_CONFIG)
+    state.acquisition = FlirRecorder(receive_status)
+
+    print("state.acquisition", state.acquisition)
+
+    state = get_global_state()
+    print("state.acquisition", state.acquisition)
+    # global_state.camera_status = global_state.acquisition.configure_cameras(DEFAULT_CONFIG)
 
     yield
 
     # Perform shutdown tasks
-    acquisition.close()
+    state.acquisition.close()
     acquisition_logger.info("Acquisition system closed")
 
 
@@ -163,30 +182,52 @@ class PriorRecordings(BaseModel):
     comment: str
 
 
-@api_router.get("/camera_status")
-async def get_camera_status():
-    camera_status = acquisition.get_camera_status()
+@api_router.get("/camera_status", response_model=List[CameraStatus])
+async def get_camera_status() -> List[CameraStatus]:
+    state = get_global_state()
+    camera_status = state.acquisition.get_camera_status()
     return camera_status
 
 
 @api_router.post("/stop")
 async def stop_recording():
-    acquisition.stop_acquisition()
+    state: GlobalState = get_global_state()
+    state.acquisition.stop_acquisition()
     return {"status": "recording_stopped"}
 
 
-@api_router.post("/new_session")
-async def new_session(subject_id: str):
-    global current_session
-    date = datetime.date.today().strftime("%Y%m%d")
-    session_dir = os.path.join(RECORDING_BASE, subject_id, date)
+@api_router.post("/session", response_model=Session)
+async def set_session(subject_id: str) -> Session:
+    """
+    Create a new session directory for the participant
+
+    Args:
+        subject_id (str): The participant ID
+    Returns:
+        dict: A dictionary with the recording directory and filename
+    """
+
+    date = datetime.date.today()
+    session_dir = os.path.join(RECORDING_BASE, subject_id, date.strftime("%Y%m%d"))
     os.makedirs(session_dir, exist_ok=True)
-    current_session = Session(participant_name=subject_id, session_date=date, recording_path=session_dir)
-    return {"recording_dir": session_dir, "recording_filename": f"{subject_id}"}
+
+    state: GlobalState = get_global_state()
+    state.current_session = Session(participant_name=subject_id, session_date=date, recording_path=session_dir)
+    print("New session: ", state.current_session)
+
+    return state.current_session
+
+
+@api_router.get("/session", response_model=Session)
+async def get_session() -> Session:
+    state: GlobalState = get_global_state()
+    if state.current_session is None:
+        raise HTTPException(status_code=404, detail="No current session")
+    return state.current_session
 
 
 @api_router.post("/new_trial")
-async def new_trial(data: NewTrialData):
+async def new_trial(data: NewTrialData, db: Session = Depends(db_dependency)):
     recording_dir = data.recording_dir
     recording_filename = data.recording_filename
     comment = data.comment
@@ -196,6 +237,9 @@ async def new_trial(data: NewTrialData):
     time_str = now.strftime("%Y%m%d_%H%M%S")
     recording_path = os.path.join(recording_dir, f"{recording_filename}_{time_str}")
 
+    state: GlobalState = get_global_state()
+    current_session = state.current_session
+
     def receive_frames_wrapper(frames):
         loop.create_task(receive_frames(frames))
 
@@ -204,12 +248,12 @@ async def new_trial(data: NewTrialData):
     from functools import partial
 
     start_acquisition = partial(
-        acquisition.start_acquisition, recording_path=recording_path, preview_callback=receive_frames_wrapper
+        state.acquisition.start_acquisition, recording_path=recording_path, preview_callback=receive_frames_wrapper
     )
     threading.Thread(target=start_acquisition).start()
 
     add_recording(
-        recording_db,
+        db,
         participant_name=current_session.participant_name,
         session_date=current_session.session_date,
         session_path=current_session.recording_path,
@@ -229,7 +273,8 @@ async def preview():
     import threading
     from functools import partial
 
-    start_acquisition = partial(acquisition.start_acquisition, preview_callback=receive_frames_wrapper)
+    state: GlobalState = get_global_state()
+    start_acquisition = partial(state.acquisition.start_acquisition, preview_callback=receive_frames_wrapper)
     threading.Thread(target=start_acquisition).start()
 
     return {}
@@ -237,14 +282,15 @@ async def preview():
 
 @api_router.post("/stop")
 async def stop():
-    acquisition.stop_acquisition()
+    state: GlobalState = get_global_state()
+    state.acquisition.stop_acquisition()
     return {}
 
 
 @api_router.get("/prior_recordings", response_model=List[PriorRecordings])
-async def get_prior_recordings() -> List[PriorRecordings]:
+async def get_prior_recordings(db=Depends(db_dependency)) -> List[PriorRecordings]:
     prior_recordings = []
-    db_recordings: ParticipantOut = get_recordings(recording_db)
+    db_recordings: ParticipantOut = get_recordings(db)
     for recording in db_recordings:
         recording: SessionOut = recording
         for session in recording.sessions:
@@ -266,54 +312,64 @@ async def get_configs():
 
 @api_router.get("/current_config", response_model=str)
 async def get_current_config() -> str:
-    config = acquisition.config_file
+    state: GlobalState = get_global_state()
+    print("get_current_config state.acquisition", state.acquisition)
+
+    config = state.acquisition.config_file
     if config is None:
         return ""
     return os.path.split(config)[-1]
 
 
-@api_router.post("/update_config")
+@api_router.post("/current_config")
 async def update_config(config: ConfigFileData):
     print("Received config: ", config.config)
-    acquisition.configure_cameras(os.path.join(CONFIG_PATH, config.config))
+    state: GlobalState = get_global_state()
+    state.acquisition.configure_cameras(os.path.join(CONFIG_PATH, config.config))
     return {"status": "success", "config": config.config}
 
 
 @api_router.post("/reset_cameras")
 async def reset_cameras():
-    acquisition.reset_cameras()
+    state: GlobalState = get_global_state()
+    state.acquisition.reset_cameras()
     return {"status": "success"}
 
 
 # create an endpoint that exposes the camera statuses
 @api_router.get("/camera_status")
 async def get_camera_status() -> List[CameraStatus]:
-    camera_status = acquisition.get_camera_status()
+    state: GlobalState = get_global_state()
+    camera_status = state.acquisition.get_camera_status()
     return camera_status
 
 
 @api_router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    print("Websocket request received")
+    """This websocket endpoint is used to send the recording status to the client"""
+
+    state: GlobalState = get_global_state()
+    logger.debug("Websocket request received")
     await websocket.accept()
-    print("Websocket connected")
+    logger.debug("Websocket connected")
     try:
         while not AppStatus.should_exit:
             try:
-                status = await asyncio.wait_for(recording_status_queue.get(), timeout=0.5)
+                status = await asyncio.wait_for(state.recording_status_queue.get(), timeout=0.5)
                 logger.info("Sending status: ", status)
                 await websocket.send_json(status)
             except asyncio.TimeoutError:
                 # need this to monitor for exit
                 pass
-        print("Exit flag detected")
+        logger.debug("Exit flag detected")
     except WebSocketDisconnect:
-        print("Websocket disconnected")
+        logger.debug("Websocket disconnected")
 
 
 @api_router.get("/recording_status", response_model=str)
 async def get_recording_status() -> str:
-    return recording_status
+    state: GlobalState = get_global_state()
+    return state.recording_status
 
 
 def downsample_image(image, new_width, new_height):
@@ -326,7 +382,8 @@ def convert_rgb_to_jpeg(frame):
 
 
 async def receive_frames(frames):
-    if not preview_queue.empty():
+    state: GlobalState = get_global_state()
+    if not state.preview_queue.empty():
         # If the queue is not empty, then we are not keeping up with the frames
         logger.warn("Dropping frame")
         return
@@ -374,7 +431,7 @@ async def receive_frames(frames):
 
     print("Putting frame on queue")
 
-    await preview_queue.put(jpeg_image)
+    await state.preview_queue.put(jpeg_image)
 
 
 # @api_router.get("/video")
@@ -403,13 +460,14 @@ async def video_endpoint():
 
 @api_router.websocket("/video_ws")
 async def video_websocket_endpoint(websocket: WebSocket):
+    state: GlobalState = get_global_state()
     await websocket.accept()
     logger.info("Video Websocket connected")
     try:
         while not AppStatus.should_exit:
             try:
-                frame = await asyncio.wait_for(preview_queue.get(), timeout=2.5)
-                print("Sending frame")
+                frame = await asyncio.wait_for(state.preview_queue.get(), timeout=2.5)
+                logger.debug("Sending frame")
                 if frame is None:
                     break
                 await websocket.send_bytes(frame)
@@ -420,36 +478,6 @@ async def video_websocket_endpoint(websocket: WebSocket):
 
 
 app.include_router(api_router)
-
-
-def websocket_test():
-    # web socket testing code
-    import aiohttp
-    import asyncio
-    import threading
-
-    async def socket_test():
-        await asyncio.sleep(10)
-        print("Testing")
-        conn = aiohttp.TCPConnector(ssl=False)
-        async with aiohttp.ClientSession(connector=conn) as session:
-            print("Connected to server")
-            async with session.ws_connect("ws://localhost:8000/api/v1/ws") as ws:
-                print("Connected to server WebSocket")
-                # await for messages and send messages
-                async for msg in ws:
-                    if msg.type == aiohttp.WSMsgType.TEXT:
-                        print(f"SERVER says - {msg.data}")
-                        text = input("Enter a message: ")
-                        await ws.send_str(text)
-                    elif msg.type == aiohttp.WSMsgType.ERROR:
-                        break
-
-    def wrapper():
-        asyncio.run(socket_test())
-
-    # run websocket_test in a new thread
-    threading.Thread(target=wrapper).start()
 
 
 if __name__ == "__main__":
