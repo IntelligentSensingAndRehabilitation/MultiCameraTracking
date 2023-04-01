@@ -1,3 +1,4 @@
+import React from 'react';
 import { useState, useEffect, createContext } from 'react';
 import axios from 'axios';
 
@@ -40,9 +41,6 @@ export const AquisitionApi = (props) => {
 
     useEffect(() => {
 
-        var client_id = Date.now()
-
-        //const socket = new WebSocket(`${WS_BASE_URL}/${client_id}`);
         const socket = new WebSocket(WS_BASE_URL);
 
         console.log("Connecting to websocket...")

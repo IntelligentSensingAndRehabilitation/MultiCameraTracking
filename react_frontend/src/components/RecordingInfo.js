@@ -1,6 +1,7 @@
+import React from 'react';
 import ReactDOM from 'react-dom';
-import { useEffect, useState, useContext, useRef } from "react";
-import { Row, Col, Form, Button } from "react-bootstrap";
+import { useEffect, useContext, useRef } from "react";
+import { Row, Col, Form } from "react-bootstrap";
 import { AcquisitionState } from "../AcquistionApi";
 
 const RecordingInfo = () => {
