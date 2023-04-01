@@ -7,9 +7,6 @@ from datetime import date
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
 from typing import List
-from typing import Optional
-from contextvars import ContextVar
-from starlette.types import ASGIApp, Receive, Scope, Send
 import numpy as np
 import logging
 import math
@@ -178,8 +175,11 @@ class ConfigFileData(BaseModel):
 
 
 class PriorRecordings(BaseModel):
+    participant: str
     filename: str
     comment: str
+    config_file: str
+    should_process: bool
 
 
 @api_router.get("/camera_status", response_model=List[CameraStatus])
@@ -258,6 +258,7 @@ async def new_trial(data: NewTrialData, db: Session = Depends(db_dependency)):
         session_date=current_session.session_date,
         session_path=current_session.recording_path,
         filename=recording_path,
+        config_file=await get_current_config(),
         comment=comment,
     )
 
@@ -289,16 +290,31 @@ async def stop():
 
 @api_router.get("/prior_recordings", response_model=List[PriorRecordings])
 async def get_prior_recordings(db=Depends(db_dependency)) -> List[PriorRecordings]:
+    state = get_global_state()
+    if state.current_session is None:
+        participant_name = None
+    else:
+        participant_name = state.current_session.participant_name
     prior_recordings = []
-    db_recordings: ParticipantOut = get_recordings(db)
-    for recording in db_recordings:
-        recording: SessionOut = recording
-        for session in recording.sessions:
+    db_recordings: ParticipantOut = get_recordings(db, participant_name=participant_name)
+    for participant in db_recordings:
+        participant: ParticipantOut = participant
+        for session in participant.sessions:
             session: SessionOut = session
             for recording in session.recordings:
                 recording: RecordingOut = recording
-                prior_recordings.append(PriorRecordings(filename=recording.filename, comment=recording.comment))
+                prior_recordings.append(
+                    PriorRecordings(
+                        participant=participant.name,
+                        filename=recording.filename,
+                        comment=recording.comment,
+                        config_file=recording.config_file,
+                        should_process=recording.should_process,
+                    )
+                )
 
+    # reverse the list before returning to put in chronological order
+    prior_recordings.reverse()
     print("Returning prior recordings: ", prior_recordings)
     return prior_recordings
 

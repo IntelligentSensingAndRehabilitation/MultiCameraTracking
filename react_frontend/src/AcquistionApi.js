@@ -16,7 +16,7 @@ export const AcquisitionState = createContext(initialState);
 
 export const AquisitionApi = (props) => {
 
-    const [participant, setParticipant] = useState([]);
+    const [participant, setParticipant] = useState("");
     const [cameraStatusList, setCameraStatusList] = useState([]);
     const [availableConfigs, setAvailableConfigs] = useState([]);
     const [currentConfig, setCurrentConfig] = useState('');
@@ -75,6 +75,7 @@ export const AquisitionApi = (props) => {
         fetchRecordings();
         fetchCurrentConfig();
         fetchRecordingStatus();
+        fetchSession();
     }, []);
 
     useEffect(() => {
@@ -82,19 +83,24 @@ export const AquisitionApi = (props) => {
     }, [currentConfig]);
 
     useEffect(() => {
-        newSession();
-    }, [participant]);
-
-    useEffect(() => {
         console.log("recordingDir: " + recordingDir);
         console.log("recordingFileBase: " + recordingFileBase);
         console.log("recordingFilename: " + recordingFilename);
     }, [recordingDir, recordingFileBase, recordingFilename]);
 
-    async function newSession() {
+    async function fetchSession() {
+        const response = await axios.get(`${API_BASE_URL}/session`);
+        const data = response.data;
+
+        setParticipant(data.participant_name);
+        setRecordingDir(data.recording_path);
+        setRecordingFileBase(data.participant_name);
+    }
+
+    async function newSession(participant) {
         if (participant && participant.length > 0) {
             console.log("Creating new session for participant: ", participant);
-            const response = await axios.post(`${API_BASE_URL}/new_session`, null,
+            const response = await axios.post(`${API_BASE_URL}/session`, null,
                 {
                     headers: {
                         'Content-Type': 'application/json',
@@ -107,14 +113,15 @@ export const AquisitionApi = (props) => {
             const data = response.data;
             console.log(data);
 
-            setRecordingDir(data.recording_dir);
-            setRecordingFileBase(data.recording_filename);
+            setParticipant(data.participant_name);
+            setRecordingDir(data.recording_path);
+            setRecordingFileBase(data.participant_name);
         }
     }
 
     async function newTrial(comment) {
         if (participant && participant.length > 0) {
-            console.log("Creating new session for participant: ", participant);
+            console.log("Starting recording for participant: ", participant);
             const response = await axios.post(`${API_BASE_URL}/new_trial`,
                 {
                     recording_dir: recordingDir,
@@ -128,7 +135,7 @@ export const AquisitionApi = (props) => {
         }
     }
 
-    async function calibrationVideo(comment) {
+    async function calibrationVideo() {
         if (participant && participant.length > 0) {
             console.log("Creating new session for participant: ", participant);
             const response = await axios.post(`${API_BASE_URL}/new_trial`,
@@ -187,7 +194,7 @@ export const AquisitionApi = (props) => {
         console.log("updateConfig: ", currentConfig);
         if (currentConfig) {
             console.log("Updating config: ", currentConfig);
-            await axios.post(`${API_BASE_URL}/update_config`, { config: currentConfig });
+            await axios.post(`${API_BASE_URL}/current_config`, { config: currentConfig });
             fetchCameraStatus();
         }
     };
@@ -198,19 +205,19 @@ export const AquisitionApi = (props) => {
         fetchCameraStatus();
     };
 
-    // useEffect(() => {
-    //     //Implementing the setInterval method
-    //     const interval = setInterval(() => {
-    //         fetchCameraStatus()
-    //         fetchRecordings()
-    //     }, 60000);
+    useEffect(() => {
+        //Implementing the setInterval method
+        //const interval = setInterval(() => {
+        fetchCameraStatus()
+        fetchRecordings()
+        //}, 500);
 
-    //     //Clearing the interval
-    //     return () => clearInterval(interval);
-    // }, []);
+        //Clearing the interval
+        //return () => clearInterval(interval);
+    }, [recordingSystemStatus, participant]);
 
     return (<AcquisitionState.Provider value={{
-        partipant: participant,
+        participant: participant,
         recordingDir: recordingDir,
         recordingFileBase: recordingFileBase,
         recordingFilename: recordingFilename,
@@ -222,7 +229,7 @@ export const AquisitionApi = (props) => {
         recordingSystemStatus: recordingSystemStatus,
         setCurrentConfig,
         resetCameras,
-        setParticipant,
+        newSession,
         newTrial,
         previewVideo,
         calibrationVideo,

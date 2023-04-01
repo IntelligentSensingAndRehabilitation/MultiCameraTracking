@@ -1,5 +1,6 @@
 import { useState, useEffect, useContext, useRef } from "react";
 import { Row, Image } from "react-bootstrap";
+import Accordion from 'react-bootstrap/Accordion';
 import { AcquisitionState } from "../AcquistionApi";
 
 
@@ -42,9 +43,17 @@ const Video = () => {
     }, []);
 
     return (
-        <Row md={10} className="g-4 p-2">
-            <Image id="video_stream" src={imageSrc} rounded />
-        </Row>
+        <Accordion defaultActiveKey="0" className="g-4 p-2">
+            <Accordion.Item eventKey="0">
+                < Accordion.Header > Video Preview</Accordion.Header >
+                <Accordion.Body>
+
+                    <Row md={10} className="g-4 p-2">
+                        <Image id="video_stream" src={imageSrc} rounded />
+                    </Row>
+                </Accordion.Body>
+            </Accordion.Item >
+        </Accordion >
     );
 };
 
