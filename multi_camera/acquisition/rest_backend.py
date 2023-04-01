@@ -380,7 +380,7 @@ async def video_websocket_endpoint(websocket: WebSocket):
                     break
                 await websocket.send_bytes(frame)
             except asyncio.TimeoutError:
-                print("No frame")
+                pass
     except WebSocketDisconnect:
         logger.info("Websocket disconnected")
 
@@ -423,9 +423,9 @@ if __name__ == "__main__":
 
     # Start the server
     uvicorn.run(
-        "multi_camera.acquisition.fastapi_gui.main:app",
+        "multi_camera.acquisition.rest_backend:app",
         host="0.0.0.0",
         port=8000,
         reload=True,
-        log_level="trace",
+        # log_level="trace",
     )

@@ -27,6 +27,17 @@ This project is under active development and breaking changes may be introduced.
     pip install -r requirements
     pip install -e .
 
+## Running Web GUI
+
+First start FastAPI backend, which provides a REST API for the acquisition software
+
+    python -m multi_camera.acquisition.rest_backend
+
+Then start the web GUI
+
+    cd react_frontend
+    npm start
+
 ## Recording:
 
     python -m multi_camera.acquisition.record [-h] [-m MAX_FRAMES] [-n NUM_CAMS] [--preview] [-s SCALING] [-c CONFIG] vid_filename
