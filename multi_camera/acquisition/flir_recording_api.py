@@ -4,7 +4,7 @@ import numpy as np
 from tqdm import tqdm
 from datetime import datetime
 from queue import Queue
-from typing import List, Callable
+from typing import List, Callable, Awaitable
 from pydantic import BaseModel
 import concurrent.futures
 import threading
@@ -36,30 +36,40 @@ def select_interface(interface, cameras):
     # interface has cameras and returns a list of valid camera IDs or
     # number of cameras
 
+    print("Update cameras:", interface.UpdateCameras())
+
     # Check the current interface to see if it has cameras
     interface_cams = interface.GetCameras()
     # Get the number of cameras on the current interface
     num_interface_cams = interface_cams.GetSize()
 
+    retval = None
+
     if num_interface_cams > 0:
         # If camera list is passed, confirm all SNs are valid
         if isinstance(cameras, list):
-            camera_id_list = [str(c) for c in cameras if interface_cams.GetBySerial(str(c)).IsValid()]
+            camera_id_list = []
+
+            for c in cameras:
+                cam = interface_cams.GetBySerial(str(c))
+                if cam.IsValid():
+                    camera_id_list.append(str(c))
+
+                del cam  # must release handle
 
             # if the camera_ID_list does not contain any valid cameras
             # based on the serial numbers present in the config file
             # return None
-            if len(camera_id_list) == 0:
-                return None
+            if len(camera_id_list) > 0:
+                # Find any invalid IDs in the config
+                invalid_ids = [c for c in cameras if str(c) not in camera_id_list]
 
-            # Find any invalid IDs in the config
-            invalid_ids = [c for c in cameras if str(c) not in camera_id_list]
+                if invalid_ids:
+                    # if len(camera_id_list) != len(cameras):
+                    print(f"The following camera ID(s) from are missing: {invalid_ids} but continuing")
 
-            if invalid_ids:
-                # if len(camera_id_list) != len(cameras):
-                print(f"The following camera ID(s) from are invalid: {invalid_ids}")
+                retval = camera_id_list
 
-            return camera_id_list
         # If num_cams is passed, confirm it is less than or equal to
         # the size of interface_cams and return the correct num_cams
         if isinstance(cameras, int):
@@ -73,9 +83,13 @@ def select_interface(interface, cameras):
             num_cams = cameras
             print(f"No config file passed. Selecting the first {num_cams} cameras in the list.")
 
-            return num_cams
+            retval = num_cams
+
+    # need to make sure we release this handle
+    interface_cams.Clear()
+
     # If there are no cameras on the interface, return None
-    return None
+    return retval
 
 
 def init_camera(
@@ -107,10 +121,17 @@ def init_camera(
     c.BinningHorizontal = binning
     c.BinningVertical = binning
 
-    if False:
-        c.GainAuto = "Continuous"
-        c.ExposureAuto = "Continuous"
-        # c.IspEnable = True
+    # use a fixed exposure time to ensure good synchronization. also want to keep this relatively
+    # low to reduce blur while obtaining sufficient light
+    c.ExposureAuto = "Off"
+    c.ExposureTime = 8000
+
+    # let the auto gain match the brightness across images as much as possible
+    c.GainAuto = "Continuous"
+    # c.Gain = 10
+
+    c.ImageCompressionMode = "Off"  # Losless might get framerate up but not working currently
+    # c.IspEnable = True  # if trying to adjust the color transformations  this is needed
 
     if jumbo_packet:
         c.GevSCPSPacketSize = 9000
@@ -133,18 +154,6 @@ def init_camera(
         c.TriggerSelector = "AcquisitionStart"  # Need to select AcquisitionStart for real time clock
         c.TriggerSource = "Action0"
         c.TriggerMode = "On"
-
-    status = CameraStatus(
-        SerialNumber=c.DeviceSerialNumber,
-        Status="Initialized",
-        # PixelSize=c.PixelSize,
-        PixelFormat=c.PixelFormat,
-        BinningHorizontal=c.BinningHorizontal,
-        BinningVertical=c.BinningVertical,
-        Width=c.Width,
-        Height=c.Height,
-    )
-    return status
 
 
 def write_queue(vid_file: str, image_queue: Queue, json_queue: Queue, serial, pixel_format: str):
@@ -230,7 +239,6 @@ class FlirRecorder:
 
         self.preview_callback = None
         self.cams = []
-        self.camera_status = []
         self.image_queue_dict = {}
         self.config_file = None
         self.status_callback = status_callback
@@ -245,9 +253,21 @@ class FlirRecorder:
         if self.status_callback is not None:
             self.status_callback(status)
 
-    def configure_cameras(
+    async def synchronize_cameras(self):
+        if not all([c.GevIEEE1588 for c in self.cams]):
+            self.set_status("Synchronizing")
+
+            print("Cameras not synchronized. Enabling IEEE1588 (takes 10 seconds)")
+            for c in self.cams:
+                c.GevIEEE1588 = True
+
+            await asyncio.sleep(10)
+
+        self.set_status("Synchronized")
+
+    async def configure_cameras(
         self, config_file: str = None, num_cams: int = None, trigger: bool = True
-    ) -> List[CameraStatus]:
+    ) -> Awaitable[List[CameraStatus]]:
         """
         Configure cameras for recording
 
@@ -267,29 +287,33 @@ class FlirRecorder:
 
             # Updating interface_cameras if a config file is passed
             # with the camera IDs passed
-            self.iface_cameras = list(self.camera_config["camera-info"].keys())
+            requested_cameras = list(self.camera_config["camera-info"].keys())
         else:
             assert num_cams is not None, "Must provide number of cameras if no config file is provided"
-            self.iface_cameras = num_cams
+            requested_cameras = num_cams
             self.camera_config = {}
+
+        print(f"Requested cameras: {requested_cameras}")
 
         # Identify the interface we are going to send a command for synchronous recording
         iface = None
-        for current_iface in iface_list:
-            current_iface_cams = select_interface(current_iface, self.iface_cameras)
+        for i, current_iface in enumerate(iface_list):
+            selected_cams = select_interface(current_iface, requested_cameras)
 
             # If the value returned from select_interface is not None,
             # select the current interface
-            if current_iface_cams is not None:
-                iface = current_iface
-                iface_cams = current_iface_cams
+            if selected_cams is not None:
                 # Break out of the loop after finding the interface and cameras
                 break
 
+        print(f"Using interface {i} with {selected_cams} cameras. In use: {current_iface.IsInUse()}")
+
+        iface_list.Clear()
+
         # Confirm that cameras were found on an interface
-        assert iface is not None, "Unable to find valid interface."
-        self.iface = iface
-        self.iface_cameras = iface_cams
+        assert current_iface is not None, "Unable to find valid interface."
+        self.iface = current_iface
+        self.iface_cameras = selected_cams
 
         self.trigger = trigger
 
@@ -313,14 +337,29 @@ class FlirRecorder:
         }
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(self.cams)) as executor:
-            self.camera_status = list(executor.map(lambda c: init_camera(c, **config_params), self.cams))
+            list(executor.map(lambda c: init_camera(c, **config_params), self.cams))
 
-        if not all([c.GevIEEE1588 for c in self.cams]):
-            print("Cameras not synchronized. Enabling IEEE1588 (takes 10 seconds)")
-            for c in self.cams:
-                c.GevIEEE1588 = True
+        await self.synchronize_cameras()
 
-            time.sleep(10)
+        self.cams.sort(key=lambda x: x.DeviceSerialNumber)
+        self.pixel_format = self.cams[0].PixelFormat
+
+        self.set_status("Idle")
+
+    async def get_camera_status(self) -> List[CameraStatus]:
+        status = [
+            CameraStatus(
+                SerialNumber=c.DeviceSerialNumber,
+                Status="Initialized",
+                # PixelSize=c.PixelSize,
+                PixelFormat=c.PixelFormat,
+                BinningHorizontal=c.BinningHorizontal,
+                BinningVertical=c.BinningVertical,
+                Width=c.Width,
+                Height=c.Height,
+            )
+            for c in self.cams
+        ]
 
         for c in self.cams:
             c.GevIEEE1588DataSetLatch()
@@ -330,20 +369,13 @@ class FlirRecorder:
             # )
 
             # set the corresponding camera status
-            for cs in self.camera_status:
+            for cs in status:
                 if cs.SerialNumber == c.DeviceSerialNumber:
                     cs.SyncOffset = c.GevIEEE1588OffsetFromMasterLatched
 
-        self.cams.sort(key=lambda x: x.DeviceSerialNumber)
-        self.camera_status.sort(key=lambda x: x.SerialNumber)
-        self.pixel_format = self.cams[0].PixelFormat
+        status.sort(key=lambda x: x.SerialNumber)
 
-        self.set_status("Idle")
-
-        return self.camera_status
-
-    def get_camera_status(self) -> List[CameraStatus]:
-        return self.camera_status
+        return status
 
     def start_acquisition(self, recording_path=None, preview_callback: callable = None, max_frames: int = 100):
         self.set_status("Recording")
@@ -405,13 +437,14 @@ class FlirRecorder:
             size_flag = 0
             real_time_images = []
             for c in self.cams:
-                im = c.get_image()
-                timestamps = im.GetTimeStamp()
+                im_ref = c.get_image()
+                timestamps = im_ref.GetTimeStamp()
 
                 # get the data array
                 # Using try/except to handle frame tearing
                 try:
-                    im = im.GetNDArray()
+                    im = im_ref.GetNDArray()
+                    im_ref.Release()
 
                     if self.preview_callback is not None:
                         # if preview is enabled, save the size of the first image
@@ -482,16 +515,63 @@ class FlirRecorder:
     def stop_acquisition(self):
         self.stop_recording.set()
 
-    def reset_cameras(self):
+    async def reset_cameras(self):
+        """
+        Reset all the cameras
+
+        This isn't working very reliably and doesn't reconnect.
+        """
+
         self.set_status("Reseting")
+        await asyncio.sleep(0.1)  # let the web service update with this message
 
+        # store the serial numbers to get and reset
+        serials = [c.DeviceSerialNumber for c in self.cams]
+
+        print("Closing")
+        # close all the cameras
         for c in self.cams:
-            print("Resetting camera", c.DeviceSerialNumber)
+            c.cam.DeInit()
+            c.close()
+            del c
+        self.cams = []
+
+        print("Reopening and reseting")
+        # find the set of cameras and trigger a reset on them
+        cams = self.system.GetCameras()
+
+        def reset_cam(s):
+            print("Opening and reseting camera", s)
+            c = cams.GetBySerial(s)
+            c.Init()
             c.DeviceReset()
+            c.DeInit()
+            del c  # force release of the handle
 
-        time.sleep(15)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(serials)) as executor:
+            executor.map(reset_cam, serials)
 
-        self.configure_cameras(self.config_file)
+        cams.Clear()
+
+        # force release of the interface
+        del self.iface
+        self.iface = None
+
+        # for some reason this is required to reenumerate the reset cameras
+        self.system.ReleaseInstance()
+
+        self.set_status("Reset complete. Waiting to reconfigure.")
+        await asyncio.sleep(15)
+
+        for s in serials:
+            print("Reopening", s)
+            cam = Camera(s, lock=True)
+            cam.init()
+
+        # running local test
+        self.system = PySpin.System.GetInstance()
+        if self.config_file is not None and self.config_file != "":
+            await self.configure_cameras(self.config_file)
 
     def close(self):
         for c in self.cams:
@@ -528,11 +608,15 @@ if __name__ == "__main__":
 
     print(args.config)
     acquistion = FlirRecorder()
-    acquistion.configure_cameras(config_file=args.config, num_cams=args.num_cams)
+    asyncio.run(acquistion.configure_cameras(config_file=args.config, num_cams=args.num_cams))
+
+    print(asyncio.run(acquistion.get_camera_status()))
 
     if args.reset:
         print("reset")
-        acquistion.reset_cameras()
+        asyncio.run(acquistion.reset_cameras())
+
+    # time.sleep(5)
 
     # Get the timestamp that should be used for the file names
     now = datetime.now()
