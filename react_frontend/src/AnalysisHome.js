@@ -1,7 +1,7 @@
 import React, { useContext, useState, useEffect } from "react";
 import { Accordion, Table, Form, Container, Button } from 'react-bootstrap';
 import path from 'path-browserify';
-import { AcquisitionState } from "./AcquistionApi";
+import { AcquisitionState } from "./AcquisitionApi";
 
 const stripPath = (filePath) => path.basename(filePath);
 

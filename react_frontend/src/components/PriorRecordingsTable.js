@@ -1,6 +1,6 @@
 import React, { useContext } from 'react';
 import { Table, ToggleButton, Accordion } from 'react-bootstrap';
-import { AcquisitionState } from "../AcquistionApi";
+import { AcquisitionState } from "../AcquisitionApi";
 
 const PriorRecordingsTable = ({ api }) => {
 
