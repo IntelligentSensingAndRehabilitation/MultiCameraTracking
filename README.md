@@ -102,6 +102,14 @@ the SMPLReconstruction results
 
     python apps/visualize.py --smpl --top_down FILENAME
 
+# Resources
+
+Web App:
+- https://docs.pydantic.dev/
+- https://fastapi.tiangolo.com/
+- https://react-bootstrap.github.io/
+- https://coreui.io/bootstrap-react/
+
 # Credits
 
 - Bundle adjustment from [Aniposelib](https://github.com/lambdaloop/aniposelib) is used for the calibration and triangulation.

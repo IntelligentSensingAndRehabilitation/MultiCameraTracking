@@ -394,6 +394,7 @@ class FlirRecorder:
         for _ in tqdm(range(max_frames)):
             # Use thread safe checking of semaphore to determine whether to stop recording
             if self.stop_recording.is_set():
+                self.stop_recording.clear()
                 print("Stopping recording")
                 break
 
