@@ -1,5 +1,5 @@
 import React from 'react';
-import { useState, useEffect, createContext } from 'react';
+import { useState, useEffect, useRef, createContext } from 'react';
 import axios from 'axios';
 
 const BASE_URL = 'localhost:8000/api/v1';
@@ -15,6 +15,37 @@ const initialState = {
 
 export const AcquisitionState = createContext(initialState);
 
+export const useEffectOnce = (effect) => {
+
+    const destroyFunc = useRef();
+    const effectCalled = useRef(false);
+    const renderAfterCalled = useRef(false);
+    const [val, setVal] = useState(0);
+
+    if (effectCalled.current) {
+        renderAfterCalled.current = true;
+    }
+
+    useEffect(() => {
+
+        // only execute the effect first time around
+        if (!effectCalled.current) {
+            destroyFunc.current = effect();
+            effectCalled.current = true;
+        }
+
+        // this forces one render after the effect is run
+        setVal(val => val + 1);
+
+        return () => {
+            // if the comp didn't render since the useEffect was called,
+            // we know it's the dummy React cycle
+            if (!renderAfterCalled.current) { return; }
+            if (destroyFunc.current) { destroyFunc.current(); }
+        };
+    }, []);
+};
+
 export const AquisitionApi = (props) => {
 
     const [participant, setParticipant] = useState("");
@@ -28,25 +59,28 @@ export const AquisitionApi = (props) => {
     const [recordingFilename, setRecordingFilename] = useState('');
 
     useEffect(() => {
-        axios.interceptors.request.use(request => {
-            console.log('Starting Request', JSON.stringify(request, null, 2))
-            return request
-        })
-
-        axios.interceptors.response.use(response => {
-            console.log('Response:', JSON.stringify(response, null, 2))
-            return response
-        })
+        // axios.interceptors.request.use(request => {
+        //     console.log('Starting Request', JSON.stringify(request, null, 2))
+        //     return request
+        // })
+        // axios.interceptors.response.use(response => {
+        //     console.log('Response:', JSON.stringify(response, null, 2))
+        //     return response
+        // })
     }, []);
 
-    useEffect(() => {
+    useEffectOnce(() => {
 
-        const socket = new WebSocket(WS_BASE_URL);
 
-        console.log("Connecting to websocket...")
+        var client_id = Date.now()
+
+        const url = `${WS_BASE_URL}/${client_id}`;
+        const socket = new WebSocket(url);
+
+        console.log("Connecting to websocket..." + url)
 
         socket.onopen = (event) => {
-            console.log("WebSocket connection established", event);
+            console.log("WebSocket connection established" + url, event);
         };
 
         socket.onmessage = (event) => {
@@ -56,15 +90,18 @@ export const AquisitionApi = (props) => {
         };
 
         socket.onclose = (event) => {
-            console.log("WebSocket connection closed", event);
+            console.log("WebSocket connection closed" + url, event);
         };
 
         socket.onerror = (event) => {
-            console.log("WebSocket error observed:", event);
+            console.log("WebSocket error observed" + url + ":", event);
         }
 
         //clean up function when we close page
-        return () => socket.close();
+        return () => {
+            console.log("Closing WebSocket " + url + " ...")
+            socket.close();
+        }
     }, []);
 
     useEffect(() => {

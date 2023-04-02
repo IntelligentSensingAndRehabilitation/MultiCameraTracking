@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from uvicorn.main import Server
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
+from websockets.exceptions import ConnectionClosedOK
 from datetime import date
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
@@ -63,7 +64,6 @@ class Session(BaseModel):
 @dataclass
 class GlobalState:
     preview_queue: asyncio.Queue = field(default_factory=asyncio.Queue)
-    recording_status_queue: asyncio.Queue = field(default_factory=asyncio.Queue)
     current_session: Session = None
     recording_status: str = ""
     acquisition = None
@@ -85,6 +85,26 @@ def db_dependency():
         db.close()
 
 
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: list[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        logger.debug("Websocket connected")
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        logger.debug("Websocket Disconnected")
+        self.active_connections.remove(websocket)
+
+    async def broadcast(self, message: str):
+        for connection in self.active_connections:
+            await connection.send_json(message)
+
+
+manager = ConnectionManager()
+
 RECORDING_BASE = "data"
 CONFIG_PATH = "/home/cbm/MultiCameraTracking/multi_camera_configs/"
 DEFAULT_CONFIG = os.path.join(CONFIG_PATH, "cotton_lab_config_20221109.yaml")
@@ -94,14 +114,18 @@ loop = asyncio.get_event_loop()
 
 
 def receive_status(status):
+    """
+    Receive status updates from the acquisition system
+
+    This callback is running on a different thread so needs to be handled carefully.
+    """
     global_state = get_global_state()
     global_state.recording_status = status
-    recording_status_queue = global_state.recording_status_queue
 
     acquisition_logger.info(f"Status: {status}")
 
     # Put the status in the queue using asyncio from a synchronous function
-    loop.call_soon_threadsafe(recording_status_queue.put_nowait, {"status": status})
+    loop.create_task(manager.broadcast({"status": status}))
 
 
 @asynccontextmanager
@@ -364,26 +388,38 @@ async def get_camera_status() -> List[CameraStatus]:
     return camera_status
 
 
-@api_router.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
+@api_router.websocket("/ws/{client_id}")
+async def websocket_endpoint(websocket: WebSocket, client_id: int):
     """This websocket endpoint is used to send the recording status to the client"""
 
     state: GlobalState = get_global_state()
     logger.debug("Websocket request received")
-    await websocket.accept()
+
+    await manager.connect(websocket)
+
     logger.debug("Websocket connected")
+
     try:
         while not AppStatus.should_exit:
             try:
-                status = await asyncio.wait_for(state.recording_status_queue.get(), timeout=0.5)
-                logger.info("Sending status: ", status)
-                await websocket.send_json(status)
+                # other code will broadcast status updates to listening clients
+                # this loop just hands out waiting for the websocket to close
+                status = await asyncio.wait_for(websocket.receive(), timeout=0.5)
             except asyncio.TimeoutError:
                 # need this to monitor for exit
+                # print(websocket.client_state, websocket.application_state)
                 pass
         logger.debug("Exit flag detected")
-    except WebSocketDisconnect:
-        logger.debug("Websocket disconnected")
+    except WebSocketDisconnect as e:
+        logger.debug("Websocket disconnected with WebSocketDisconnect: %s", e)
+    except RuntimeError as e:
+        # This is a cludge, but when the remote websocket is closed then receive throws a RuntimeError.
+        # it seems like the WebSocketDisconnect should be thrown, but it is not.
+        logger.debug("Websocket disconnected with RuntimeError: %s", e)
+
+    manager.disconnect(websocket)
+
+    logger.info("Regular websocket exited")
 
 
 @api_router.get("/recording_status", response_model=str)
@@ -491,8 +527,12 @@ async def video_websocket_endpoint(websocket: WebSocket):
                 await websocket.send_bytes(frame)
             except asyncio.TimeoutError:
                 pass
-    except WebSocketDisconnect:
-        logger.info("Websocket disconnected")
+    except WebSocketDisconnect as e:
+        logger.info("Video Websocket disconnected with WebSocketDisconnect: %s", e)
+    except ConnectionClosedOK as e:
+        logger.info("Video  Websocket disconnected with ConnectionClosedOK: %s", e)
+
+    logger.info("Video websocket exited")
 
 
 app.include_router(api_router)
