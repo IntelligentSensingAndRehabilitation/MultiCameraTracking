@@ -94,7 +94,6 @@ const AnalysisHome = () => {
 
 
     const onToggleShouldProcess = (participant, session_date, recordingKey, isChecked) => {
-        console.log(`onToggleShouldProcess: participant=${participant}, session_date=${session_date}, recordingKey=${recordingKey}, isChecked=${isChecked}`);
 
         // Find the corresponding entry in the recordingDb and toggle the should_process flag
         const participantIndex = recordingDb.findIndex((participantEntry) => participantEntry.name === participant);
