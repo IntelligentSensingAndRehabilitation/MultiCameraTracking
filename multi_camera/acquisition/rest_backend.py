@@ -370,7 +370,10 @@ async def get_current_config() -> str:
 async def update_config(config: ConfigFileData):
     print("Received config: ", config.config)
     state: GlobalState = get_global_state()
-    await state.acquisition.configure_cameras(os.path.join(CONFIG_PATH, config.config))
+    if config.config == "":
+        state.acquisition.reset()
+    else:
+        await state.acquisition.configure_cameras(os.path.join(CONFIG_PATH, config.config))
     return {"status": "success", "config": config.config}
 
 

@@ -242,6 +242,7 @@ class FlirRecorder:
         self.cams = []
         self.image_queue_dict = {}
         self.config_file = None
+        self.iface = None
         self.status_callback = status_callback
         self.set_status("Uninitialized")
 
@@ -568,24 +569,38 @@ class FlirRecorder:
             await self.configure_cameras(config_file)
 
     def close(self):
-        for c in self.cams:
-            print("Closing camera", c.DeviceSerialNumber)
-            c.cam.DeInit()
-            c.close()
-            del c
+        """Close all the cameras and release the system"""
+
+        if len(self.cams) > 0:
+
+            def close_cam(c):
+                print("Closing camera", c.DeviceSerialNumber)
+                c.cam.DeInit()
+                c.close()
+                del c
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=len(self.cams)) as executor:
+                executor.map(close_cam, self.cams)
+
         self.cams = []
 
-        del self.iface
-        self.iface = None
-
-        del self.system
-        self.system = None
+        if self.iface is not None:
+            del self.iface
+            self.iface = None
 
         simple_pyspin._SYSTEM.ReleaseInstance()
         del simple_pyspin._SYSTEM
         simple_pyspin._SYSTEM = None
 
+        self.system = None
+
         self.config_file = None
+
+        print("PySpin system released")
+
+    def reset(self):
+        self.close()
+        self._get_pyspin_system()
 
 
 if __name__ == "__main__":
