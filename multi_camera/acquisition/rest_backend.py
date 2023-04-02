@@ -162,6 +162,7 @@ class NewTrialData(BaseModel):
     recording_dir: str
     recording_filename: str
     comment: str
+    max_frames: int
 
 
 class ConfigFileData(BaseModel):
@@ -187,7 +188,7 @@ async def get_camera_status() -> List[CameraStatus]:
 async def stop_recording():
     state: GlobalState = get_global_state()
     state.acquisition.stop_acquisition()
-    return {"status": "recording_stopped"}
+    return {}
 
 
 @api_router.post("/session", response_model=Session)
@@ -225,6 +226,9 @@ async def new_trial(data: NewTrialData, db: Session = Depends(db_dependency)):
     recording_dir = data.recording_dir
     recording_filename = data.recording_filename
     comment = data.comment
+    max_frames = data.max_frames
+
+    print("New trial: ", data)
 
     # Build the recording file name from the components
     now = datetime.datetime.now()
@@ -242,7 +246,10 @@ async def new_trial(data: NewTrialData, db: Session = Depends(db_dependency)):
     from functools import partial
 
     start_acquisition = partial(
-        state.acquisition.start_acquisition, recording_path=recording_path, preview_callback=receive_frames_wrapper
+        state.acquisition.start_acquisition,
+        recording_path=recording_path,
+        preview_callback=receive_frames_wrapper,
+        max_frames=max_frames,
     )
     threading.Thread(target=start_acquisition).start()
 
@@ -399,7 +406,7 @@ async def receive_frames(frames):
     state: GlobalState = get_global_state()
     if not state.preview_queue.empty():
         # If the queue is not empty, then we are not keeping up with the frames
-        logger.warn("Dropping frame")
+        # logger.warn("Dropping frame")
         return
 
     num_frames = len(frames)
@@ -442,8 +449,6 @@ async def receive_frames(frames):
 
     downsampled_frame = downsample_image(grid_image, int(ratio * width), width)
     jpeg_image = convert_rgb_to_jpeg(downsampled_frame)
-
-    print("Putting frame on queue")
 
     await state.preview_queue.put(jpeg_image)
 

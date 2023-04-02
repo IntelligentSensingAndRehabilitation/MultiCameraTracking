@@ -117,14 +117,21 @@ export const AquisitionApi = (props) => {
         }
     }
 
-    async function newTrial(comment) {
+    async function newTrial(comment, max_frames) {
+
+        // set max frames to 100 if undefined
+        if (max_frames === undefined) {
+            max_frames = 100;
+        }
+
         if (participant && participant.length > 0) {
             console.log("Starting recording for participant: ", participant);
             const response = await axios.post(`${API_BASE_URL}/new_trial`,
                 {
                     recording_dir: recordingDir,
                     recording_filename: recordingFileBase,
-                    comment: comment
+                    comment: comment,
+                    max_frames: max_frames
                 });
 
             const data = response.data;
@@ -133,14 +140,15 @@ export const AquisitionApi = (props) => {
         }
     }
 
-    async function calibrationVideo() {
+    async function calibrationVideo(max_frames) {
         if (participant && participant.length > 0) {
             console.log("Creating new session for participant: ", participant);
             const response = await axios.post(`${API_BASE_URL}/new_trial`,
                 {
                     recording_dir: recordingDir,
                     recording_filename: "calibration",
-                    comment: "calibration"
+                    comment: "calibration",
+                    max_frames: max_frames
                 });
 
             const data = response.data;
@@ -149,12 +157,12 @@ export const AquisitionApi = (props) => {
         }
     }
 
-    async function previewVideo() {
+    async function previewVideo(max_frames) {
         await axios.post(`${API_BASE_URL}/preview`);
     }
 
     async function stopAcquisition() {
-        await axios.post(`${API_BASE_URL}/preview`);
+        await axios.post(`${API_BASE_URL}/stop`);
     }
 
     const fetchCameraStatus = async () => {
