@@ -17,21 +17,29 @@ const RecordingControl = () => {
                 <Container>
                     <Row className="justify-content-md-left">
                         <Col md="auto">
-                            <Button id="preview" className="btn btn-secondary"
+                            <Button id="preview"
+                                className="btn btn-secondary"
+                                disabled={recordingSystemStatus !== "Idle"}
                                 onClick={() => previewVideo(maxFrames)}
                             >Preview</Button>
                         </Col>
                         <Col md="auto">
-                            <Button id="calibration" className="btn btn-secondary"
+                            <Button id="calibration"
+                                className="btn btn-secondary"
+                                disabled={recordingSystemStatus !== "Idle"}
                                 onClick={() => calibrationVideo(maxFrames)}
                             >Calibration</Button>
                         </Col>
                         <Col md="auto">
-                            <Button id="new_trial" onClick={() => newTrial(comment, maxFrames)}
+                            <Button id="new_trial"
+                                disabled={recordingSystemStatus !== "Idle"}
+                                onClick={() => newTrial(comment, maxFrames)}
                                 className="btn btn-primary">New Trial</Button>
                         </Col>
                         <Col md="auto">
-                            <Button id="stop" className="btn btn-danger float-right"
+                            <Button id="stop"
+                                className="btn btn-danger float-right"
+                                disabled={recordingSystemStatus === "Idle"}
                                 onClick={() => stopAcquisition()}
                             >Stop</Button>
                         </Col>

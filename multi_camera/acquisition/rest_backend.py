@@ -334,7 +334,6 @@ async def get_configs():
 @api_router.get("/current_config", response_model=str)
 async def get_current_config() -> str:
     state: GlobalState = get_global_state()
-    print("get_current_config state.acquisition", state.acquisition)
 
     config = state.acquisition.config_file
     if config is None:
