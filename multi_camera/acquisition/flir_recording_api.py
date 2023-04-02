@@ -1,4 +1,5 @@
 import PySpin
+import simple_pyspin
 from simple_pyspin import Camera
 import numpy as np
 from tqdm import tqdm
@@ -232,7 +233,7 @@ class FlirRecorder:
         self,
         status_callback: Callable[[str], None] = None,
     ):
-        self.system = PySpin.System.GetInstance()
+        self._get_pyspin_system()
 
         # Set up thread safe semaphore to stop recording from a different thread
         self.stop_recording = threading.Event()
@@ -243,6 +244,11 @@ class FlirRecorder:
         self.config_file = None
         self.status_callback = status_callback
         self.set_status("Uninitialized")
+
+    def _get_pyspin_system(self):
+        # use this to ensure both calls with simple pyspin and locally use the same references
+        simple_pyspin.list_cameras()
+        self.system = simple_pyspin._SYSTEM  # PySpin.System.GetInstance()
 
     def get_acquisition_status(self):
         return self.status
@@ -516,29 +522,25 @@ class FlirRecorder:
         self.stop_recording.set()
 
     async def reset_cameras(self):
-        """
-        Reset all the cameras
-
-        This isn't working very reliably and doesn't reconnect.
-        """
+        """Reset all the cameras and reopen the system"""
 
         self.set_status("Reseting")
         await asyncio.sleep(0.1)  # let the web service update with this message
 
         # store the serial numbers to get and reset
         serials = [c.DeviceSerialNumber for c in self.cams]
+        config_file = self.config_file  # grab this before closing as it is cleared
 
-        print("Closing")
-        # close all the cameras
-        for c in self.cams:
-            c.cam.DeInit()
-            c.close()
-            del c
-        self.cams = []
+        # this releases all the handles to the pyspin system.
+        self.close()
 
         print("Reopening and reseting")
+        ########## working with new, temporary, reference to PySpin system
+        # this seems important for reliability
+
         # find the set of cameras and trigger a reset on them
-        cams = self.system.GetCameras()
+        system = PySpin.System.GetInstance()
+        cams = system.GetCameras()
 
         def reset_cam(s):
             print("Opening and reseting camera", s)
@@ -552,35 +554,36 @@ class FlirRecorder:
             executor.map(reset_cam, serials)
 
         cams.Clear()
+        system.ReleaseInstance()
 
-        # force release of the interface
-        del self.iface
-        self.iface = None
-
-        # for some reason this is required to reenumerate the reset cameras
-        self.system.ReleaseInstance()
+        ########## go back to the original reference to the PySpin system
 
         self.set_status("Reset complete. Waiting to reconfigure.")
         await asyncio.sleep(15)
 
-        for s in serials:
-            print("Reopening", s)
-            cam = Camera(s, lock=True)
-            cam.init()
+        # set up the PySpin system reference again
+        self._get_pyspin_system()
 
-        # running local test
-        self.system = PySpin.System.GetInstance()
-        if self.config_file is not None and self.config_file != "":
-            await self.configure_cameras(self.config_file)
+        if config_file is not None and config_file != "":
+            await self.configure_cameras(config_file)
 
     def close(self):
         for c in self.cams:
             print("Closing camera", c.DeviceSerialNumber)
+            c.cam.DeInit()
             c.close()
+            del c
         self.cams = []
 
-        #    Release the PySpin system
-        self.system.ReleaseInstance()
+        del self.iface
+        self.iface = None
+
+        del self.system
+        self.system = None
+
+        simple_pyspin._SYSTEM.ReleaseInstance()
+        del simple_pyspin._SYSTEM
+        simple_pyspin._SYSTEM = None
 
         self.config_file = None
 
