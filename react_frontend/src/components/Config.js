@@ -4,14 +4,16 @@ import { Row, Col, Form, Button } from "react-bootstrap";
 import { AcquisitionState } from "../AcquisitionApi";
 
 const Config = () => {
-    const { currentConfig, availableConfigs, setCurrentConfig, resetCameras } = useContext(AcquisitionState);
+
+    const { currentConfig, availableConfigs, resetCameras, updateConfig } = useContext(AcquisitionState);
 
     const [validated, setValidated] = useState(false);
 
-    const handleConfigChange = (event) => {
+    const handleConfigChange = async (event) => {
         const value = event.target.value;
         console.log("handleConfigChange: " + value);
-        setCurrentConfig(value);
+        setValidated(false)
+        await updateConfig(value);
         setValidated(true)
         console.log("Validated: " + validated)
     };
