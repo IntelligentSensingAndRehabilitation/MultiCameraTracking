@@ -2,7 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom';
 import { useEffect, useContext, useRef } from "react";
 import { Row, Col, Form } from "react-bootstrap";
-import { AcquisitionState } from "../AcquistionApi";
+import { AcquisitionState } from "../AcquisitionApi";
 
 const RecordingInfo = () => {
     const { recordingDir, recordingFileBase } = useContext(AcquisitionState);

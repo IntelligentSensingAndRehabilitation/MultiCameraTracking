@@ -2,7 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom';
 import { useState, useRef, useEffect, useContext } from "react";
 import { Row, Col, Form, Button } from "react-bootstrap";
-import { AcquisitionState } from "../AcquistionApi";
+import { AcquisitionState } from "../AcquisitionApi";
 
 const Participant = () => {
     const { participant, newSession } = useContext(AcquisitionState);

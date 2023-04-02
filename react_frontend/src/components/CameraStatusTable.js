@@ -1,8 +1,7 @@
 import React, { useContext } from 'react';
 import { Table } from 'react-bootstrap';
 import Accordion from 'react-bootstrap/Accordion';
-
-import { AcquisitionState } from "../AcquistionApi";
+import { AcquisitionState } from "../AcquisitionApi";
 
 const CameraStatusTable = ({ api }) => {
 

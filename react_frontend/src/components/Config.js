@@ -1,7 +1,7 @@
 import React from 'react';
 import { useContext, useState } from "react";
 import { Row, Col, Form, Button } from "react-bootstrap";
-import { AcquisitionState } from "../AcquistionApi";
+import { AcquisitionState } from "../AcquisitionApi";
 
 const Config = () => {
     const { currentConfig, availableConfigs, setCurrentConfig, resetCameras } = useContext(AcquisitionState);
