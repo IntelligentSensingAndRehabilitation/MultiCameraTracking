@@ -4,6 +4,35 @@ import yaml
 
 
 def reset(all_cams=True, config="", verbose=False):
+    if all_cams:
+        import PySpin
+
+        system = PySpin.System.GetInstance()
+
+        cams = system.GetCameras()
+
+        N = cams.GetSize()
+        print(f"Resetting {N} cameras.")
+
+        def reset_cam(i):
+            c = cams[i]
+            c.Init()
+            c.DeviceReset()
+            c.DeInit()
+            print(f"Reset {i}")
+            del c
+
+        import concurrent.futures
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=N) as executor:
+            executor.map(reset_cam, range(N))
+
+        cams.Clear()
+
+        system.ReleaseInstance()
+
+        print("Completed resetting all cameras. Exiting.")
+        return
 
     # Get the available cameras
     camera_list = simple_pyspin.list_cameras()

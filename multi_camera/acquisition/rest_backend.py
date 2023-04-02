@@ -1,8 +1,9 @@
 from fastapi import FastAPI, Depends, Request, APIRouter, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from uvicorn.main import Server
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
+from starlette.concurrency import run_in_threadpool
+from uvicorn.main import Server
 from websockets.exceptions import ConnectionClosedOK
 from datetime import date
 from pydantic import BaseModel
@@ -204,7 +205,7 @@ class PriorRecordings(BaseModel):
 @api_router.get("/camera_status", response_model=List[CameraStatus])
 async def get_camera_status() -> List[CameraStatus]:
     state = get_global_state()
-    camera_status = state.acquisition.get_camera_status()
+    camera_status = await state.acquisition.get_camera_status()
     return camera_status
 
 
@@ -369,14 +370,15 @@ async def get_current_config() -> str:
 async def update_config(config: ConfigFileData):
     print("Received config: ", config.config)
     state: GlobalState = get_global_state()
-    state.acquisition.configure_cameras(os.path.join(CONFIG_PATH, config.config))
+    await state.acquisition.configure_cameras(os.path.join(CONFIG_PATH, config.config))
     return {"status": "success", "config": config.config}
 
 
 @api_router.post("/reset_cameras")
 async def reset_cameras():
     state: GlobalState = get_global_state()
-    state.acquisition.reset_cameras()
+    # await run_in_threadpool(state.acquisition.reset_cameras)
+    await state.acquisition.reset_cameras()
     return {"status": "success"}
 
 
@@ -547,5 +549,6 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=8000,
         reload=True,
-        # log_level="trace",
+        timeout_keep_alive=30,
+        log_level="debug",
     )
