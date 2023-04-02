@@ -114,10 +114,6 @@ export const AquisitionApi = (props) => {
     }, []);
 
     useEffect(() => {
-        updateConfig();
-    }, [currentConfig]);
-
-    useEffect(() => {
         console.log("recordingDir: " + recordingDir);
         console.log("recordingFileBase: " + recordingFileBase);
         console.log("recordingFilename: " + recordingFilename);
@@ -237,13 +233,11 @@ export const AquisitionApi = (props) => {
         setCurrentConfig(response.data);
     };
 
-    const updateConfig = async () => {
-        console.log("updateConfig: ", currentConfig);
-        if (currentConfig) {
-            console.log("Updating config: ", currentConfig);
-            await axios.post(`${API_BASE_URL}/current_config`, { config: currentConfig });
-            fetchCameraStatus();
-        }
+    const updateConfig = async (newConfig) => {
+        console.log("Updating config: ", newConfig);
+        await axios.post(`${API_BASE_URL}/current_config`, { config: newConfig });
+        await fetchCurrentConfig();
+        await fetchCameraStatus();
     };
 
     const resetCameras = async () => {
@@ -274,12 +268,12 @@ export const AquisitionApi = (props) => {
         priorRecordings: priorRecordings,
         videoUrl: `ws://${BASE_URL}/video_ws`,
         recordingSystemStatus: recordingSystemStatus,
-        setCurrentConfig,
         resetCameras,
         newSession,
         newTrial,
         previewVideo,
         calibrationVideo,
+        updateConfig,
         stopAcquisition,
         fetchRecordingDb
     }}> {props.children} </AcquisitionState.Provider >)
