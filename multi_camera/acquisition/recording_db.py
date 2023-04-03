@@ -37,6 +37,7 @@ class Recording(Base):
     comment = Column(String, nullable=True)  # Add comment field
     config_file = Column(String, nullable=True)  # Add config_file field
     should_process = Column(Boolean, default=True)  # Add should_process field with a default value of True
+    timestamp_spread = Column(Integer, nullable=True)  # Add timestamp_spread field
 
     session = relationship("Session", back_populates="recordings")
 
@@ -50,6 +51,7 @@ def add_recording(
     config_file: Optional[str] = None,
     comment: Optional[str] = None,
     should_process: Optional[bool] = True,
+    timestamp_spread: Optional[int] = None,
 ):
     print(
         "Adding recording to database: ",
@@ -60,6 +62,7 @@ def add_recording(
         comment,
         config_file,
         should_process,
+        timestamp_spread,
     )
 
     # if date is a string, convert to a python date type
@@ -91,6 +94,7 @@ def add_recording(
         comment=comment,
         config_file=config_file,
         should_process=should_process,
+        timestamp_spread=timestamp_spread,
     )
     db.add(new_recording)
     db.commit()
@@ -106,6 +110,7 @@ class RecordingOut(BaseModel):
     comment: Optional[str]
     config_file: Optional[str]
     should_process: bool
+    timestamp_spread: Optional[float]
 
 
 class SessionOut(BaseModel):

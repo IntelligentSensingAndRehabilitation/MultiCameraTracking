@@ -430,6 +430,8 @@ class FlirRecorder:
         self.iface.TLInterface.GevActionDeviceKey.SetValue(0)
         self.iface.TLInterface.ActionCommand()
 
+        all_timestamps = []
+
         for _ in tqdm(range(max_frames)):
             # Use thread safe checking of semaphore to determine whether to stop recording
             if self.stop_recording.is_set():
@@ -443,9 +445,15 @@ class FlirRecorder:
             real_times = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
             size_flag = 0
             real_time_images = []
+
+            frame_timestamps = {"real_times": real_times}
+
             for c in self.cams:
                 im_ref = c.get_image()
                 timestamps = im_ref.GetTimeStamp()
+
+                # store camera timestamps
+                frame_timestamps[c.DeviceSerialNumber] = timestamps
 
                 # get the data array
                 # Using try/except to handle frame tearing
@@ -467,6 +475,8 @@ class FlirRecorder:
                     {"im": im, "real_times": real_times, "timestamps": timestamps}
                 )
 
+            all_timestamps.append(frame_timestamps)
+
             if self.preview_callback:
                 self.preview_callback(real_time_images)
 
@@ -476,48 +486,51 @@ class FlirRecorder:
         for c in self.cams:
             c.stop()
 
+        # Creating a dictionary to hold the contents of each camera's json queue
+        output_json = {}
+        all_json = {}
+
+        # convert list of dicts to dict of lists
+        all_timestamps = {k: [dic[k] for dic in all_timestamps] for k in all_timestamps[0]}
+
+        output_json["real_times"] = all_timestamps.pop("real_times")
+        output_json["serials"] = []  # list(all_timestamps.keys())
+        output_json["timestamps"] = []  # all_timestamps
+        for k, v in all_timestamps.items():
+            output_json["serials"].append(k)
+            output_json["timestamps"].append(v)
+        output_json["timestamps"] = np.array(output_json["timestamps"]).T.tolist()
+        print(np.array(output_json["timestamps"]).shape)
+
+        if self.camera_config != "":
+            output_json["meta_info"] = self.camera_config["meta-info"]
+            output_json["camera_info"] = self.camera_config["camera-info"]
+
         if self.video_base_file is not None:
+            # stop video writing threads and output json file
+
             # to allow each queue to be processed before moving on
             for c in self.cams:
                 self.image_queue_dict[c.DeviceSerialNumber].put(None)
                 self.image_queue_dict[c.DeviceSerialNumber].join()
 
-            # Creating a dictionary to hold the contents of each camera's json queue
-            output_json = {}
-            all_json = {}
-
-            for j in json_queue:
-                real_times = json_queue[j].queue[0]["real_times"]
-
-                all_json[json_queue[j].queue[0]["serial"]] = json_queue[j].queue[0]
-
             # defining the filename for the json file
             json_file = os.path.splitext(self.video_base_file)[0] + ".json"
-
-            # combining the json information from each camera's queue
-            all_serials = [all_json[key]["serial"] for key in all_json]
-            all_timestamps = [all_json[key]["timestamps"] for key in all_json]
-
-            output_json["serials"] = all_serials
-            output_json["timestamps"] = [list(t) for t in zip(*all_timestamps)]
-            output_json["real_times"] = real_times
-
-            if self.camera_config != "":
-                output_json["meta_info"] = self.camera_config["meta-info"]
-                output_json["camera_info"] = self.camera_config["camera-info"]
 
             # writing the json file for the current recording session
             json.dump(output_json, open(json_file, "w"))
 
-            ts = np.array(output_json["timestamps"])
-            dt = (ts - ts[0, 0]) / 1e9
-            spread = np.max(dt, axis=1) - np.min(dt, axis=1)
-            if np.all(spread < 1e-6):
-                print("Timestamps well aligned and clean")
-            else:
-                print(f"Timestamps showed a maximum spread of {np.max(spread) * 1000} ms")
+        ts = np.array(output_json["timestamps"])
+        dt = (ts - ts[0, 0]) / 1e9
+        spread = np.max(dt, axis=1) - np.min(dt, axis=1)
+        if np.all(spread < 1e-6):
+            print("Timestamps well aligned and clean")
+        else:
+            print(f"Timestamps showed a maximum spread of {np.max(spread) * 1000} ms")
 
         self.set_status("Idle")
+
+        return {"timestamp_spread": np.max(spread) * 1000}
 
     def stop_acquisition(self):
         self.stop_recording.set()
