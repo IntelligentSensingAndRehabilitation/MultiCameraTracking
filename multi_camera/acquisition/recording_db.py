@@ -166,6 +166,28 @@ def get_recordings(
     return participant_out_list
 
 
+def modify_recording_entry(db: Session, participant: ParticipantOut, updated_recording: RecordingOut):
+    # find the recording entry that matches by participant and file name and update the other fields
+
+    query = db.query(Recording).join(Session).join(Participant)
+
+    # first filter by participant name
+    query = query.filter(Participant.name == participant.name)
+
+    # then filter by filename
+    query = query.filter(Recording.filename == updated_recording.filename)
+
+    # get the recording entry
+    recording = query.first()
+
+    # now update the comment and should process fields
+    recording.comment = updated_recording.comment
+    recording.should_process = updated_recording.should_process
+
+    # commit the changes
+    db.commit()
+
+
 def get_db():
     from sqlalchemy.orm import Session, sessionmaker
 

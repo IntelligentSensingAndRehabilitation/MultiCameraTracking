@@ -246,6 +246,37 @@ export const AquisitionApi = (props) => {
         fetchCameraStatus();
     };
 
+    /* Code for editing recording database */
+
+    const getMatchingPriorRecordings = (participant, filename) => {
+        const matched = priorRecordings.filter((recording) => {
+            return recording.participant === participant && recording.filename === filename;
+        });
+        // Check there is only one matching recording and return that
+        if (matched.length === 1) {
+            return matched[0];
+        }
+        else {
+            return null;
+        }
+    }
+
+    const toggleProcess = async (participant, filename, isChecked) => {
+        console.log(`Should process changed for ${participant} ${filename}: ${isChecked}`);
+        const matchedRecording = getMatchingPriorRecordings(participant, filename);
+        matchedRecording.should_process = isChecked;
+        await axios.post(`${API_BASE_URL}/update_recording`, matchedRecording);
+        fetchRecordings();
+    }
+
+    const changeComment = async (participant, filename, newComment) => {
+        console.log(`Comment changed for ${participant} ${filename}: ${newComment}`);
+        const matchedRecording = getMatchingPriorRecordings(participant, filename);
+        matchedRecording.comment = newComment;
+        await axios.post(`${API_BASE_URL}/update_recording`, matchedRecording);
+        fetchRecordings();
+    };
+
     useEffect(() => {
         //Implementing the setInterval method
         //const interval = setInterval(() => {
@@ -276,7 +307,9 @@ export const AquisitionApi = (props) => {
         updateConfig,
         stopAcquisition,
         setRecordingFileBase,
-        fetchRecordingDb
+        fetchRecordingDb,
+        toggleProcess,
+        changeComment
     }}> {props.children} </AcquisitionState.Provider >)
     //return (<div> {children} </div>)
 };
