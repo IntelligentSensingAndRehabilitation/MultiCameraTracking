@@ -8,7 +8,7 @@ from websockets.exceptions import ConnectionClosedOK
 from datetime import date
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
-from typing import List
+from typing import List, Dict
 from dataclasses import dataclass, field
 import numpy as np
 import logging
@@ -23,6 +23,7 @@ from multi_camera.acquisition.recording_db import (
     get_db,
     add_recording,
     get_recordings,
+    modify_recording_entry,
     ParticipantOut,
     SessionOut,
     RecordingOut,
@@ -356,6 +357,23 @@ async def get_prior_recordings(db=Depends(db_dependency)) -> List[PriorRecording
     return prior_recordings
 
 
+@api_router.post("/update_recording")
+async def update_recording(recording: PriorRecordings, db=Depends(db_dependency)):
+    print("Updating recording: ", recording)
+
+    participant = ParticipantOut(name=recording.participant, sessions=[])
+    recording = RecordingOut(
+        filename=recording.filename,
+        comment=recording.comment,
+        should_process=recording.should_process,
+        timestamp_spread=recording.timestamp_spread,
+    )
+
+    modify_recording_entry(db, participant, recording)
+
+    return {}
+
+
 @api_router.get("/recording_db", response_model=List[ParticipantOut])
 async def get_recording_db(db=Depends(db_dependency)) -> List[ParticipantOut]:
     return get_recordings(db)
@@ -554,6 +572,23 @@ async def video_websocket_endpoint(websocket: WebSocket):
 
 app.include_router(api_router)
 
+
+def register_exception(app: FastAPI):
+    from fastapi import Request, status
+    from fastapi.exceptions import RequestValidationError
+    from fastapi.responses import JSONResponse
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(request: Request, exc: RequestValidationError):
+        exc_str = f"{exc}".replace("\n", " ").replace("   ", " ")
+        # or logger.error(f'{exc}')
+        # logger.error(request, exc_str)
+        print(request, exc_str)
+        content = {"status_code": 10422, "message": exc_str, "data": None}
+        return JSONResponse(content=content, status_code=status.HTTP_422_UNPROCESSABLE_ENTITY)
+
+
+register_exception(app)
 
 if __name__ == "__main__":
     import uvicorn
