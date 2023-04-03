@@ -1,8 +1,8 @@
-from sqlalchemy import create_engine, Boolean, Column, Integer, String, Date, ForeignKey
+from sqlalchemy import create_engine, Boolean, Column, Integer, String, Date, DateTime, ForeignKey
 from sqlalchemy.orm import relationship, declarative_base, joinedload
 from typing import Union, Tuple, List, Optional
 from pydantic import BaseModel
-from datetime import date
+from datetime import date, datetime
 
 Base = declarative_base()
 
@@ -34,6 +34,7 @@ class Recording(Base):
     id = Column(Integer, primary_key=True, index=True)
     session_id = Column(Integer, ForeignKey("sessions.id"))
     filename = Column(String)
+    recording_timestamp = Column(DateTime)  # Add recording_timestamp field
     comment = Column(String, nullable=True)  # Add comment field
     config_file = Column(String, nullable=True)  # Add config_file field
     should_process = Column(Boolean, default=True)  # Add should_process field with a default value of True
@@ -48,6 +49,7 @@ def add_recording(
     session_date: Date,
     session_path: str,
     filename: str,
+    recording_timestamp: DateTime,
     config_file: Optional[str] = None,
     comment: Optional[str] = None,
     should_process: Optional[bool] = True,
@@ -59,6 +61,7 @@ def add_recording(
         session_date,
         session_path,
         filename,
+        recording_timestamp,
         comment,
         config_file,
         should_process,
@@ -91,6 +94,7 @@ def add_recording(
     new_recording = Recording(
         session_id=session.id,
         filename=filename,
+        recording_timestamp=recording_timestamp,
         comment=comment,
         config_file=config_file,
         should_process=should_process,
@@ -107,6 +111,7 @@ def add_recording(
 
 class RecordingOut(BaseModel):
     filename: str
+    recording_timestamp: datetime
     comment: Optional[str]
     config_file: Optional[str]
     should_process: bool

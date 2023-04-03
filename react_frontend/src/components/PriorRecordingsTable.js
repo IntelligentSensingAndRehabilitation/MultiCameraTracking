@@ -1,5 +1,5 @@
 import React, { useContext } from 'react';
-import { Table, ToggleButton, Accordion, Form } from 'react-bootstrap';
+import { Table, Accordion, Form } from 'react-bootstrap';
 import { AcquisitionState } from "../AcquisitionApi";
 
 const PriorRecordingsTable = ({ api }) => {
@@ -14,6 +14,13 @@ const PriorRecordingsTable = ({ api }) => {
         }
     };
 
+    const sortedRecordings = priorRecordings.sort((a, b) => new Date(a.recording_timestamp) - new Date(b.recording_timestamp)).reverse();
+
+    const formatTimestamp = (timestamp) => {
+        const date = new Date(timestamp);
+        return new Intl.DateTimeFormat('en', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(date).replace(',', '');
+    };
+
     return (
         <Accordion defaultActiveKey="0" className="g-4 p-2" >
             <Accordion.Item eventKey="0">
@@ -25,6 +32,7 @@ const PriorRecordingsTable = ({ api }) => {
                             <tr>
                                 <th>Participant</th>
                                 <th>Filename</th>
+                                <th>Timestamp</th>
                                 <th>Comment</th>
                                 {/* <th>Config</th> */}
                                 <th>Timestamp Spread</th>
@@ -32,10 +40,11 @@ const PriorRecordingsTable = ({ api }) => {
                             </tr>
                         </thead>
                         <tbody>
-                            {priorRecordings.map((recording) => (
+                            {sortedRecordings.map((recording) => (
                                 <tr key={recording.filename}>
                                     <td>{recording.participant}</td>
                                     <td>{recording.filename}</td>
+                                    <td>{formatTimestamp(recording.recording_timestamp)}</td>
                                     <td
                                         contentEditable
                                         suppressContentEditableWarning
