@@ -19,6 +19,7 @@ const PriorRecordingsTable = ({ api }) => {
                                 <th>Filename</th>
                                 <th>Comment</th>
                                 {/* <th>Config</th> */}
+                                <th>Timestamp Spread</th>
                                 <th>Process</th>
                             </tr>
                         </thead>
@@ -29,6 +30,8 @@ const PriorRecordingsTable = ({ api }) => {
                                     <td>{recording.filename}</td>
                                     <td>{recording.comment}</td>
                                     {/* <td>{recording.config_file}</td> */}
+                                    {/* round recording.timestamp_spread to 2 decimal places */}
+                                    <td>{recording.timestamp_spread.toFixed(2)}</td>
                                     <td>
 
                                         <ToggleButton

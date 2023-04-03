@@ -200,6 +200,7 @@ class PriorRecordings(BaseModel):
     comment: str
     config_file: str
     should_process: bool
+    timestamp_spread: float
 
 
 @api_router.get("/camera_status", response_model=List[CameraStatus])
@@ -267,26 +268,37 @@ async def new_trial(data: NewTrialData, db: Session = Depends(db_dependency)):
         loop.create_task(receive_frames(frames))
 
     # run acquisition in a separate thread
-    import threading
-    from functools import partial
-
-    start_acquisition = partial(
+    acquisition_coroutine = run_in_threadpool(
         state.acquisition.start_acquisition,
         recording_path=recording_path,
         preview_callback=receive_frames_wrapper,
         max_frames=max_frames,
     )
-    threading.Thread(target=start_acquisition).start()
+    task = asyncio.create_task(acquisition_coroutine)
 
-    add_recording(
-        db,
-        participant_name=current_session.participant_name,
-        session_date=current_session.session_date,
-        session_path=current_session.recording_path,
-        filename=recording_path,
-        config_file=await get_current_config(),
-        comment=comment,
-    )
+    config = await get_current_config()
+
+    def task_done_callback(task):
+        print("Task completed.")
+        # You can retrieve the result (or exception) of the task using `result()` method.
+        try:
+            result = task.result()
+            print(f"Task result: {result}")
+
+            add_recording(
+                db,
+                participant_name=current_session.participant_name,
+                session_date=current_session.session_date,
+                session_path=current_session.recording_path,
+                filename=recording_path,
+                config_file=config,
+                comment=comment,
+                timestamp_spread=result["timestamp_spread"],
+            )
+        except Exception as e:
+            print(f"Task raised an exception: {e}")
+
+    task.add_done_callback(task_done_callback)
 
     return {"recording_file_name": recording_path}
 
@@ -301,8 +313,7 @@ async def preview():
     from functools import partial
 
     state: GlobalState = get_global_state()
-    start_acquisition = partial(state.acquisition.start_acquisition, preview_callback=receive_frames_wrapper)
-    threading.Thread(target=start_acquisition).start()
+    await run_in_threadpool(state.acquisition.start_acquisition, preview_callback=receive_frames_wrapper)
 
     return {}
 
@@ -336,6 +347,7 @@ async def get_prior_recordings(db=Depends(db_dependency)) -> List[PriorRecording
                         comment=recording.comment,
                         config_file=recording.config_file,
                         should_process=recording.should_process,
+                        timestamp_spread=recording.timestamp_spread,
                     )
                 )
 
@@ -553,5 +565,5 @@ if __name__ == "__main__":
         port=8000,
         reload=True,
         timeout_keep_alive=30,
-        log_level="debug",
+        # log_level="debug",
     )
