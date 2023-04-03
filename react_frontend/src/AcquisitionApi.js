@@ -20,7 +20,7 @@ export const useEffectOnce = (effect) => {
     const destroyFunc = useRef();
     const effectCalled = useRef(false);
     const renderAfterCalled = useRef(false);
-    const [val, setVal] = useState(0);
+    const [, setVal] = useState(0);
 
     if (effectCalled.current) {
         renderAfterCalled.current = true;

@@ -443,7 +443,6 @@ class FlirRecorder:
             # for each camera, get the current frame and assign it to
             # the corresponding camera
             real_times = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-            size_flag = 0
             real_time_images = []
 
             frame_timestamps = {"real_times": real_times}
@@ -488,7 +487,6 @@ class FlirRecorder:
 
         # Creating a dictionary to hold the contents of each camera's json queue
         output_json = {}
-        all_json = {}
 
         # convert list of dicts to dict of lists
         all_timestamps = {k: [dic[k] for dic in all_timestamps] for k in all_timestamps[0]}
@@ -530,7 +528,7 @@ class FlirRecorder:
 
         self.set_status("Idle")
 
-        return {"timestamp_spread": np.max(spread) * 1000}
+        return {"timestamp_spread": np.max(spread) * 1000, "recording_timestamp": output_json["real_times"][0]}
 
     def stop_acquisition(self):
         self.stop_recording.set()

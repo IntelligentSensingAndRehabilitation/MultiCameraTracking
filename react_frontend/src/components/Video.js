@@ -1,5 +1,5 @@
 import React from 'react';
-import { useState, useEffect, useContext, useRef } from "react";
+import { useState, useContext, useRef } from "react";
 import { Row, Image } from "react-bootstrap";
 import Accordion from 'react-bootstrap/Accordion';
 import { AcquisitionState, useEffectOnce } from "../AcquisitionApi";

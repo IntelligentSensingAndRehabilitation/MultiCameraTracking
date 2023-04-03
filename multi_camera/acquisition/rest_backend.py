@@ -198,6 +198,7 @@ class ConfigFileData(BaseModel):
 class PriorRecordings(BaseModel):
     participant: str
     filename: str
+    recording_timestamp: datetime.datetime
     comment: str
     config_file: str
     should_process: bool
@@ -292,6 +293,7 @@ async def new_trial(data: NewTrialData, db: Session = Depends(db_dependency)):
                 session_date=current_session.session_date,
                 session_path=current_session.recording_path,
                 filename=recording_path,
+                recording_timestamp=now,
                 config_file=config,
                 comment=comment,
                 timestamp_spread=result["timestamp_spread"],
@@ -345,6 +347,7 @@ async def get_prior_recordings(db=Depends(db_dependency)) -> List[PriorRecording
                     PriorRecordings(
                         participant=participant.name,
                         filename=recording.filename,
+                        recording_timestamp=recording.recording_timestamp,
                         comment=recording.comment,
                         config_file=recording.config_file,
                         should_process=recording.should_process,
@@ -364,6 +367,7 @@ async def update_recording(recording: PriorRecordings, db=Depends(db_dependency)
     participant = ParticipantOut(name=recording.participant, sessions=[])
     recording = RecordingOut(
         filename=recording.filename,
+        recording_timestamp=recording.recording_timestamp,
         comment=recording.comment,
         should_process=recording.should_process,
         timestamp_spread=recording.timestamp_spread,
@@ -477,6 +481,10 @@ async def receive_frames(frames):
     if not state.preview_queue.empty():
         # If the queue is not empty, then we are not keeping up with the frames
         # logger.warn("Dropping frame")
+        return
+
+    if frames is None:
+        print("Received empty frame")
         return
 
     num_frames = len(frames)
