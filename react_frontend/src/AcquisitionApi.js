@@ -275,6 +275,7 @@ export const AquisitionApi = (props) => {
         calibrationVideo,
         updateConfig,
         stopAcquisition,
+        setRecordingFileBase,
         fetchRecordingDb
     }}> {props.children} </AcquisitionState.Provider >)
     //return (<div> {children} </div>)
