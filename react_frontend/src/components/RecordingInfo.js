@@ -5,7 +5,7 @@ import { Row, Col, Form } from "react-bootstrap";
 import { AcquisitionState } from "../AcquisitionApi";
 
 const RecordingInfo = () => {
-    const { recordingDir, recordingFileBase } = useContext(AcquisitionState);
+    const { recordingDir, recordingFileBase, setRecordingFileBase } = useContext(AcquisitionState);
 
     const recordingDirRef = useRef(null);
     const recordingBaseRef = useRef(null);
@@ -42,6 +42,7 @@ const RecordingInfo = () => {
                             type="text"
                             placeholder="Base Filename"
                             defaultValue={recordingFileBase}
+                            onChange={(e) => setRecordingFileBase(e.target.value)}
                         >
                         </Form.Control>
                     </Col>
