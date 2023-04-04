@@ -12,7 +12,20 @@ const RecordingControl = () => {
 
     return (
         <div >
-            <Form className="g-4 p-2 border">
+
+            {/* Set the form css background-color to green while recordingSystemStatus === "Recording"*/}
+            <style type="text/css">
+                {`
+                .form-recording {
+                    background-color: purple;
+                    color: white; 
+                }`
+                }
+
+            </style>
+
+            {/* Set the form color green while recordingSystemStatus === "Recording"*/}
+            <Form className={recordingSystemStatus === "Recording" ? "g-4 p-2 border bg-warning" : "g-4 p-2 border"}>
 
                 <Container>
                     <Row className="justify-content-md-left">
