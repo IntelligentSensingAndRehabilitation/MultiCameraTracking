@@ -115,7 +115,7 @@ DEFAULT_CONFIG = os.path.join(CONFIG_PATH, "cotton_lab_config_20221109.yaml")
 loop = asyncio.get_event_loop()
 
 
-def receive_status(status):
+def receive_status(status, progress=None):
     """
     Receive status updates from the acquisition system
 
@@ -124,10 +124,14 @@ def receive_status(status):
     global_state = get_global_state()
     global_state.recording_status = status
 
-    acquisition_logger.info(f"Status: {status}")
+    update = {"status": status}
+    if progress is not None:
+        update["progress"] = progress
+    else:
+        acquisition_logger.info(f"Status: {status}")
 
     # Put the status in the queue using asyncio from a synchronous function
-    loop.create_task(manager.broadcast({"status": status}))
+    loop.create_task(manager.broadcast(update))
 
 
 @asynccontextmanager

@@ -57,6 +57,7 @@ export const AquisitionApi = (props) => {
     const [recordingDir, setRecordingDir] = useState('');
     const [recordingFileBase, setRecordingFileBase] = useState('');
     const [recordingFilename, setRecordingFilename] = useState('');
+    const [recordingProgress, setRecordingProgress] = useState('');
 
     useEffect(() => {
         // axios.interceptors.request.use(request => {
@@ -87,6 +88,12 @@ export const AquisitionApi = (props) => {
             const data = JSON.parse(event.data);
             console.log("WebSocket message received", data);
             setRecordingSystemStatus(data.status);
+
+            // if there is a progress field, then update the progress bar
+            if (data.progress) {
+                // Compute progress as percentage and take ceiling to nearest integer
+                setRecordingProgress(Math.ceil(data.progress * 100));
+            }
         };
 
         socket.onclose = (event) => {
@@ -169,6 +176,7 @@ export const AquisitionApi = (props) => {
 
             const data = response.data;
             console.log(data);
+            setRecordingProgress(0);
             setRecordingFilename(data.recording_file_name);
         }
     }
@@ -186,12 +194,14 @@ export const AquisitionApi = (props) => {
 
             const data = response.data;
             console.log(data);
+            setRecordingProgress(0);
             setRecordingFilename(data.recording_file_name);
         }
     }
 
     async function previewVideo(max_frames) {
         await axios.post(`${API_BASE_URL}/preview`);
+        setRecordingProgress(0);
     }
 
     async function stopAcquisition() {
@@ -299,6 +309,7 @@ export const AquisitionApi = (props) => {
         priorRecordings: priorRecordings,
         videoUrl: `ws://${BASE_URL}/video_ws`,
         recordingSystemStatus: recordingSystemStatus,
+        recordingProgress: recordingProgress,
         resetCameras,
         newSession,
         newTrial,
