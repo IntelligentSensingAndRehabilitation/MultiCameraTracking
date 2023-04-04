@@ -260,6 +260,10 @@ class FlirRecorder:
         if self.status_callback is not None:
             self.status_callback(status)
 
+    def set_progress(self, progress):
+        if self.status_callback is not None:
+            self.status_callback(self.status, progress=progress)
+
     async def synchronize_cameras(self):
         if not all([c.GevIEEE1588 for c in self.cams]):
             self.set_status("Synchronizing")
@@ -432,12 +436,14 @@ class FlirRecorder:
 
         all_timestamps = []
 
-        for _ in tqdm(range(max_frames)):
+        for frame_idx in tqdm(range(max_frames)):
             # Use thread safe checking of semaphore to determine whether to stop recording
             if self.stop_recording.is_set():
                 self.stop_recording.clear()
                 print("Stopping recording")
                 break
+
+            self.set_progress(frame_idx / max_frames)
 
             # get the image raw data
             # for each camera, get the current frame and assign it to

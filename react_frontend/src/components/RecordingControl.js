@@ -1,11 +1,11 @@
 import React from 'react';
 import { useContext, useState } from "react";
-import { Container, Row, Col, Form, Button } from "react-bootstrap";
+import { Container, Row, Col, Form, Button, ProgressBar } from "react-bootstrap";
 import { AcquisitionState } from "../AcquisitionApi";
 import Spinner from 'react-bootstrap/Spinner';
 
 const RecordingControl = () => {
-    const { newTrial, recordingFilename, recordingSystemStatus, calibrationVideo, previewVideo, stopAcquisition } = useContext(AcquisitionState);
+    const { newTrial, recordingFilename, recordingProgress, recordingSystemStatus, calibrationVideo, previewVideo, stopAcquisition } = useContext(AcquisitionState);
 
     const [comment, setComment] = useState("");
     const [maxFrames, setMaxFrames] = useState(1000);
@@ -79,6 +79,18 @@ const RecordingControl = () => {
                     </Col>
                 </Row>
 
+
+                <Row className="p-2">
+                    <Col sm={3}>
+                        <Form.Label >Recording Progress:</Form.Label>
+                    </Col>
+                    <Col>
+                        {/* Only show progress bar if status is recording */}
+                        {recordingSystemStatus !== "Recording" ? null :
+                            <ProgressBar now={recordingProgress} label={`${recordingProgress}%`} />
+                        }
+                    </Col>
+                </Row>
             </Form>
         </div >
     );
