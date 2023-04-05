@@ -145,6 +145,8 @@ def record_dual(vid_file, max_frames=100, num_cams=4, preview=True, resize=0.5, 
         # c.BinningHorizontal = 1
         # c.BinningVertical = 1
 
+        c.ExposureAuto = "Off"
+
         if False:
             c.GainAuto = "Continuous"
             c.ExposureAuto = "Continuous"
@@ -169,6 +171,9 @@ def record_dual(vid_file, max_frames=100, num_cams=4, preview=True, resize=0.5, 
         c.TriggerSelector = "AcquisitionStart"  # Need to select AcquisitionStart for real time clock
         c.TriggerSource = "Action0"
         c.TriggerMode = "On"
+
+        # NOTE: Blackfly and Flea3 GEV cameras need 1 second delay after trigger mode is turned on
+        time.sleep(1)
 
         # Initializing an image queue for each camera
         image_queue_dict[c.DeviceSerialNumber] = Queue(max_frames)

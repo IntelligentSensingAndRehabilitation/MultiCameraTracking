@@ -10,6 +10,7 @@ def reset(all_cams=True, config="", verbose=False):
     cams = [Camera(i, lock=True) for i in range(camera_list.GetSize())]
 
     if verbose:
+        print(f"Total cams: {len(cams)}")
         print(f"List of cams: {cams}")
 
     # Check if either flag has been provided (config or all cams)
@@ -24,7 +25,7 @@ def reset(all_cams=True, config="", verbose=False):
         # Reset all available cameras
         print(f"No config file passed. Resetting {len(cams)} discovered cameras.")
 
-    for c in cams:
+    for i, c in enumerate(cams):
         c.init()
 
         # check if the current camera is in the list defined by config
@@ -35,7 +36,7 @@ def reset(all_cams=True, config="", verbose=False):
                 continue
 
         c.DeviceReset()
-        print(f"Reset {c.DeviceSerialNumber}")
+        print(f"Reset {(i+1):02d}) {c.DeviceSerialNumber}")
 
 
 if __name__ == "__main__":

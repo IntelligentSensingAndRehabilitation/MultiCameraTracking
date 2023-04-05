@@ -55,6 +55,12 @@ cam_df['unique_vals'] = cam_df.nunique(axis=1)
 diff_val_df = cam_df[cam_df.unique_vals > 1]
 
 print(cam_df)
+
+import time
+current_time = time.strftime('%Y%m%d_%H%M%S')
+cam_df.to_csv(f'all_cam_settings_{current_time}.csv')
+diff_val_df.to_csv(f'diff_cam_settings_{current_time}.csv')
+
 # # Set up acquisition parameters
 # num_buffers = 10
 # packet_size_list = []
