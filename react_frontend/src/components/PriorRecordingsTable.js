@@ -1,6 +1,9 @@
 import React, { useContext } from 'react';
 import { Table, Accordion, Form } from 'react-bootstrap';
+import path from 'path-browserify';
 import { AcquisitionState } from "../AcquisitionApi";
+
+const stripPath = (filePath) => path.basename(filePath);
 
 const PriorRecordingsTable = ({ api }) => {
 
@@ -43,7 +46,7 @@ const PriorRecordingsTable = ({ api }) => {
                             {sortedRecordings.map((recording) => (
                                 <tr key={recording.filename}>
                                     <td>{recording.participant}</td>
-                                    <td>{recording.filename}</td>
+                                    <td>{stripPath(recording.filename)}</td>
                                     <td>{formatTimestamp(recording.recording_timestamp)}</td>
                                     <td
                                         contentEditable

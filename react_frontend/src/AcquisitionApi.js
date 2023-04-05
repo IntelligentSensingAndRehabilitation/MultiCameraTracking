@@ -258,7 +258,7 @@ export const AquisitionApi = (props) => {
 
     /* Code for editing recording database */
 
-    const getMatchingPriorRecordings = (participant, filename) => {
+    const getMatchingPriorRecordings = async (participant, filename) => {
         const matched = priorRecordings.filter((recording) => {
             return recording.participant === participant && recording.filename === filename;
         });
@@ -267,13 +267,44 @@ export const AquisitionApi = (props) => {
             return matched[0];
         }
         else {
+            // When querying the non-active session, then need to get the whole DB
+            // to search through
+
+            const recordingDb = await fetchRecordingDb();
+
+            // get the list of sessions that match this participant
+            const participant_sessions = recordingDb.filter((session) => {
+                console.log("session.participant: ", session);
+                return session.name === participant;
+            })[0].sessions;
+
+            // find the recording within the list of sessions that matches the filename
+            for (let session of participant_sessions) {
+
+                const matchedRecording = session.recordings.filter((recording) => {
+                    return recording.filename === filename;
+                });
+                if (matchedRecording.length === 1) {
+                    const prior_recording = {
+                        participant: participant,
+                        filename: filename,
+                        recording_timestamp: matchedRecording[0].recording_timestamp,
+                        comment: matchedRecording[0].comment,
+                        config_file: matchedRecording[0].config_file,
+                        should_process: matchedRecording[0].should_process,
+                        timestamp_spread: matchedRecording[0].timestamp_spread
+                    }
+                    console.log("prior_recording: ", prior_recording)
+                    return prior_recording;
+                }
+            }
             return null;
         }
     }
 
     const toggleProcess = async (participant, filename, isChecked) => {
         console.log(`Should process changed for ${participant} ${filename}: ${isChecked}`);
-        const matchedRecording = getMatchingPriorRecordings(participant, filename);
+        const matchedRecording = await getMatchingPriorRecordings(participant, filename);
         matchedRecording.should_process = isChecked;
         await axios.post(`${API_BASE_URL}/update_recording`, matchedRecording);
         fetchRecordings();
@@ -286,6 +317,12 @@ export const AquisitionApi = (props) => {
         await axios.post(`${API_BASE_URL}/update_recording`, matchedRecording);
         fetchRecordings();
     };
+
+    const runCalibration = async (participant, filename) => {
+        console.log(`Calibration running for ${participant} ${filename}`);
+        const matchedRecording = await getMatchingPriorRecordings(participant, filename);
+        await axios.post(`${API_BASE_URL}/calibrate`, matchedRecording);
+    }
 
     useEffect(() => {
         //Implementing the setInterval method
@@ -320,7 +357,8 @@ export const AquisitionApi = (props) => {
         setRecordingFileBase,
         fetchRecordingDb,
         toggleProcess,
-        changeComment
+        changeComment,
+        runCalibration
     }}> {props.children} </AcquisitionState.Provider >)
     //return (<div> {children} </div>)
 };
