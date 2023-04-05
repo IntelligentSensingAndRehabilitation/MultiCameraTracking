@@ -26,17 +26,21 @@ def reset(all_cams=True, config="", verbose=False):
         print(f"No config file passed. Resetting {len(cams)} discovered cameras.")
 
     for i, c in enumerate(cams):
-        c.init()
+        try:
+            c.init()
 
-        # check if the current camera is in the list defined by config
-        if config != "":
-            if int(c.DeviceSerialNumber) not in camera_config["camera-info"].keys():
-                if verbose:
-                    print(f"{c.DeviceSerialNumber} not listed in config file.")
-                continue
+            # check if the current camera is in the list defined by config
+            if config != "":
+                if int(c.DeviceSerialNumber) not in camera_config["camera-info"].keys():
+                    if verbose:
+                        print(f"{c.DeviceSerialNumber} not listed in config file.")
+                    continue
 
-        c.DeviceReset()
-        print(f"Reset {(i+1):02d}) {c.DeviceSerialNumber}")
+            c.DeviceReset()
+            print(f"Reset {(i+1):02d}) {c.DeviceSerialNumber}")
+            del c
+        except Exception as E:
+            print(E)
 
 
 if __name__ == "__main__":
