@@ -145,7 +145,12 @@ def record_dual(vid_file, max_frames=100, num_cams=4, preview=True, resize=0.5, 
         # c.BinningHorizontal = 1
         # c.BinningVertical = 1
 
-        c.ExposureAuto = "Off"
+        print(f"Before: {c.DeviceSerialNumber}: {c.ExposureTime_FloatVal}")
+
+        c.ExposureAuto = "Continuous"
+        # c.ExposureTime = 15000
+        c.AcquisitionMode = "MultiFrame"
+        c.AcquisitionFrameCount = max_frames
 
         if False:
             c.GainAuto = "Continuous"
@@ -171,8 +176,12 @@ def record_dual(vid_file, max_frames=100, num_cams=4, preview=True, resize=0.5, 
         c.TriggerSelector = "AcquisitionStart"  # Need to select AcquisitionStart for real time clock
         c.TriggerSource = "Action0"
         c.TriggerMode = "On"
+        trg_delay = 15000 - c.ExposureTime_FloatVal
+        if trg_delay < 24.:
+            trg_delay = 24.
+        c.TriggerDelay = trg_delay
 
-        # NOTE: Blackfly and Flea3 GEV cameras need 1 second delay after trigger mode is turned on
+        print("sleep after turning on trigger")
         time.sleep(1)
 
         # Initializing an image queue for each camera
@@ -189,6 +198,8 @@ def record_dual(vid_file, max_frames=100, num_cams=4, preview=True, resize=0.5, 
             c.HeightMax,
             c.BinningHorizontal,
             c.BinningVertical,
+            c.ExposureTime_FloatVal,
+            c.TriggerDelay,
         )
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(cams)) as executor:
@@ -480,7 +491,7 @@ def record_dual(vid_file, max_frames=100, num_cams=4, preview=True, resize=0.5, 
     else:
         print(f"Timestamps showed a maximum spread of {np.max(spread) * 1000} ms")
 
-    return np.max(spread) * 1000
+    return (np.max(spread) * 1000, np.argmax(dt,axis=1),np.argmin(dt,axis=1))
 
 
 if __name__ == "__main__":
