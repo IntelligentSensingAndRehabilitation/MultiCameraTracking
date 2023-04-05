@@ -382,6 +382,25 @@ async def update_recording(recording: PriorRecordings, db=Depends(db_dependency)
     return {}
 
 
+@api_router.post("/calibrate")
+async def update_recording(recording: PriorRecordings, db=Depends(db_dependency)):
+    from multi_camera.datajoint.calibrate_cameras import run_calibration
+
+    print("Calibrating recording: ", recording)
+
+    vid_path, vid_base = os.path.split(recording.filename)
+    run_calibration(vid_base=vid_base, vid_path=vid_path)
+
+    calibration_coroutine = run_in_threadpool(
+        run_calibration,
+        vid_base=vid_base,
+        vid_path=vid_path,
+    )
+    task = asyncio.create_task(calibration_coroutine)
+
+    return {}
+
+
 @api_router.get("/recording_db", response_model=List[ParticipantOut])
 async def get_recording_db(db=Depends(db_dependency)) -> List[ParticipantOut]:
     return get_recordings(db)
