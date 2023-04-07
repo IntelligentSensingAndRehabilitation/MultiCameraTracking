@@ -86,7 +86,7 @@ class Viewer {
         console.log('system', system)
         this.scene = createScene(system);
 
-        this.trajectory = createTrajectory(system);
+        //this.trajectory = createTrajectory(system);
 
         /* set up renderer, camera, and add default scene elements */
         this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
@@ -151,8 +151,8 @@ class Viewer {
             .max(50);
 
         /* set up animator and load trajectory */
-        this.animator = new Animator(this);
-        this.animator.load(this.trajectory, {});
+        //this.animator = new Animator(this);
+        //this.animator.load(this.trajectory, {});
 
         /* add body inspectors */
         const bodiesFolder = this.gui.addFolder('Bodies');
@@ -261,48 +261,48 @@ class Viewer {
 
     animate() {
         requestAnimationFrame(() => this.animate());
-        this.animator.update();
+        //this.animator.update();
 
         // make sure the orbiter is pointed at the right target
-        const targetPos = new THREE.Vector3();
-        this.target.getWorldPosition(targetPos);
+        // const targetPos = new THREE.Vector3();
+        // this.target.getWorldPosition(targetPos);
 
-        // if the target gets too far from the camera, nudge the camera
-        if (this.camera.follow) {
-            this.controls.target.lerp(targetPos, 0.1);
-            if (this.camera.position.distanceTo(this.controls.target) >
-                this.camera.followDistance) {
-                const followBehind = this.controls.target.clone()
-                    .sub(this.camera.position)
-                    .normalize()
-                    .multiplyScalar(this.camera.followDistance)
-                    .sub(this.controls.target)
-                    .negate();
-                this.camera.position.lerp(followBehind, 0.5);
-                this.setDirty();
-            }
-        }
+        // // if the target gets too far from the camera, nudge the camera
+        // if (this.camera.follow) {
+        //     this.controls.target.lerp(targetPos, 0.1);
+        //     if (this.camera.position.distanceTo(this.controls.target) >
+        //         this.camera.followDistance) {
+        //         const followBehind = this.controls.target.clone()
+        //             .sub(this.camera.position)
+        //             .normalize()
+        //             .multiplyScalar(this.camera.followDistance)
+        //             .sub(this.controls.target)
+        //             .negate();
+        //         this.camera.position.lerp(followBehind, 0.5);
+        //         this.setDirty();
+        //     }
+        // }
 
-        // make sure target stays within shadow map region
-        this.dirLight.position.set(
-            targetPos.x + 3, targetPos.y + 10, targetPos.z + 10);
-        this.dirLight.target = this.target;
+        // // make sure target stays within shadow map region
+        // this.dirLight.position.set(
+        //     targetPos.x + 3, targetPos.y + 10, targetPos.z + 10);
+        // this.dirLight.target = this.target;
 
-        if (this.controls.update()) {
-            this.setDirty();
-        }
+        // if (this.controls.update()) {
+        //     this.setDirty();
+        // }
 
-        // if freezeAngle requested, move the camera on xz plane to match target
-        if (this.camera.freezeAngle) {
-            const off = new THREE.Vector3();
-            off.add(this.controls.target).sub(this.controlTargetPos);
-            off.setComponent(1, 0);
-            if (off.lengthSq() > 0) {
-                this.camera.position.add(off);
-                this.setDirty();
-            }
-        }
-        this.controlTargetPos.copy(this.controls.target);
+        // // if freezeAngle requested, move the camera on xz plane to match target
+        // if (this.camera.freezeAngle) {
+        //     const off = new THREE.Vector3();
+        //     off.add(this.controls.target).sub(this.controlTargetPos);
+        //     off.setComponent(1, 0);
+        //     if (off.lengthSq() > 0) {
+        //         this.camera.position.add(off);
+        //         this.setDirty();
+        //     }
+        // }
+        // this.controlTargetPos.copy(this.controls.target);
 
 
         if (this.needsRender) {
