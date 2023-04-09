@@ -145,6 +145,10 @@ function createScene(system) {
     worldAxis.visible = false;
     scene.add(worldAxis);
 
+    const ground = createPlane(null, createCheckerBoard());
+    console.log("Ground:    ", ground);
+    scene.add(ground);
+
     let minAxisSize = 1e6;
     Object.entries(system.geoms).forEach(function (geom) {
         const name = geom[0];
@@ -224,6 +228,27 @@ function createScene(system) {
         }
     }
 
+    if (system.keypoints) {
+        const num_keypoints = system.keypoints[0].length
+        print('number of keypoints: ' + num_keypoints + '\n')
+        /* add keypoint spheres  */
+        for (let i = 0; i < num_keypoints; i++) {
+            const parent = new THREE.Group();
+            parent.name = 'keypoint' + i;
+            let child;
+
+            const mat = new THREE.MeshPhongMaterial({ color: 0x00ff00 });
+            const sphere_geom = new THREE.SphereGeometry(0.2, 6, 6);
+            child = new THREE.Mesh(sphere_geom, mat);
+            child.baseMaterial = child.material;
+            child.castShadow = false;
+            child.position.set(0, 0, 0);
+
+            parent.add(child);
+            scene.add(parent);
+        }
+    }
+
     return scene;
 }
 
@@ -267,4 +292,26 @@ function createTrajectory(system) {
     return new THREE.AnimationClip('Action', -1, tracks);
 }
 
-export { createScene, createTrajectory };
+function createKeypointTrajectory(system) {
+    const times =
+        [...Array(system.keypoints.length).keys()].map((x) => x * system.dt);
+    const tracks = [];
+
+    console.log("length of keypoints: " + system.keypoints.length);
+
+    // Assuming the `system.keypoints` has the structure [time][joint][coordinate]
+    for (let jointIndex = 0; jointIndex < system.keypoints[0].length; jointIndex++) {
+        const jointPositions = system.keypoints.map((time) => time[jointIndex]);
+        tracks.push(
+            new THREE.VectorKeyframeTrack(
+                "scene/keypoint" + jointIndex + ".position",
+                times,
+                jointPositions.flat()
+            )
+        );
+    }
+
+    return new THREE.AnimationClip("Action", -1, tracks);
+}
+
+export { createScene, createTrajectory, createKeypointTrajectory };

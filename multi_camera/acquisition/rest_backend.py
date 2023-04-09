@@ -636,13 +636,13 @@ async def get_mesh() -> SMPLData:
         from easymocap.smplmodel.body_model import SMPLlayer
 
         keys = EasymocapSmpl.fetch("KEY")
-        key = keys[100]
+        key = keys[200]
 
-        smpl_results = (EasymocapSmpl & key).fetch1("smpl_results")[:10]
+        smpl_results = (EasymocapSmpl & key).fetch1("smpl_results")[:300]
         smpl = SMPLlayer(model_path, model_type="smpl", gender="neutral")
 
         def zero_position(r):
-            r["Th"] = np.array([[0, 0, 0]])
+            # r["Th"] = np.array([[0, 0, 0]])
             return r
 
         if return_id is not None:
@@ -662,7 +662,7 @@ async def get_mesh() -> SMPLData:
         return {"verts": verts, "faces": smpl.faces.tolist()}
 
     print("retrieving mesh")
-    res = get_mesh_info(0)
+    res = get_mesh_info(1)
     print("done retrieving mesh")
     return SMPLData(**res)
 
