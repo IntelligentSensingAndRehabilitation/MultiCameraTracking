@@ -58,6 +58,7 @@ export const AquisitionApi = (props) => {
     const [recordingFileBase, setRecordingFileBase] = useState('');
     const [recordingFilename, setRecordingFilename] = useState('');
     const [recordingProgress, setRecordingProgress] = useState('');
+    const [keypoints, setKeypoints] = useState([]);
 
     useEffect(() => {
         // axios.interceptors.request.use(request => {
@@ -118,6 +119,7 @@ export const AquisitionApi = (props) => {
         fetchCurrentConfig();
         fetchRecordingStatus();
         fetchSession();
+        fetchKeypoints();
     }, []);
 
     useEffect(() => {
@@ -229,6 +231,18 @@ export const AquisitionApi = (props) => {
         console.log("Recording DB: ", response.data)
         return response.data;
     };
+
+    async function fetchKeypoints() {
+        const response = await axios.get(`${API_BASE_URL}/keypoints`);
+        //console.log("Keypoints: ", response.data)
+        setKeypoints(response.data);
+        return response.data;
+    }
+
+    async function fetchMesh() {
+        const response = await axios.get(`${API_BASE_URL}/mesh`);
+        return response.data;
+    }
 
     // Camera configuration settings
 
@@ -347,6 +361,7 @@ export const AquisitionApi = (props) => {
         videoUrl: `ws://${BASE_URL}/video_ws`,
         recordingSystemStatus: recordingSystemStatus,
         recordingProgress: recordingProgress,
+        keypoints: keypoints,
         resetCameras,
         newSession,
         newTrial,
@@ -358,7 +373,9 @@ export const AquisitionApi = (props) => {
         fetchRecordingDb,
         toggleProcess,
         changeComment,
-        runCalibration
+        runCalibration,
+        fetchKeypoints,
+        fetchMesh
     }}> {props.children} </AcquisitionState.Provider >)
     //return (<div> {children} </div>)
 };

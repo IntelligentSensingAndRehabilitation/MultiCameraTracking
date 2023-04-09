@@ -606,11 +606,12 @@ async def get_keypoints():
     from multi_camera.datajoint.multi_camera_dj import PersonKeypointReconstruction
 
     keys = PersonKeypointReconstruction.fetch("KEY")
-    key = keys[0]
+    key = keys[8500]
 
     keypoints3d = (PersonKeypointReconstruction & key).fetch1("keypoints3d")
 
-    keypoints3d = keypoints3d[:, :26, :3]
+    # keypoints3d = keypoints3d[:, :26, :3]
+    keypoints3d = keypoints3d[:, :, :3]
     keypoints3d = keypoints3d - np.mean(np.mean(keypoints3d, axis=0, keepdims=True), axis=1, keepdims=True)
     keypoints3d = keypoints3d / 1000.0  # convert to meters
     # set the z coordinate minimum to be zero
@@ -619,6 +620,51 @@ async def get_keypoints():
     # convert the numpy 3d array to JSON to send to the client
     keypoints3d = keypoints3d.tolist()
     return keypoints3d
+
+
+class SMPLData(BaseModel):
+    verts: List[List[List[float]]]
+    faces: List[List[int]]
+
+
+@api_router.get("/mesh", response_model=SMPLData)
+async def get_mesh() -> SMPLData:
+    def get_mesh_info(
+        return_id=None, model_path: str = "/home/jcotton/projects/pose/MultiCameraTracking/model_data/smpl_clean/"
+    ):
+        from multi_camera.datajoint.easymocap import EasymocapSmpl
+        from easymocap.smplmodel.body_model import SMPLlayer
+
+        keys = EasymocapSmpl.fetch("KEY")
+        key = keys[100]
+
+        smpl_results = (EasymocapSmpl & key).fetch1("smpl_results")[:10]
+        smpl = SMPLlayer(model_path, model_type="smpl", gender="neutral")
+
+        def zero_position(r):
+            r["Th"] = np.array([[0, 0, 0]])
+            return r
+
+        if return_id is not None:
+            verts = [
+                [
+                    smpl(**zero_position(r), return_verts=True, return_tensor=False)[0].tolist()
+                    for r in frame
+                    if r["id"] == return_id
+                ][0]
+                for frame in smpl_results
+            ]
+        else:
+            verts = [
+                [smpl(**r, return_verts=True, return_tensor=False)[0].tolist() for r in frame] for frame in smpl_results
+            ]
+
+        return {"verts": verts, "faces": smpl.faces.tolist()}
+
+    print("retrieving mesh")
+    res = get_mesh_info(0)
+    print("done retrieving mesh")
+    return SMPLData(**res)
 
 
 app.include_router(api_router)
