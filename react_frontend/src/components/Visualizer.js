@@ -12,22 +12,7 @@ const HumanMesh = ({ data }) => {
 };
 
 const system = {
-    'meshes': {
-        'custom_mesh': {
-            'vert': [
-                [0, 0, 0],
-                [100, 0, 0],
-                [0, 100, 0],
-                [0, 0, 100],
-            ],
-            'face': [
-                [0, 1, 2],
-                [0, 1, 3],
-                [0, 2, 3],
-                [1, 2, 3],
-            ],
-        },
-    },
+    'meshes': {},
     'geoms': {
         // 'sphere': [
         //     {
@@ -39,28 +24,28 @@ const system = {
         //         'rgba': [0, 0, 1, 1],
         //     },
         // ],
-        // 'mesh': [
-        //     {
-        //         'name': 'Mesh',
-        //         'vert': [
-        //             [0, 0, 0],
-        //             [1, 0, 0],
-        //             [0, 1, 0],
-        //             [0, 0, 1],
-        //         ],
-        //         'face': [
-        //             [0, 1, 2],
-        //             [0, 1, 3],
-        //             [0, 2, 3],
-        //             [1, 2, 3],
-        //         ],
-        //         'link_idx': 0,
-        //         'transform': {
-        //             'pos': [2, 2, 2],
-        //         },
-        //         'rgba': [1, 0, 0, 1],
-        //     },
-        // ],
+        'mesh': [
+            {
+                'name': 'Mesh',
+                'vert': [
+                    [0, 0, 0],
+                    [1, 0, 0],
+                    [0, 1, 0],
+                    [0, 0, 1],
+                ],
+                'face': [
+                    [0, 1, 2],
+                    [0, 1, 3],
+                    [0, 2, 3],
+                    [1, 2, 3],
+                ],
+                'link_idx': 0,
+                'transform': {
+                    'pos': [2, 2, 2],
+                },
+                'rgba': [1, 0, 0, 1],
+            },
+        ],
     },
     'keypoints': null,
     'states': { 'x': { 'pos': [] } }, 'dt': 0.033
@@ -71,7 +56,7 @@ const BiomechanicalReconstruction = ({ data }) => {
     const viewerRef = useRef();
     const containerRef = useRef();
 
-    const { keypoints, fetchKeypoints } = useContext(AcquisitionState);
+    const { keypoints, fetchKeypoints, fetchMesh } = useContext(AcquisitionState);
 
     // useEffectOnce(() => {
     //     // Instantiate the Viewer when the component mounts
@@ -82,6 +67,16 @@ const BiomechanicalReconstruction = ({ data }) => {
     useEffectOnce(async () => {
         // You can load data here and update the state accordingly
         system.keypoints = await fetchKeypoints();
+
+        console.log('fetching mesh');
+        const mesh = await fetchMesh();
+        console.log('mesh: ' + mesh + " keypoints: " + system.keypoints);
+        system.geoms['mesh'][0].vert = mesh.verts[0];
+        system.geoms['mesh'][0].face = mesh.faces;
+        //console.log('received mesh. size: ', mesh.vert.length, mesh.face.length);
+        console.log(system.geoms)
+        console.log(mesh.verts)
+
         console.log("keypoints shape: ", system.keypoints.length, system.keypoints[0].length);
         const domElement = containerRef.current;
         console.log("domElement: ", domElement)

@@ -11,6 +11,7 @@ import { LinkContainer } from 'react-router-bootstrap';
 import AcquisitionHome from './AcquisitionHome';
 import AnalysisHome from './AnalysisHome';
 import { AquisitionApi } from './AcquisitionApi';
+import BiomechanicalReconstruction from './components/Visualizer';
 import Container from "react-bootstrap/Container";
 
 function App() {
@@ -28,6 +29,9 @@ function App() {
             <LinkContainer to="/analysis">
               <Nav.Link>Analyze</Nav.Link>
             </LinkContainer>
+            <LinkContainer to="/visualize">
+              <Nav.Link>Visualize</Nav.Link>
+            </LinkContainer>
           </Nav>
         </Container>
       </Navbar>
@@ -36,6 +40,7 @@ function App() {
         <Routes>
           <Route path="/" element={<AcquisitionHome />} />
           <Route path="/analysis" element={<AnalysisHome />} />
+          <Route path="/visualize" element={<BiomechanicalReconstruction />} />
         </Routes>
       </AquisitionApi>
 
