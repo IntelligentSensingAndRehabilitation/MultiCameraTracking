@@ -9,7 +9,7 @@ import { GUI } from 'lil-gui';
 
 import { Animator } from './animator.js';
 import { Selector } from './selector.js';
-import { createScene, createTrajectory, createKeypointTrajectory } from './system.js';
+import { createScene, createTrajectory, createKeypointTrajectory, createSmplTrajectories } from './system.js';
 
 function downloadDataUri(name, uri) {
     let link = document.createElement('a');
@@ -88,6 +88,13 @@ class Viewer {
 
         //this.trajectory = createTrajectory(system);
         this.trajectory = createKeypointTrajectory(system);
+
+        this.smplMeshes = createSmplTrajectories(system);
+        this.smplMeshes.forEach((mesh) => {
+            console.log('adding SMPL mesh for trajectory', mesh)
+            this.scene.add(mesh)
+        });
+
 
         /* set up renderer, camera, and add default scene elements */
         this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
@@ -263,6 +270,20 @@ class Viewer {
     animate() {
         requestAnimationFrame(() => this.animate());
         this.animator.update();
+
+        const dt = this.system.dt;
+        for (let meshIndex = 0; meshIndex < this.smplMeshes.length; meshIndex++) {
+            const mesh = this.smplMeshes[meshIndex];
+
+            const num_targets = mesh.morphTargetInfluences.length;
+            const timeIndex = Math.floor(this.animator.time / dt) % num_targets;
+            console.log("Time calculated: " + timeIndex + "this.animator.time" + this.animator.time + "dt" + dt);
+
+            for (let i = 0; i < mesh.morphTargetInfluences.length; i++) {
+                mesh.morphTargetInfluences[i] = i === timeIndex ? 1 : 0;
+            }
+            mesh.geometry.computeVertexNormals();
+        }
 
         // make sure the orbiter is pointed at the right target
         // const targetPos = new THREE.Vector3();

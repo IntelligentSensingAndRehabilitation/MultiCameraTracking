@@ -9,7 +9,7 @@ import { GUI } from 'lilgui';
 
 import { Animator } from './animator.js';
 import { Selector } from './selector.js';
-import { createScene, createTrajectory } from './system.js';
+import { createScene, createTrajectory, createKeypointTrajectory } from './system.js';
 
 function downloadDataUri(name, uri) {
     let link = document.createElement('a');
@@ -87,6 +87,7 @@ class Viewer {
         this.scene = createScene(system);
 
         //this.trajectory = createTrajectory(system);
+        this.trajectory = createKeypointTrajectory(system);
 
         /* set up renderer, camera, and add default scene elements */
         this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
@@ -151,8 +152,8 @@ class Viewer {
             .max(50);
 
         /* set up animator and load trajectory */
-        //this.animator = new Animator(this);
-        //this.animator.load(this.trajectory, {});
+        this.animator = new Animator(this);
+        this.animator.load(this.trajectory, {});
 
         /* add body inspectors */
         const bodiesFolder = this.gui.addFolder('Bodies');
@@ -261,7 +262,7 @@ class Viewer {
 
     animate() {
         requestAnimationFrame(() => this.animate());
-        //this.animator.update();
+        this.animator.update();
 
         // make sure the orbiter is pointed at the right target
         // const targetPos = new THREE.Vector3();

@@ -113,9 +113,9 @@ function createMesh(meshGeom, mat) {
     const positions = new Float32Array(vertices.length * 3);
     // Convert the coordinate system.
     vertices.forEach(function (vertice, i) {
-        positions[i * 3] = vertice[0];
-        positions[i * 3 + 1] = vertice[1];
-        positions[i * 3 + 2] = vertice[2];
+        positions[i * 3] = vertice[0] * 0;
+        positions[i * 3 + 1] = vertice[1] * 0;
+        positions[i * 3 + 2] = vertice[2] * 0;
     });
     const indices = new Uint16Array(meshGeom.face.flat());
     bufferGeometry.setAttribute(
@@ -126,7 +126,7 @@ function createMesh(meshGeom, mat) {
     const mesh = new THREE.Mesh(bufferGeometry, mat);
     mesh.castShadow = true;
     mesh.baseMaterial = mesh.material;
-    mesh.layers.enable(1);
+    mesh.layers.enable(0);
     return mesh;
 }
 
@@ -146,7 +146,6 @@ function createScene(system) {
     scene.add(worldAxis);
 
     const ground = createPlane(null, createCheckerBoard());
-    console.log("Ground:    ", ground);
     scene.add(ground);
 
     let minAxisSize = 1e6;
@@ -312,4 +311,84 @@ function createKeypointTrajectory(system) {
     return new THREE.AnimationClip("Action", -1, tracks);
 }
 
-export { createScene, createTrajectory, createKeypointTrajectory };
+function createSmplTrajectories(system) {
+    const smplMeshes = [];
+
+    Object.entries(system.geoms).forEach(function (geom) {
+        const name = geom[0];
+        const parent = new THREE.Group();
+        parent.name = name.replaceAll('/', '_');  // sanitize node name
+
+
+        geom[1].forEach(function (meshData) {
+
+            const rgba = meshData.rgba;
+            const color = new THREE.Color(rgba[0], rgba[1], rgba[2]);
+            const mat = new THREE.MeshPhongMaterial({ color: color });
+
+            // Try using code from above
+            const bufferGeometry = new THREE.BufferGeometry();
+
+            const vertices = meshData.vert;
+            const positions = new Float32Array(vertices.length * 3);
+            // Convert the coordinate system.
+            vertices.forEach(function (vertice, i) {
+                positions[i * 3] = vertice[0];
+                positions[i * 3 + 1] = vertice[1];
+                positions[i * 3 + 2] = vertice[2];
+            });
+            const indices = new Uint16Array(meshData.face.flat());
+            bufferGeometry.setAttribute(
+                'position', new THREE.BufferAttribute(positions, 3));
+            bufferGeometry.setIndex(new THREE.BufferAttribute(indices, 1));
+            bufferGeometry.computeVertexNormals();
+
+            bufferGeometry.morphTargetsRelative = true;
+            bufferGeometry.morphAttributes.position = [];
+            for (let timeIndex = 0; timeIndex < meshData.vert_anim.length; timeIndex++) {
+                const morphVertices = new Float32Array(meshData.vert_anim[timeIndex].flat());
+                bufferGeometry.morphAttributes.position.push(new THREE.Float32BufferAttribute(morphVertices, 3));
+                console.log("Added morph target " + timeIndex + " to " + name);
+            }
+
+            const mesh = new THREE.Mesh(bufferGeometry, mat);
+            mesh.castShadow = true;
+            mesh.baseMaterial = mesh.material;
+            mesh.layers.enable(0);
+            smplMeshes.push(mesh);
+
+            // End code from above
+
+            if (false) {
+
+                const rgba = meshData.rgba;
+                const color = new THREE.Color(rgba[0], rgba[1], rgba[2]);
+                const mat = new THREE.MeshPhongMaterial({ color: color });
+
+                const baseGeometry = new THREE.BufferGeometry().setFromPoints(meshData.vert.map(v => new THREE.Vector3(...v)));
+                baseGeometry.setIndex(meshData.face);
+                baseGeometry.computeVertexNormals();
+                baseGeometry.morphTargetsRelative = true;
+                baseGeometry.morphAttributes.position = [];
+
+                for (let timeIndex = 0; timeIndex < meshData.vert_anim.length; timeIndex++) {
+                    const morphVertices = new Float32Array(meshData.vert_anim[timeIndex].flat());
+                    baseGeometry.morphAttributes.position = baseGeometry.morphAttributes.position || [];
+                    baseGeometry.morphAttributes.position.push(new THREE.Float32BufferAttribute(morphVertices, 3));
+                    console.log("Added morph target " + timeIndex + " to " + name);
+                }
+                console.log("Created mesh with " + baseGeometry.morphAttributes.position.length + " morph targets.  ")
+
+                const smplMesh = new THREE.Mesh(baseGeometry, mat);
+                smplMesh.position.set(...meshData.transform.pos);
+                smplMeshes.push(smplMesh);
+            }
+        });
+    });
+
+    console.log("Created " + smplMeshes.length + " SMPL meshes.");
+
+    return smplMeshes;
+}
+
+export { createScene, createTrajectory, createKeypointTrajectory, createSmplTrajectories };
