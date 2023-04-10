@@ -667,6 +667,12 @@ async def get_mesh() -> SMPLData:
     return SMPLData(**res)
 
 
+def process_frame(frame_data, smpl):
+    return [
+        {"id": int(r["id"]), "verts": smpl(**r, return_verts=True, return_tensor=False)[0].tolist()} for r in frame_data
+    ]
+
+
 @api_router.websocket("/mesh_ws")
 async def mesh_websocket_endpoint(
     websocket: WebSocket, model_path: str = "/home/jcotton/projects/pose/MultiCameraTracking/model_data/smpl_clean/"
@@ -706,26 +712,14 @@ async def mesh_websocket_endpoint(
             for i in range(0, len(smpl_results), batch_size):
                 yield smpl_results[i : i + batch_size]
 
-        def process_frame(frame_data):
-            return [
-                {"id": int(r["id"]), "verts": smpl(**r, return_verts=True, return_tensor=False)[0].tolist()}
-                for r in frame_data
-            ]
-
         for frame_batch in frame_batch_generator():
             if AppStatus.should_exit:
                 break
 
             import concurrent.futures
 
-            with concurrent.futures.ThreadPoolExecutor(max_workers=batch_size) as executor:
-                futures = [
-                    executor.submit(
-                        process_frame,
-                        frame,
-                    )
-                    for frame in frame_batch
-                ]
+            with concurrent.futures.ProcessPoolExecutor(max_workers=batch_size) as executor:
+                futures = [executor.submit(process_frame, frame, smpl) for frame in frame_batch]
 
                 # now collect gather the futures results
                 to_send = [f.result() for f in futures]
