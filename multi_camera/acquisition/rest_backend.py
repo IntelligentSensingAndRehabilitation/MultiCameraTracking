@@ -638,7 +638,7 @@ async def get_mesh() -> SMPLData:
         keys = EasymocapSmpl.fetch("KEY")
         key = keys[200]
 
-        smpl_results = (EasymocapSmpl & key).fetch1("smpl_results")[:300]
+        smpl_results = (EasymocapSmpl & key).fetch1("smpl_results")[:20]
         smpl = SMPLlayer(model_path, model_type="smpl", gender="neutral")
 
         def zero_position(r):
@@ -665,6 +665,81 @@ async def get_mesh() -> SMPLData:
     res = get_mesh_info(1)
     print("done retrieving mesh")
     return SMPLData(**res)
+
+
+@api_router.websocket("/mesh_ws")
+async def mesh_websocket_endpoint(
+    websocket: WebSocket, model_path: str = "/home/jcotton/projects/pose/MultiCameraTracking/model_data/smpl_clean/"
+):
+    await websocket.accept()
+    logger.info("Mesh Websocket connected")
+
+    from multi_camera.datajoint.easymocap import EasymocapSmpl
+    from easymocap.smplmodel.body_model import SMPLlayer
+
+    # TODO: make this a parameter
+    keys = EasymocapSmpl.fetch("KEY")
+    key = keys[400]
+
+    smpl_results = (EasymocapSmpl & key).fetch1("smpl_results")[:900:1]
+    smpl = SMPLlayer(model_path, model_type="smpl", gender="neutral")
+
+    # get the unique list of ids
+    ids = [[r["id"] for r in frame] for frame in smpl_results]
+    ids = list(set([id for frame in ids for id in frame]))
+
+    try:
+        # send the mesh info
+        info = {
+            "ids": [int(x) for x in ids],
+            "frames": len(smpl_results),
+            "type": "smpl",
+            "faces": smpl.faces.astype(int).tolist(),
+        }
+        await websocket.send_json(info)
+        print("Sent info")
+
+        # use concurrent futures to process batches of 10 frames in parallel
+        batch_size = 30
+
+        def frame_batch_generator():
+            for i in range(0, len(smpl_results), batch_size):
+                yield smpl_results[i : i + batch_size]
+
+        def process_frame(frame_data):
+            return [
+                {"id": int(r["id"]), "verts": smpl(**r, return_verts=True, return_tensor=False)[0].tolist()}
+                for r in frame_data
+            ]
+
+        for frame_batch in frame_batch_generator():
+            if AppStatus.should_exit:
+                break
+
+            import concurrent.futures
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=batch_size) as executor:
+                futures = [
+                    executor.submit(
+                        process_frame,
+                        frame,
+                    )
+                    for frame in frame_batch
+                ]
+
+                # now collect gather the futures results
+                to_send = [f.result() for f in futures]
+
+                print("Batch done")
+
+                await websocket.send_json(to_send)
+
+    except WebSocketDisconnect as e:
+        logger.info("Mesh Websocket disconnected with WebSocketDisconnect: %s", e)
+    except ConnectionClosedOK as e:
+        logger.info("Mesh  Websocket disconnected with ConnectionClosedOK: %s", e)
+
+    logger.info("Mesh websocket exited")
 
 
 app.include_router(api_router)

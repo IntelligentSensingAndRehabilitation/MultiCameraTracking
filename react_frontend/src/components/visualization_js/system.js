@@ -391,4 +391,126 @@ function createSmplTrajectories(system) {
     return smplMeshes;
 }
 
-export { createScene, createTrajectory, createKeypointTrajectory, createSmplTrajectories };
+function appendSmplFrame(frameData, smplMeshes, scene, timeIndex, faces) {
+    /*
+    frameData contains the data for a single frame of the SMPL animation. it is a list of dictionaries,
+    where each dictionary element has an ID field with the numerical identity for that person and a verts
+    field with the vertices for that person for the specified frame. This is used to update teh smplMeshes
+    data.
+
+    smplMeshes is a list of THREE.Mesh objects, one for each person in the scene. The order of the meshes
+    in the list should match the numeric IDs for the people in the frameData list.
+
+    faces are the face vertex ids used when creating new meshes
+
+    scene is the scene object to which the meshes should be added.
+
+    timeIndex is only used when creating new meshes to add the appropriate invisible frames when people
+    were not visible in earlier frames. for any frames wehre an ID is not in the frameData list, we need
+    to set the visible user data to false so the animation layer will not show the mesh for that frame.
+    */
+
+
+    // loop through all the meshes and if there is not a personId that matches
+    // that index we will mark it as invisible for this frame.
+    for (let i = 0; i < smplMeshes.length; i++) {
+        let found = false;
+        frameData.forEach(person => {
+            if (person.id == i) {
+                found = true;
+            }
+        })
+
+        if (!found) {
+            smplMeshes[i].userData.visibility.push(false);
+            smplMeshes[i].morphTargetInfluences.push(0);
+        }
+    }
+
+    console.log("smpMeshes length: " + smplMeshes.length + " frameData length: " + frameData.length);
+    frameData.forEach(person => {
+
+        const personId = person.id;
+        const vertices = person.verts;
+
+        if (personId > 20) {
+            console.log("Skipping person " + personId);
+            return;
+        }
+
+        if (personId >= smplMeshes.length) {
+
+            console.log("Creating new mesh for person " + personId);
+
+            // This person isn't yet in the scene so we need to create a new mesh for them.
+            const bufferGeometry = new THREE.BufferGeometry();
+
+            // generate a unique color based on the personId. use a color map so that each person has a unique color
+            function idToColor(personId) {
+                const goldenRatioConjugate = 0.618033988749895;
+                const hue = ((personId * goldenRatioConjugate) % 1) * 360;
+
+                return new THREE.Color(`hsl(${hue}, 100%, 50%)`);
+            }
+
+            const mat = new THREE.MeshPhongMaterial({ color: idToColor(personId) });
+
+            const positions = new Float32Array(vertices.length * 3);
+            // Convert the coordinate system.
+            vertices.forEach(function (vertice, i) {
+                positions[i * 3] = vertice[0];
+                positions[i * 3 + 1] = vertice[1];
+                positions[i * 3 + 2] = vertice[2];
+            });
+            const indices = new Uint16Array(faces.flat());
+            bufferGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            bufferGeometry.setIndex(new THREE.BufferAttribute(indices, 1));
+            bufferGeometry.computeVertexNormals();
+
+            // Prepare to add the morph targets and fill in the prior frames with invisible meshes
+            bufferGeometry.morphTargetsRelative = true;
+            bufferGeometry.morphAttributes.position = [];
+
+            for (let i = 0; i < timeIndex; i++) {
+                bufferGeometry.morphAttributes.position.push(new THREE.Float32BufferAttribute(positions, 3));
+                // TODO: handle visibility
+            }
+
+            const mesh = new THREE.Mesh(bufferGeometry, mat);
+            mesh.castShadow = true;
+            mesh.baseMaterial = mesh.material;
+            mesh.layers.enable(0);
+
+            if (timeIndex > 0) {
+                const invisibleFrames = timeIndex - 1;
+                mesh.userData.visibility = Array(invisibleFrames).fill(false).concat(true);
+            } else {
+                mesh.userData.visibility = [true];
+            }
+
+            smplMeshes.push(mesh);
+
+            scene.add(mesh);
+        }
+
+        const bufferGeometry = smplMeshes[personId].geometry;
+        const morphVertices = new Float32Array(vertices.flat());
+        bufferGeometry.morphAttributes.position.push(new THREE.Float32BufferAttribute(morphVertices, 3));
+        console.log("Added morp target " + timeIndex + " to " + personId);
+
+        // Let Three.js know that the existing morph attributes have been updated
+        bufferGeometry.attributes.position.needsUpdate = true;
+
+        // Add a new morph target influence to the mesh and mark visible
+        smplMeshes[personId].morphTargetInfluences.push(0);
+        smplMeshes[personId].userData.visibility.push(true);
+
+        // Check that the mesh.morphTargetInfluences has changed
+        // console.log(mesh.morphTargetInfluences.length);
+        console.log("morphTargetInfluences length: " + smplMeshes[personId].morphTargetInfluences.length);
+    });
+
+    return smplMeshes;
+};
+
+export { createScene, createTrajectory, createKeypointTrajectory, createSmplTrajectories, appendSmplFrame };
