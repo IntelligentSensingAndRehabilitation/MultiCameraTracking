@@ -244,6 +244,11 @@ export const AquisitionApi = (props) => {
         return response.data;
     }
 
+    async function fetchBiomechanics() {
+        const response = await axios.get(`${API_BASE_URL}/biomechanics`);
+        return response.data;
+    }
+
     // Camera configuration settings
 
     const fetchConfigs = async () => {
@@ -376,7 +381,8 @@ export const AquisitionApi = (props) => {
         changeComment,
         runCalibration,
         fetchKeypoints,
-        fetchMesh
+        fetchMesh,
+        fetchBiomechanics
     }}> {props.children} </AcquisitionState.Provider >)
     //return (<div> {children} </div>)
 };

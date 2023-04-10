@@ -9,7 +9,7 @@ import { GUI } from 'lil-gui';
 
 import { Animator } from './animator.js';
 import { Selector } from './selector.js';
-import { createScene, createTrajectory, createKeypointTrajectory, createSmplTrajectories, appendSmplFrame } from './system.js';
+import { createScene, createTrajectory, createKeypointTrajectory, createSmplTrajectories, appendSmplFrame, createBiomechanicalMesh, createBiomechanicalTrajectory } from './system.js';
 
 function downloadDataUri(name, uri) {
     let link = document.createElement('a');
@@ -247,6 +247,18 @@ class Viewer {
         })
 
         console.log("received " + frameData.length + " frames. current frame count: " + this.smpl_frames);
+    }
+
+    addBiomechanics(meshes, trajectories) {
+        const boneMeshes = createBiomechanicalMesh(meshes)
+
+        for (const [name, mesh] of boneMeshes) {
+            console.log("adding mesh " + name);
+            this.scene.add(mesh);
+        }
+
+        this.trajectory = createBiomechanicalTrajectory(trajectories, this.system.dt);
+        this.animator.load(this.trajectory, {});
     }
 
     setDirty() {
