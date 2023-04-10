@@ -45,69 +45,73 @@ const BiomechanicalReconstruction = ({ data }) => {
     const viewerRef = useRef();
     const containerRef = useRef();
 
-    const { meshUrl, fetchKeypoints, fetchMesh } = useContext(AcquisitionState);
+    const { meshUrl, fetchKeypoints, fetchMesh, fetchBiomechanics } = useContext(AcquisitionState);
 
     const ws = useRef(null);
+
+    const showMesh = false;
 
     useEffectOnce(async () => {
 
         console.log('Initializing viewer');
 
+
         // You can load data here and update the state accordingly
         system.keypoints = await fetchKeypoints();
         console.log("keypoints shape: ", system.keypoints.length, system.keypoints[0].length);
 
-        // console.log('fetching mesh');
-        // const mesh = await fetchMesh();
         var faces = null;
-
-        // system.geoms['mesh'][0].vert_anim = mesh.verts;
-        // system.geoms['mesh'][0].vert = mesh.verts[5];
-        // system.geoms['mesh'][0].face = mesh.faces;
 
         const domElement = containerRef.current;
         viewerRef.current = new Viewer(domElement, system);
 
 
-        console.log('Connecting to mesh websocket...');
+        if (showMesh) {
+            console.log('Connecting to mesh websocket...');
 
-        ws.current = new WebSocket(meshUrl);
+            ws.current = new WebSocket(meshUrl);
 
-        ws.current.onopen = () => {
-            console.log("Mesh WebSocket connected");
-        };
+            ws.current.onopen = () => {
+                console.log("Mesh WebSocket connected");
+            };
 
-        ws.current.onmessage = (event) => {
-            // convert event.data from JSON to JS object
-            const data = JSON.parse(event.data);
+            ws.current.onmessage = (event) => {
+                // convert event.data from JSON to JS object
+                const data = JSON.parse(event.data);
 
-            if (faces === null) {
-                console.log("faces: ", faces, data.faces);
-                faces = data.faces;
-            } else {
-                viewerRef.current.addFrame(data, faces);
+                if (faces === null) {
+                    console.log("faces: ", faces, data.faces);
+                    faces = data.faces;
+                } else {
+                    viewerRef.current.addFrame(data, faces);
+                }
+
+            };
+
+            ws.current.onclose = () => {
+                console.log("Mesh WebSocket disconnected");
+            };
+
+            ws.current.onerror = (event) => {
+                console.log("Mesh WebSocket error observed:", event);
             }
 
-        };
+            return () => {
+                if (ws.current) {
+                    ws.current.close();
+                }
+            };
+        } else {
+            const biomechanics = await fetchBiomechanics();
+            viewerRef.current.addBiomechanics(biomechanics.meshes, biomechanics.trajectories);
+            console.log("biomechanics: ", biomechanics);
 
-        ws.current.onclose = () => {
-            console.log("Mesh WebSocket disconnected");
-        };
-
-        ws.current.onerror = (event) => {
-            console.log("Mesh WebSocket error observed:", event);
+            return () => {
+                console.log("Closed biomechanics")
+            };
         }
 
-        return () => {
-            if (ws.current) {
-                ws.current.close();
-            }
-        };
-    }, [system]);
-
-
-    useEffectOnce(async () => {
-    }, [system]);
+    }, []);
 
     // Set the height of the brax-viewer div to 400 pixels
     const viewerStyle = {

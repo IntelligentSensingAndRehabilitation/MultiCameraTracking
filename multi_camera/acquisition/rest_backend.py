@@ -736,6 +736,95 @@ async def mesh_websocket_endpoint(
     logger.info("Mesh websocket exited")
 
 
+class MeshData(BaseModel):
+    vertices: List[List[float]]
+    faces: List[List[int]]
+
+
+class TrajectoryData(BaseModel):
+    positions: List[List[float]]
+    rotations: List[List[float]]
+
+
+class BiomechanicsData(BaseModel):
+    meshes: Dict[str, MeshData]
+    trajectories: Dict[str, TrajectoryData]
+
+
+@api_router.get("/biomechanics")
+async def get_biomechanics():
+    import numpy as np
+    from scipy.spatial.transform import Rotation as R
+    from multi_camera.analysis.biomechanics.render import load_skeleton_meshes, pose_skeleton
+
+    def getBiomechanicalMesh(skeleton):
+        meshes = load_skeleton_meshes(skeleton)
+        meshes_data = {}
+        for name, mesh in meshes.items():
+            meshes_data[name] = MeshData(
+                vertices=(mesh.vertices).tolist(),
+                faces=mesh.faces.astype(int).tolist(),
+            )
+        return meshes_data
+
+    def getBiomechanicalTrajectory(skeleton, poses):
+        trajectories = {}
+
+        # Create a transformation matrix that swaps Y and Z axes
+        r = np.pi / 2
+        swap_yz_matrix = np.array(
+            [[1, 0, 0, 0], [0, np.cos(r), -np.sin(r), 0], [0, np.sin(r), np.cos(r), 0], [0, 0, 0, 1]]
+        )
+
+        for pose in poses:
+            skeleton.setPositions(pose)
+
+            for b in skeleton.getBodyNodes():
+                for s in b.getShapeNodes():
+                    name = s.getName()
+                    transform_matrix = s.getWorldTransform().matrix()
+
+                    # Apply the affine transformation to the world transform matrix
+                    transformed_matrix = swap_yz_matrix @ transform_matrix
+
+                    position = transformed_matrix[:3, 3].tolist()
+
+                    rot_matrix = transformed_matrix[:3, :3]
+                    rotation = R.from_matrix(rot_matrix).as_quat().tolist()
+
+                    if name not in trajectories:
+                        trajectories[name] = {
+                            "position": [],
+                            "orientation": [],
+                        }
+
+                    trajectories[name]["position"].append(position)
+                    trajectories[name]["orientation"].append(rotation)
+
+        trajectories = {
+            k: TrajectoryData(positions=v["position"], rotations=v["orientation"]) for k, v in trajectories.items()
+        }
+        return trajectories
+
+    from multi_camera.datajoint.biomechanics import BiomechanicalReconstruction
+    from multi_camera.analysis.biomechanics import bilevel_optimization
+
+    keys = (BiomechanicalReconstruction.Trial & "model_name='Rajagopal_Neck_mbl_movi_87_rev15'").fetch("KEY")
+    key = keys[100]
+
+    model_name, skeleton_def = (BiomechanicalReconstruction & key).fetch1("model_name", "skeleton_definition")
+    # print(model_name, skeleton_def)
+    skeleton = bilevel_optimization.reload_skeleton(model_name, skeleton_def["group_scales"])
+    timestamps, poses = (BiomechanicalReconstruction.Trial & key).fetch1("timestamps", "poses")
+
+    meshes = getBiomechanicalMesh(skeleton)
+    traj = getBiomechanicalTrajectory(skeleton, poses)
+
+    data = BiomechanicsData(meshes=meshes, trajectories=traj)
+
+    return data
+
+
 app.include_router(api_router)
 
 
