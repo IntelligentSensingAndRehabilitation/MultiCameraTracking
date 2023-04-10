@@ -9,7 +9,7 @@ import { GUI } from 'lil-gui';
 
 import { Animator } from './animator.js';
 import { Selector } from './selector.js';
-import { createScene, createTrajectory, createKeypointTrajectory, createSmplTrajectories } from './system.js';
+import { createScene, createTrajectory, createKeypointTrajectory, createSmplTrajectories, appendSmplFrame } from './system.js';
 
 function downloadDataUri(name, uri) {
     let link = document.createElement('a');
@@ -89,11 +89,13 @@ class Viewer {
         //this.trajectory = createTrajectory(system);
         this.trajectory = createKeypointTrajectory(system);
 
-        this.smplMeshes = createSmplTrajectories(system);
+        /*this.smplMeshes = createSmplTrajectories(system);
         this.smplMeshes.forEach((mesh) => {
             console.log('adding SMPL mesh for trajectory', mesh)
             this.scene.add(mesh)
-        });
+        });*/
+
+        this.smplMeshes = [];
 
 
         /* set up renderer, camera, and add default scene elements */
@@ -230,6 +232,21 @@ class Viewer {
 
         /* start animation */
         this.animate();
+
+        this.smpl_frames = 0;
+    }
+
+    addFrame(frameData, faces) {
+        // frameData is a list of dictionaries. each entry has a field ID with the numeric ID of the body
+        // and a field with the verts for that body and the new time point
+
+        // console.log("adding frame " + this.smpl_frames);
+        frameData.forEach((frame) => {
+            this.smplMeshes = appendSmplFrame(frame, this.smplMeshes, this.scene, this.smpl_frames, faces);
+            this.smpl_frames += 1;
+        })
+
+        console.log("received " + frameData.length + " frames. current frame count: " + this.smpl_frames);
     }
 
     setDirty() {
@@ -275,14 +292,21 @@ class Viewer {
         for (let meshIndex = 0; meshIndex < this.smplMeshes.length; meshIndex++) {
             const mesh = this.smplMeshes[meshIndex];
 
-            const num_targets = mesh.morphTargetInfluences.length;
+            const num_targets = this.smpl_frames;
             const timeIndex = Math.floor(this.animator.time / dt) % num_targets;
-            console.log("Time calculated: " + timeIndex + "this.animator.time" + this.animator.time + "dt" + dt);
+            //console.log("Time calculated: " + timeIndex + " this.animator.time: " + this.animator.time + ".dt: " + dt + ". num_targets: " + num_targets + ". meshIndex: " + meshIndex);
 
-            for (let i = 0; i < mesh.morphTargetInfluences.length; i++) {
-                mesh.morphTargetInfluences[i] = i === timeIndex ? 1 : 0;
+            // Check if the mesh should be visible for the current time index
+            if (mesh.userData.visibility[timeIndex]) {
+                mesh.visible = true;
+                for (let i = 0; i < mesh.morphTargetInfluences.length; i++) {
+                    mesh.morphTargetInfluences[i] = i === timeIndex ? 1 : 0;
+                }
+                mesh.geometry.computeVertexNormals();
+            } else {
+                mesh.visible = false;
             }
-            mesh.geometry.computeVertexNormals();
+
         }
 
         // make sure the orbiter is pointed at the right target

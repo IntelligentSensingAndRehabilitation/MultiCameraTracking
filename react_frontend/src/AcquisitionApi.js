@@ -359,6 +359,7 @@ export const AquisitionApi = (props) => {
         cameraStatusList: cameraStatusList,
         priorRecordings: priorRecordings,
         videoUrl: `ws://${BASE_URL}/video_ws`,
+        meshUrl: `ws://${BASE_URL}/mesh_ws`,
         recordingSystemStatus: recordingSystemStatus,
         recordingProgress: recordingProgress,
         keypoints: keypoints,
