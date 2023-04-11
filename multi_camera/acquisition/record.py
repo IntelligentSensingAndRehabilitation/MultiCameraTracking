@@ -145,12 +145,8 @@ def record_dual(vid_file, max_frames=100, num_cams=4, preview=True, resize=0.5, 
         # c.BinningHorizontal = 1
         # c.BinningVertical = 1
 
-        print(f"Before: {c.DeviceSerialNumber}: {c.ExposureTime_FloatVal}")
-
-        c.ExposureAuto = "Continuous"
+        c.ExposureAuto = "Off"
         # c.ExposureTime = 15000
-        c.AcquisitionMode = "MultiFrame"
-        c.AcquisitionFrameCount = max_frames
 
         if False:
             c.GainAuto = "Continuous"
@@ -181,7 +177,7 @@ def record_dual(vid_file, max_frames=100, num_cams=4, preview=True, resize=0.5, 
             trg_delay = 24.
         c.TriggerDelay = trg_delay
 
-        print("sleep after turning on trigger")
+        # NOTE: Blackfly and Flea3 GEV cameras need 1 second delay after trigger mode is turned on
         time.sleep(1)
 
         # Initializing an image queue for each camera
