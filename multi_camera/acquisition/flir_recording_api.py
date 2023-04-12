@@ -66,7 +66,6 @@ def select_interface(interface, cameras):
                 invalid_ids = [c for c in cameras if str(c) not in camera_id_list]
 
                 if invalid_ids:
-                    # if len(camera_id_list) != len(cameras):
                     print(f"The following camera ID(s) from are missing: {invalid_ids} but continuing")
 
                 retval = camera_id_list
@@ -131,7 +130,7 @@ def init_camera(
     c.GainAuto = "Continuous"
     # c.Gain = 10
 
-    c.ImageCompressionMode = "Off"  # Losless might get framerate up but not working currently
+    c.ImageCompressionMode = "Off"  # Lossless might get frame rate up but not working currently
     # c.IspEnable = True  # if trying to adjust the color transformations  this is needed
 
     if jumbo_packet:
@@ -542,7 +541,7 @@ class FlirRecorder:
     async def reset_cameras(self):
         """Reset all the cameras and reopen the system"""
 
-        self.set_status("Reseting")
+        self.set_status("Resetting")
         await asyncio.sleep(0.1)  # let the web service update with this message
 
         # store the serial numbers to get and reset
@@ -552,7 +551,7 @@ class FlirRecorder:
         # this releases all the handles to the pyspin system.
         self.close()
 
-        print("Reopening and reseting")
+        print("Reopening and resetting")
         ########## working with new, temporary, reference to PySpin system
         # this seems important for reliability
 
@@ -561,7 +560,7 @@ class FlirRecorder:
         cams = system.GetCameras()
 
         def reset_cam(s):
-            print("Opening and reseting camera", s)
+            print("Opening and resetting camera", s)
             c = cams.GetBySerial(s)
             c.Init()
             c.DeviceReset()
@@ -642,14 +641,14 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     print(args.config)
-    acquistion = FlirRecorder()
-    asyncio.run(acquistion.configure_cameras(config_file=args.config, num_cams=args.num_cams))
+    acquisition = FlirRecorder()
+    asyncio.run(acquisition.configure_cameras(config_file=args.config, num_cams=args.num_cams))
 
-    print(asyncio.run(acquistion.get_camera_status()))
+    print(asyncio.run(acquisition.get_camera_status()))
 
     if args.reset:
         print("reset")
-        asyncio.run(acquistion.reset_cameras())
+        asyncio.run(acquisition.reset_cameras())
 
     # time.sleep(5)
 
@@ -659,17 +658,17 @@ if __name__ == "__main__":
     filename = f"{args.vid_file}_{time_str}.mp4"
 
     # loop = asyncio.get_event_loop()
-    # loop.run_until_complete(acquistion.start_acquisition(recording_path=filename, max_frames=args.max_frames))
-    acquistion.start_acquisition(recording_path=filename, max_frames=args.max_frames)
+    # loop.run_until_complete(acquisition.start_acquisition(recording_path=filename, max_frames=args.max_frames))
+    acquisition.start_acquisition(recording_path=filename, max_frames=args.max_frames)
 
-    # acquistion.reset_cameras()
+    # acquisition.reset_cameras()
 
     now = datetime.now()
     time_str = now.strftime("%Y%m%d_%H%M%S")
     filename = f"{args.vid_file}_{time_str}.mp4"
 
     # loop = asyncio.get_event_loop()
-    # loop.run_until_complete(acquistion.start_acquisition(recording_path=filename, max_frames=args.max_frames))
-    # acquistion.start_acquisition(recording_path=filename, max_frames=args.max_frames)
+    # loop.run_until_complete(acquisition.start_acquisition(recording_path=filename, max_frames=args.max_frames))
+    # acquisition.start_acquisition(recording_path=filename, max_frames=args.max_frames)
 
-    acquistion.close()
+    acquisition.close()
