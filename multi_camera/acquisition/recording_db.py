@@ -130,7 +130,10 @@ class ParticipantOut(BaseModel):
 
 
 def get_recordings(
-    db: Session, participant_name: Optional[str] = None, order_by_date: Optional[bool] = False
+    db: Session,
+    participant_name: Optional[str] = None,
+    filter_by_session_date: Optional[date] = None,
+    order_by_date: Optional[bool] = False,
 ) -> Union[List[ParticipantOut], Tuple[List[SessionOut], List[str]]]:
     query = db.query(Participant).options(joinedload(Participant.sessions).joinedload(Session.recordings))
 
@@ -143,6 +146,9 @@ def get_recordings(
     for participant in participants:
         session_out_list = []
         for session in participant.sessions:
+            if filter_by_session_date and session.session_date != filter_by_session_date:
+                continue
+
             recording_out_list = [
                 RecordingOut(**{k: v for k, v in recording.__dict__.items() if k != "_sa_instance_state"})
                 for recording in session.recordings
