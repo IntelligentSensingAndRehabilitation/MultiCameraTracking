@@ -157,7 +157,9 @@ def init_camera(
         c.TriggerMode = "On"
 
 
-def write_queue(vid_file: str, image_queue: Queue, json_queue: Queue, serial, pixel_format: str, acquisition_fps: float):
+def write_queue(
+    vid_file: str, image_queue: Queue, json_queue: Queue, serial, pixel_format: str, acquisition_fps: float
+):
     """
     Write images from the queue to a video file
 
