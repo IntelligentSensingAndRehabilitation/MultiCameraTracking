@@ -972,7 +972,7 @@ class SMPLXReconstructionVideos(dj.Computed):
             os.remove(out_file_name)
 
 
-def import_recording(vid_base, vid_path=".", video_project="MULTICAMERA_TEST", legacy_flip=None):
+def import_recording(vid_base, vid_path=".", video_project="MULTICAMERA_TEST", legacy_flip=None, skip_connection=False):
     import os
     import json
     import numpy as np
@@ -1028,7 +1028,6 @@ def import_recording(vid_base, vid_path=".", video_project="MULTICAMERA_TEST", l
     vid_structs = []
     single_structs = []
     for v, serial in zip(vids, camera_names):
-
         vid_filename = os.path.split(v)[1]
         vid_filename = os.path.splitext(vid_filename)[0]
 
@@ -1047,13 +1046,25 @@ def import_recording(vid_base, vid_path=".", video_project="MULTICAMERA_TEST", l
         vid_structs.append(vid_struct)
         single_structs.append(single_struct)
 
-    dj.conn().start_transaction()
-    try:
+    if MultiCameraRecording & parent:
+        print("Recording already exists. Skipping.")
+        return parent
+
+    if skip_connection:
         MultiCameraRecording.insert1(parent)
         Video.insert(vid_structs, skip_duplicates=True)
         SingleCameraVideo.insert(single_structs)
-    except Exception as e:
-        dj.conn().cancel_transaction()
-        raise e
+
     else:
-        dj.conn().commit_transaction()
+        dj.conn().start_transaction()
+        try:
+            MultiCameraRecording.insert1(parent)
+            Video.insert(vid_structs, skip_duplicates=True)
+            SingleCameraVideo.insert(single_structs)
+        except Exception as e:
+            dj.conn().cancel_transaction()
+            raise e
+        else:
+            dj.conn().commit_transaction()
+
+    return parent
