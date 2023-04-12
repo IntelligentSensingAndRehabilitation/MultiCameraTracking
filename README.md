@@ -5,6 +5,7 @@ This library supports multiview recordings, pose estimation, fitting SMPL meshes
 
 Modules:
 - `multi_camera.acquisition` - the recording software
+- `multi_camera.acquisition.diagnostics` - tools to debug the recording software
 - `multi_camera.analysis` - core analysis code
 - `multi_camera.datajoint` - data management and bridges between recording software and analysis code
 - `multi_camera.utils` - miscellaneous utilities.
@@ -40,7 +41,7 @@ Then start the web GUI
 
 ## Recording:
 
-    python -m multi_camera.acquisition.record [-h] [-m MAX_FRAMES] [-n NUM_CAMS] [--preview] [-s SCALING] [-c CONFIG] vid_filename
+    python -m multi_camera.acquisition.flir_recording_api [-h] [-m MAX_FRAMES] [-n NUM_CAMS] [--preview] [-s SCALING] [-c CONFIG] vid_filename
 
 One can either pass a number of frames or hit "Ctrl-C" to stop recording
 
@@ -50,7 +51,7 @@ set_mtu.sh script is used to enable jumbo packets with linux.
 
 To record calibration data, analyze it, and insert it into the database run
 
-    python -m multi_camera.acquisition.record [-n NUM_CAMS] calibration
+    python -m multi_camera.acquisition.flir_recording_api [-n NUM_CAMS] calibration
     python -m multi_camera.datajoint.calibrate_cameras calibration_<basefile>
 
 ## Video analysis
