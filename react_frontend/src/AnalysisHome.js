@@ -1,5 +1,5 @@
-import React, { useContext, useState, useEffect } from "react";
-import { Accordion, Table, Form, Container, Button } from 'react-bootstrap';
+import React, { useContext, useState, useRef, useEffect } from "react";
+import { Accordion, Table, Form, Container, Button, Col, Row } from 'react-bootstrap';
 import path from 'path-browserify';
 import { AcquisitionState } from "./AcquisitionApi";
 
@@ -7,6 +7,8 @@ const stripPath = (filePath) => path.basename(filePath);
 
 
 const RecordingTable = ({ recordings, participant, session_date, callback }) => {
+
+    const videoProjectRef = useRef(null);
 
     const handleToggle = async (recordingKey, isChecked) => {
         await callback.onToggleShouldProcess(participant, session_date, recordingKey, isChecked);
@@ -16,8 +18,9 @@ const RecordingTable = ({ recordings, participant, session_date, callback }) => 
         await callback.onCalibrate(participant, session_date, recordingKey);
     }
 
-    const process = () => {
-        console.log("process participant: ", participant, "session_date: ", session_date);
+    const process = async () => {
+        const videoProject = videoProjectRef.current.value;
+        await callback.onProcessSession(participant, session_date, videoProject);
     }
 
     return (
@@ -53,13 +56,30 @@ const RecordingTable = ({ recordings, participant, session_date, callback }) => 
                                     checked={recording.should_process}
                                     onChange={(e) => handleToggle(recording.filename, e.target.checked)}
                                 />
+                                {/* Now have label and form for video project entry */}
+
                             </td>
                         </tr>
                     ))}
                 </tbody>
             </Table>
             {/* Button that pushes a recording to DataJoint */}
-            <Button variant="primary" onClick={() => process()}>Push to DataJoint</Button>
+            <Form.Group controlId="video_project" className="p-2">
+                <Row>
+                    <Col>
+                        <Form.Label>Video Project</Form.Label>
+                    </Col>
+                    <Col>
+                        <Form.Control type="text" ref={videoProjectRef} placeholder="Enter Project" />
+                    </Col>
+                    <Col>
+                        <Button variant="primary" onClick={() => process()}>
+                            Push to DataJoint
+                        </Button>
+                    </Col>
+                </Row>
+            </Form.Group>
+
         </Container>
     );
 };
@@ -110,7 +130,7 @@ const ParticipantAccordion = ({ participants, callback }) => {
 const AnalysisHome = () => {
 
     const [recordingDb, setRecordingDb] = useState([]);
-    const { fetchRecordingDb, toggleProcess, runCalibration } = useContext(AcquisitionState);
+    const { fetchRecordingDb, toggleProcess, runCalibration, processSession } = useContext(AcquisitionState);
 
 
     const onToggleShouldProcess = async (participant, session_date, recordingKey, isChecked) => {
@@ -136,8 +156,14 @@ const AnalysisHome = () => {
         await runCalibration(participant, recordingKey);
     }
 
+    const onProcessSession = async (participant, session_date, videoProject) => {
+        console.log("process session", participant, session_date, videoProject);
+        await processSession(participant, session_date, videoProject);
+    }
+
     // Create variable with both callbacks
     const callbacks = {
+        onProcessSession: onProcessSession,
         onToggleShouldProcess: onToggleShouldProcess,
         onCalibrate: onCalibrate
     }

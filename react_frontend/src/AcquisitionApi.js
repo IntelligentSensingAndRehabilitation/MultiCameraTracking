@@ -41,7 +41,10 @@ export const useEffectOnce = (effect) => {
             // if the comp didn't render since the useEffect was called,
             // we know it's the dummy React cycle
             if (!renderAfterCalled.current) { return; }
-            if (destroyFunc.current) { destroyFunc.current(); }
+            if (destroyFunc.current) {
+                console.log(destroyFunc.current);
+                destroyFunc.current();
+            }
         };
     }, []);
 };
@@ -343,6 +346,15 @@ export const AquisitionApi = (props) => {
         await axios.post(`${API_BASE_URL}/calibrate`, matchedRecording);
     }
 
+    const processSession = async (participant, session, video_project) => {
+        console.log(`Processing session ${session} for ${participant}`);
+        await axios.post(`${API_BASE_URL}/process_session`, {
+            participant_name: participant,
+            session_date: session,
+            video_project: video_project
+        });
+    }
+
     useEffect(() => {
         //Implementing the setInterval method
         //const interval = setInterval(() => {
@@ -380,6 +392,7 @@ export const AquisitionApi = (props) => {
         toggleProcess,
         changeComment,
         runCalibration,
+        processSession,
         fetchKeypoints,
         fetchMesh,
         fetchBiomechanics
