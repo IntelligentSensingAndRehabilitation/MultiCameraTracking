@@ -665,14 +665,4 @@ if __name__ == "__main__":
     # loop.run_until_complete(acquisition.start_acquisition(recording_path=filename, max_frames=args.max_frames))
     acquisition.start_acquisition(recording_path=filename, max_frames=args.max_frames)
 
-    # acquisition.reset_cameras()
-
-    now = datetime.now()
-    time_str = now.strftime("%Y%m%d_%H%M%S")
-    filename = f"{args.vid_file}_{time_str}.mp4"
-
-    # loop = asyncio.get_event_loop()
-    # loop.run_until_complete(acquisition.start_acquisition(recording_path=filename, max_frames=args.max_frames))
-    # acquisition.start_acquisition(recording_path=filename, max_frames=args.max_frames)
-
     acquisition.close()
