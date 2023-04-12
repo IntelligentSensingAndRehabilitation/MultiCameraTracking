@@ -109,6 +109,7 @@ def init_camera(
             triggering (bool): Enable network triggering for start
             throughput_limit (int): Throughput limit for camera.
             resend_enable (bool): Enable packet resend
+            binning (int): Factor by which the image resolution is reduced
 
         Throughput should be limited for multiple cameras but reduces frame rate. Can use 125000000 for maximum
         frame rate or 85000000 when using more cameras with a 10GigE switch.
