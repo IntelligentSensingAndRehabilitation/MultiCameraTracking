@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multi-camera Video Acquisition System</title>
+    <!-- link href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css" rel="stylesheet"
+        integrity="sha384-rbsA2VBKQhggwzxH7pPCaAqO46MgnOM80zW1RWuH61DGLwZJEdK2Kadq2F9CUG65" crossorigin="anonymous">
+    <link rel="stylesheet" href="styles.css" -->
+
+    <style>
+        .styled-table th,
+        .styled-table td {
+            padding: 10px;
+            border: 1px solid #ccc;
+        }
+
+        .styled-table {
+            border-collapse: collapse;
+        }
+    </style>
+</head>
+
+<body class="container my-4">
+
+    <h1 class="mb-4">Multi-camera Video Acquisition System</h1>
+
+    <div class="form-group">
+        <label for="config">Config:</label>
+        <select id="config" class="form-control" onchange="configChanged()">
+            <!-- options will be added by the backend -->
+        </select>
+    </div>
+    <button id="reset_cameras" class="btn btn-primary mb-4" onclick="resetCameras()">Reset Cameras</button>
+
+    <div class="form-group">
+        <label for="participant_identifier">Participant Identifier:</label>
+        <input id="participant_identifier" type="text" class="form-control" />
+    </div>
+
+    <div class="form-row">
+        <div class="form-group col-md-6">
+            <button id="new_session" class="btn btn-primary" onclick="newSession()">New Session</button>
+        </div>
+        <div class="form-group col-md-6">
+            <label for="session_dir">Recording Directory:</label>
+            <input id="session_dir" type="text" class="form-control" />
+        </div>
+        <div class="form-group col-md-6">
+            <label for="session_filename">Base Filename:</label>
+            <input id="session_filename" type="text" class="form-control" />
+        </div>
+    </div>
+
+    <div class="form-row">
+        <div class="form-group col-md-6">
+            <button id="new_trial" class="btn btn-primary" onclick="newTrial()">New Trial</button>
+        </div>
+        <div class="form-group col-md-6">
+            <button id="stop" class="btn btn-danger">Stop Recording</button>
+        </div>
+        <div class="form-group col-md-6">
+            <label for="file_name">File Name:</label>
+            <input id="file_name" type="text" class="form-control" readonly />
+        </div>
+        <div class="form-group col-md-6">
+            <label for="comment">Comment:</label>
+            <input id="comment" type="text" class="form-control" />
+        </div>
+    </div>
+
+    <div class="form-group">
+        <label for="status">Status:</label>
+        <input id="status" type="text" class="form-control" readonly />
+    </div>
+
+    <div style="border: 1px solid black;">
+        <img id="video_stream" width="640">
+    </div>
+
+    <hr style="border-top: 3px solid black;">
+
+    <table class="styled-table">
+        <tr>
+            <td>
+                <h3>Camera Status:</h3>
+            </td>
+        </tr>
+        <tr>
+            <td>
+                <table id="camera_status_table" class="styled-table">
+                    <thead>
+                        <tr>
+                            <th>Serial Number</th>
+                            <th>Status</th>
+                            <th>Pixel Format</th>
+                            <th>Binning Horizontal</th>
+                            <th>Binning Vertical</th>
+                            <th>Width</th>
+                            <th>Height</th>
+                            <th>Sync Offset</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <!-- Camera status rows will be added by JavaScript -->
+                    </tbody>
+                </table>
+            </td>
+        </tr>
+    </table>
+
+    <hr style="border-top: 3px solid black;">
+
+    <table class="styled-table">
+        <tr>
+            <td>
+                <h3>Prior Recordings:</h3>
+            </td>
+        </tr>
+        <tr>
+            <td>
+                <table id="previous_recordings" class="styled-table">
+                    <thead>
+                        <tr>
+                            <th>Filename</th>
+                            <th>Comment</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <!-- rows will be added by the backend -->
+                    </tbody>
+                </table>
+            </td>
+        </tr>
+    </table>
+
+
+    <script>
+        const API_ENDPOINT = "/api/v1"; // Define the API endpoint path
+
+        const video = document.getElementById("video");
+        const channelSelector = document.getElementById("channel");
+        const startButton = document.getElementById("start");
+        const stopButton = document.getElementById("stop");
+        const participantIdentifierInput = document.getElementById("participant_identifier");
+        const sessionDirInput = document.getElementById("session_dir");
+        const sessionFilenameInput = document.getElementById("session_filename");
+        const newSessionButton = document.getElementById("new_session");
+        const newTrialButton = document.getElementById("new_trial");
+        const statusInput = document.getElementById("status");
+        const commentInput = document.getElementById("comment");
+        const configSelect = document.getElementById("config");
+        const fileNameInput = document.getElementById("file_name");
+
+        async function sendData(url, data) {
+            console.log("Sending data:", data, "to", url);
+            const response = await fetch(`${API_ENDPOINT}${url}`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify(data),
+            });
+            return response.json();
+        }
+
+        async function updateStatus(status) {
+            statusInput.value = status;
+        }
+
+        async function newSession() {
+
+            fetch(`${API_ENDPOINT}/new_session?subject_id=${participantIdentifierInput.value}`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                }
+            })
+                .then(response => response.json())
+                .then(data => {
+                    console.log(data);
+                    // Parse the recording_dir and recording_filename fields and show the results in the UI
+                    const recordingDir = data.recording_dir;
+                    const recordingFilename = data.recording_filename;
+                    sessionDirInput.value = recordingDir;
+                    sessionFilenameInput.value = recordingFilename;
+                }
+                )
+                .catch(error => console.error(error));
+
+        }
+
+        async function newTrial() {
+            const recordingDir = sessionDirInput.value;
+
+            sendData("/new_trial", { recording_dir: sessionDirInput.value, recording_filename: sessionFilenameInput.value, comment: commentInput.value })
+                .then(data => {
+                    console.log(data);
+                    updateStatus(data.status);
+                    fileNameInput.value = data.recording_file_name;
+
+                    updatePriorRecordingsTable();
+                });
+        }
+
+        stopButton.addEventListener("click", () => {
+            sendData("/stop", {}).then(data => {
+                statusInput.value = "recording stopped";
+            });
+        });
+
+        async function updatePriorRecordingsTable() {
+            const response = await fetch(`${API_ENDPOINT}/prior_recordings`);
+            const priorRecordings = await response.json();
+
+            // Clear the current table
+            const table = document.getElementById("previous_recordings").getElementsByTagName('tbody')[0];
+            table.innerHTML = '';
+
+            // Add new rows to the table
+            priorRecordings.forEach(recording => {
+                const row = table.insertRow();
+                const filenameCell = row.insertCell(0);
+                const commentCell = row.insertCell(1);
+                filenameCell.innerHTML = recording.filename;
+                commentCell.innerHTML = recording.comment;
+            });
+        }
+
+        fetch(`${API_ENDPOINT}/configs`)
+            .then(response => response.json())
+            .then(data => {
+                data.forEach(config => {
+                    const option = document.createElement("option");
+                    option.value = config;
+                    option.text = config;
+                    configSelect.add(option);
+                });
+            });
+
+        async function configChanged() {
+            sendData("/update_config", { config: configSelect.value }).then(data => {
+                console.log(data);
+                if (data.status = "success") {
+                    updateStatus("config updated");
+                }
+            });
+
+        }
+
+        async function resetCameras() {
+            sendData("/reset_cameras", {});
+        }
+
+        fetch(`${API_ENDPOINT}/prior_recordings`)
+            .then(response => response.json())
+            .then(data => {
+                const table = document.getElementById("previous_recordings");
+                data.forEach(recording => {
+                    const row = table.insertRow();
+                    const participantCell = row.insertCell(0);
+                    const filenameCell = row.insertCell(1);
+                    const commentCell = row.insertCell(2);
+                    participantCell.innerHTML = recording.participant;
+                    filenameCell.innerHTML = recording.filename;
+                    commentCell.innerHTML = recording.comment;
+                });
+            });
+
+        async function updateCameraStatus() {
+            const response = await fetch(`${API_ENDPOINT}/camera_status`);
+            const cameraStatusList = await response.json();
+
+            // Clear the table
+            const table = document.getElementById("camera_status_table");
+            table.innerHTML = "";
+
+            // Add new rows for each camera
+            cameraStatusList.forEach((cameraStatus) => {
+                const row = table.insertRow();
+                row.insertCell().innerHTML = cameraStatus.SerialNumber;
+                row.insertCell().innerHTML = cameraStatus.Status;
+                row.insertCell().innerHTML = cameraStatus.PixelFormat;
+                row.insertCell().innerHTML = cameraStatus.BinningHorizontal;
+                row.insertCell().innerHTML = cameraStatus.BinningVertical;
+                row.insertCell().innerHTML = cameraStatus.Width;
+                row.insertCell().innerHTML = cameraStatus.Height;
+                row.insertCell().innerHTML = cameraStatus.SyncOffset;
+            });
+        }
+
+        // Fetch the camera status every 5 seconds (5000 ms)
+        // setInterval(updateCameraStatus, 5000);
+
+        // Handle incoming WebSocket messages
+        function setupWebSocket() {
+            const wsUrl = "ws://localhost:8000/api/v1/ws";
+
+            console.log("Setting up WebSocket connection:" + wsUrl);
+            const ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => console.log("WebSocket connected");
+            ws.onclose = () => console.log("WebSocket disconnected");
+            ws.onerror = (error) => console.log("WebSocket error:", error);
+            ws.onmessage = (event) => console.log("WebSocket message:", event.data);
+        }
+
+        // Call the setupWebSocket function to initialize the WebSocket connection
+        setupWebSocket();
+
+        // Connect up for recording
+        const videoStream = document.getElementById("video_stream");
+
+        // Set the image source to the video stream endpoint
+        // videoStream.src = `http://localhost:8000${API_ENDPOINT}/video`;
+    </script>
+</body>
+
+</html>

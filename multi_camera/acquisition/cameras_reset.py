@@ -4,12 +4,42 @@ import yaml
 
 
 def reset(all_cams=True, config="", verbose=False):
+    if all_cams:
+        import PySpin
+
+        system = PySpin.System.GetInstance()
+
+        cams = system.GetCameras()
+
+        N = cams.GetSize()
+        print(f"Resetting {N} cameras.")
+
+        def reset_cam(i):
+            c = cams[i]
+            c.Init()
+            c.DeviceReset()
+            c.DeInit()
+            print(f"Reset {i}")
+            del c
+
+        import concurrent.futures
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=N) as executor:
+            executor.map(reset_cam, range(N))
+
+        cams.Clear()
+
+        system.ReleaseInstance()
+
+        print("Completed resetting all cameras. Exiting.")
+        return
 
     # Get the available cameras
     camera_list = simple_pyspin.list_cameras()
     cams = [Camera(i, lock=True) for i in range(camera_list.GetSize())]
 
     if verbose:
+        print(f"Total cams: {len(cams)}")
         print(f"List of cams: {cams}")
 
     # Check if either flag has been provided (config or all cams)
@@ -24,17 +54,22 @@ def reset(all_cams=True, config="", verbose=False):
         # Reset all available cameras
         print(f"No config file passed. Resetting {len(cams)} discovered cameras.")
 
-    for c in cams:
-        c.init()
+    for i, c in enumerate(cams):
+        try:
+            c.init()
 
-        # check if the current camera is in the list defined by config
-        if config != "":
-            if int(c.DeviceSerialNumber) not in camera_config["camera-info"].keys():
-                if verbose:
-                    print(f"{c.DeviceSerialNumber} not listed in config file.")
-                continue
-        print(f"Reset {c.DeviceSerialNumber}")
-        c.DeviceReset()
+            # check if the current camera is in the list defined by config
+            if config != "":
+                if int(c.DeviceSerialNumber) not in camera_config["camera-info"].keys():
+                    if verbose:
+                        print(f"{c.DeviceSerialNumber} not listed in config file.")
+                    continue
+
+            c.DeviceReset()
+            print(f"Reset {(i+1):02d}) {c.DeviceSerialNumber}")
+            del c
+        except Exception as E:
+            print(E)
 
 
 if __name__ == "__main__":
