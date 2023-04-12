@@ -156,7 +156,7 @@ def init_camera(
         c.TriggerMode = "On"
 
 
-def write_queue(vid_file: str, image_queue: Queue, json_queue: Queue, serial, pixel_format: str):
+def write_queue(vid_file: str, image_queue: Queue, json_queue: Queue, serial, pixel_format: str, acquisition_fps: float):
     """
     Write images from the queue to a video file
 
@@ -166,8 +166,9 @@ def write_queue(vid_file: str, image_queue: Queue, json_queue: Queue, serial, pi
         json_queue (Queue): Queue to write the json information about timestamps to
         serial (str): Camera serial number
         pixel_format (str): Pixel format of the camera
+        acquisition_fps (float): Frame rate of camera in Hz
 
-    Filename is determine by the vid_file and time_str. The serial number is appended to the end of the filename.
+    Filename is determined by the vid_file and time_str. The serial number is appended to the end of the filename.
 
     This is expected to be called from a standalone thread and will autoamtically terminate when the image_queue is empty.
     """
@@ -197,13 +198,10 @@ def write_queue(vid_file: str, image_queue: Queue, json_queue: Queue, serial, pi
             last_im = im
 
         elif out_video is None and len(real_times) > 1:
-            ts = np.asarray(timestamps)
-            delta = np.mean(np.diff(ts, axis=0)) * 1e-9
-            fps = 1.0 / delta
-            tqdm.write(f"Computed FPS: {fps}")
+            tqdm.write(f"Writing FPS: {acquisition_fps}")
 
             fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-            out_video = cv2.VideoWriter(vid_file, fourcc, fps, (im.shape[1], im.shape[0]))
+            out_video = cv2.VideoWriter(vid_file, fourcc, acquisition_fps, (im.shape[1], im.shape[0]))
             out_video.write(last_im)
 
         else:
@@ -413,6 +411,7 @@ class FlirRecorder:
                         "json_queue": json_queue[c.DeviceSerialNumber],
                         "serial": serial,
                         "pixel_format": self.pixel_format,
+                        "acquisition_fps": c.AcquisitionFrameRate,
                     },
                 ).start()
 
