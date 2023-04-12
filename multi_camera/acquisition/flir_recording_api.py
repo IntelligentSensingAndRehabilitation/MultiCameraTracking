@@ -623,6 +623,7 @@ class FlirRecorder:
 
 if __name__ == "__main__":
     import argparse
+    import signal
 
     parser = argparse.ArgumentParser(description="Record video from GigE FLIR cameras")
     parser.add_argument("vid_file", help="Video file to write")
@@ -658,6 +659,9 @@ if __name__ == "__main__":
     now = datetime.now()
     time_str = now.strftime("%Y%m%d_%H%M%S")
     filename = f"{args.vid_file}_{time_str}.mp4"
+
+    # install a signal handler to call stop acquisition on Ctrl-C
+    signal.signal(signal.SIGINT, lambda sig, frame: acquisition.stop_acquisition())
 
     # loop = asyncio.get_event_loop()
     # loop.run_until_complete(acquisition.start_acquisition(recording_path=filename, max_frames=args.max_frames))
