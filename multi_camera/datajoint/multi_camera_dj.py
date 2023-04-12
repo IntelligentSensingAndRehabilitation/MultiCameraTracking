@@ -97,7 +97,6 @@ class PersonKeypointReconstruction(dj.Computed):
     """
 
     def make(self, key):
-
         import numpy as np
         from ..analysis.camera import robust_triangulate_points, triangulate_point
         from ..analysis.optimize_reconstruction import skeleton_loss, reprojection_loss, smoothness_loss
@@ -298,7 +297,6 @@ class PersonKeypointReconstruction(dj.Computed):
             )
 
         elif reconstruction_method_name == "Implicit Optimization, MaxHuber=10":
-
             from ..analysis.optimize_reconstruction import optimize_trajectory
 
             points3d, camera_weights = optimize_trajectory(
@@ -576,7 +574,6 @@ class PersonKeypointReprojectionVideos(dj.Computed):
         for i, video_key in enumerate(video_keys):
 
             def render_overlay(frame, idx):
-
                 if idx >= keypoints2d.shape[1]:
                     return frame
 
@@ -756,7 +753,6 @@ class SMPLReconstructionVideos(dj.Computed):
         render = Renderer(height=height, width=width, down_scale=2, bg_color=[0, 0, 0, 0.0])
 
         for i, video_key in enumerate(video_keys):
-
             # get camera parameters
             K = np.array(get_intrinsic(camera_params, i))
 
@@ -771,7 +767,6 @@ class SMPLReconstructionVideos(dj.Computed):
             vertices_distorted = vertices_distorted / 1000.0
 
             def render_overlay(frame, idx, vertices=vertices_distorted, faces=faces, cameras=cameras):
-
                 if idx >= vertices.shape[0]:
                     return frame
 
@@ -931,7 +926,6 @@ class SMPLXReconstructionVideos(dj.Computed):
         render = Renderer(height=height, width=width, down_scale=2, bg_color=[0, 0, 0, 0.0])
 
         for i, video_key in enumerate(video_keys):
-
             # get camera parameters
             K = np.array(get_intrinsic(camera_params, i))
 
@@ -946,7 +940,6 @@ class SMPLXReconstructionVideos(dj.Computed):
             vertices_distorted = vertices_distorted / 1000.0
 
             def render_overlay(frame, idx, vertices=vertices_distorted, faces=faces, cameras=cameras):
-
                 if idx >= vertices.shape[0]:
                     return frame
 
