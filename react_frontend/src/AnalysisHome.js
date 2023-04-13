@@ -1,5 +1,5 @@
 import React, { useContext, useState, useRef, useEffect } from "react";
-import { Accordion, Table, Form, Container, Button, Col, Row } from 'react-bootstrap';
+import { Accordion, Table, Form, Container, Button, Col, Row, ButtonGroup, ToggleButton } from 'react-bootstrap';
 import path from 'path-browserify';
 import { AcquisitionState } from "./AcquisitionApi";
 
@@ -85,47 +85,117 @@ const RecordingTable = ({ recordings, participant, session_date, imported, callb
     );
 };
 
-const SessionAccordion = ({ sessions, participant, callback }) => {
+const InnerAccordion = ({ sessions, participants, callback, sortByDate }) => {
 
-    console.log("sessions", sessions, "participant", participant)
+    console.log("sessions", sessions, "participant", participants)
 
-    return (
+    if (sortByDate) {
+        const date = sessions; // only 1 in this case
 
-        < Accordion defaultActiveKey="0" >
-            {
-                sessions.slice().reverse().map((session, index) => (
-                    <Accordion.Item key={session.session_path} eventKey={`${index}`}>
-                        <Accordion.Header>{session.session_date}</Accordion.Header>
-                        <Accordion.Body className="p-1" >
-                            <RecordingTable recordings={session.recordings} participant={participant} session_date={session.session_date} imported={session.imported} callback={callback} />
-                        </Accordion.Body>
-                    </Accordion.Item>
-                ))
+        // make a deep copy of the participants
+        var participants_copy = JSON.parse(JSON.stringify(participants))
+
+        console.log("participants_copy", participants_copy)
+
+        // need to filter the sessions for each participant to only include the one with the correct date
+        participants_copy.forEach(participant => {
+            participant.sessions = participant.sessions.filter(session => session.session_date === date)
+            if (participant.sessions.length === 0) {
+                console.log("participant", participant, "has no sessions for date", date)
             }
-        </Accordion >
-    );
+        })
+
+        participants_copy = participants_copy.filter(participant => participant.sessions.length > 0)
+
+
+        return (
+            < Accordion defaultActiveKey="0" >
+                {
+                    participants_copy.map((participant, index) => (
+                        <Accordion.Item key={participant.sessions[0].session_path} eventKey={`${index}`}>
+                            <Accordion.Header>{participant.name}</Accordion.Header>
+                            <Accordion.Body className="p-1" >
+                                <RecordingTable recordings={participant.sessions[0].recordings} participant={participant.name} session_date={participant.sessions[0].session_date} imported={participant.sessions[0].imported} callback={callback} />
+                            </Accordion.Body>
+                        </Accordion.Item>
+                    ))
+                }
+            </Accordion >
+        );
+    } else {
+        // When not sorting by date, there is one participant for the inner accordion
+        // and the sessions are all from that person so we loop over them
+        const participant = participants; // only 1 in this case
+        return (
+            < Accordion defaultActiveKey="0" >
+                {
+                    sessions.slice().reverse().map((session, index) => (
+                        <Accordion.Item key={session.session_path} eventKey={`${index}`}>
+                            <Accordion.Header>{session.session_date}</Accordion.Header>
+                            <Accordion.Body className="p-1" >
+                                <RecordingTable recordings={session.recordings} participant={participant} session_date={session.session_date} imported={session.imported} callback={callback} />
+                            </Accordion.Body>
+                        </Accordion.Item>
+                    ))
+                }
+            </Accordion >
+        );
+    }
 };
 
-const ParticipantAccordion = ({ participants, callback }) => {
-    return (
-        <Accordion>
-            {participants.map((participant, index) => (
-                <Accordion.Item eventKey={`${index}`}>
+// Add the sortByDate prop
+const OuterAccordion = ({ participants, callback, sortByDate }) => {
 
-                    <Accordion.Header>
-                        {participant.name}
-                    </Accordion.Header>
+    if (sortByDate) {
+        const allSessions = participants.flatMap(participant => participant.sessions);
+        const uniqueDates = Array.from(new Set(allSessions.map(session => session.session_date))).sort().reverse();
 
-                    <Accordion.Body className="p-0" >
-                        <SessionAccordion sessions={participant.sessions} participant={participant.name} callback={callback} />
-                    </Accordion.Body>
 
-                </Accordion.Item>
-            ))}
-        </Accordion>
+        return (
+            <Accordion>
+                {uniqueDates.map((date, index) => (
+                    <Accordion.Item eventKey={`${index}`}>
 
-    );
+                        <Accordion.Header>
+                            {date}
+                        </Accordion.Header>
+
+                        <Accordion.Body className="p-0">
+                            <InnerAccordion
+                                sessions={date}
+                                participants={participants.filter(participant => participant.sessions.some(session => session.session_date === date))}
+                                callback={callback}
+                                sortByDate={sortByDate}
+                            />
+                        </Accordion.Body>
+
+                    </Accordion.Item>
+                ))}
+            </Accordion>
+        );
+    } else {
+
+        return (
+            <Accordion>
+                {participants.map((participant, index) => (
+                    <Accordion.Item eventKey={`${index}`}>
+
+                        <Accordion.Header>
+                            {participant.name}
+                        </Accordion.Header>
+
+                        <Accordion.Body className="p-0" >
+                            <InnerAccordion sessions={participant.sessions} participants={participant.name} callback={callback} sortByDate={sortByDate} />
+                        </Accordion.Body>
+
+                    </Accordion.Item>
+                ))}
+            </Accordion>
+
+        );
+    }
 };
+
 
 
 const AnalysisHome = () => {
@@ -133,6 +203,13 @@ const AnalysisHome = () => {
     const [recordingDb, setRecordingDb] = useState([]);
     const { fetchRecordingDb, toggleProcess, runCalibration, processSession } = useContext(AcquisitionState);
 
+    // Add a state variable to track the toggle state
+    const [sortByDate, setSortByDate] = useState(true);
+
+    const radios = [
+        { name: 'By Date', value: true },
+        { name: 'By Participant', value: false },
+    ];
 
     const onToggleShouldProcess = async (participant, session_date, recordingKey, isChecked) => {
         console.log("toggle", participant, session_date, recordingKey, isChecked);
@@ -187,11 +264,34 @@ const AnalysisHome = () => {
         setRecordingDb(recordings);
     }
 
+    const toggle = (val) => {
+        val = val == "true";
+        console.log("toggle", val);
+        setSortByDate(val);
+    }
+
     return (
         <div>
-            <h1>Experiments</h1>
+            <h1>Recordings</h1>
             <Container className="g-4 p-2" gap={3}>
-                <ParticipantAccordion participants={recordingDb} callback={callbacks} />
+
+                <ButtonGroup className="mb-3 p-2">
+                    {radios.map((radio, idx) => (
+                        <ToggleButton
+                            key={idx}
+                            id={`radio-${idx}`}
+                            type="radio"
+                            variant={idx % 2 ? 'outline-success' : 'outline-danger'}
+                            name="radio"
+                            value={radio.value}
+                            checked={sortByDate == radio.value}
+                            onChange={(e) => toggle(e.currentTarget.value)}
+                        >
+                            {radio.name}
+                        </ToggleButton>
+                    ))}
+                </ButtonGroup>
+                <OuterAccordion participants={recordingDb} callback={callbacks} sortByDate={sortByDate} />
             </Container>
             <Button onClick={resyncData}>Refresh Video Database</Button>
         </div>
