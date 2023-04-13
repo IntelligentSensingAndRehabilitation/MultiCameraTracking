@@ -24,6 +24,8 @@ from multi_camera.acquisition.recording_db import (
     add_recording,
     get_recordings,
     modify_recording_entry,
+    synchronize_to_datajoint,
+    push_to_datajoint,
     ParticipantOut,
     SessionOut,
     RecordingOut,
@@ -143,6 +145,9 @@ async def lifespan(app: FastAPI):
     state.acquisition = FlirRecorder(receive_status)
 
     state = get_global_state()
+
+    db = get_db()
+    synchronize_to_datajoint(db)
 
     yield
 
@@ -408,39 +413,7 @@ class ProcessSession(BaseModel):
 
 @api_router.post("/process_session")
 async def update_recording(session: ProcessSession, db=Depends(db_dependency)):
-    from multi_camera.datajoint.sessions import import_session
-
-    print("Processing session: ", session)
-
-    # get the list of recordings from the database with their comments
-    # that match the participant and session date
-    db_recordings: ParticipantOut = get_recordings(
-        db, participant_name=session.participant_name, filter_by_session_date=session.session_date
-    )
-    assert len(db_recordings) == 1, "Did not find exactly one participant for this name."
-    sessions: SessionOut = db_recordings[0].sessions
-    assert len(sessions) == 1, "Did not find exactly one session for this participant and date."
-    recordings: List[RecordingOut] = sessions[0].recordings
-
-    # filter out the recordings that should not be processed and retain the
-    # filename and comment
-    recordings = [
-        (rec.filename, rec.comment) for rec in recordings if rec.should_process and rec.comment != "calibration"
-    ]
-
-    print("Processing recordings: ", recordings)
-
-    # TODO: confirm calibration has been performed
-
-    # detect if particpant_name has the format p## or t## where ## is numeric, in which
-    # case strip off the first character
-    if session.participant_name[0] in ("p", "t") and session.participant_name[1:].isnumeric():
-        participant_id = session.participant_name[1:]
-    else:
-        participant_id = session.participant_name
-
-    import_session(participant_id, session.session_date, video_project=session.video_project, recordings=recordings)
-
+    push_to_datajoint(db, session.participant_name, session.session_date, session.video_project)
     return {}
 
 
