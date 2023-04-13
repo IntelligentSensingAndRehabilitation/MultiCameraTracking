@@ -6,7 +6,7 @@ import { AcquisitionState } from "./AcquisitionApi";
 const stripPath = (filePath) => path.basename(filePath);
 
 
-const RecordingTable = ({ recordings, participant, session_date, callback }) => {
+const RecordingTable = ({ recordings, participant, session_date, imported, callback }) => {
 
     const videoProjectRef = useRef(null);
 
@@ -55,6 +55,7 @@ const RecordingTable = ({ recordings, participant, session_date, callback }) => 
                                     id={`toggle-${index}`}
                                     checked={recording.should_process}
                                     onChange={(e) => handleToggle(recording.filename, e.target.checked)}
+                                    disabled={imported}
                                 />
                                 {/* Now have label and form for video project entry */}
 
@@ -70,10 +71,10 @@ const RecordingTable = ({ recordings, participant, session_date, callback }) => 
                         <Form.Label>Video Project</Form.Label>
                     </Col>
                     <Col>
-                        <Form.Control type="text" ref={videoProjectRef} placeholder="Enter Project" />
+                        <Form.Control type="text" ref={videoProjectRef} placeholder="Enter Project" disabled={imported} />
                     </Col>
                     <Col>
-                        <Button variant="primary" onClick={() => process()}>
+                        <Button variant="primary" onClick={() => process()} disabled={imported}>
                             Push to DataJoint
                         </Button>
                     </Col>
@@ -96,7 +97,7 @@ const SessionAccordion = ({ sessions, participant, callback }) => {
                     <Accordion.Item key={session.session_path} eventKey={`${index}`}>
                         <Accordion.Header>{session.session_date}</Accordion.Header>
                         <Accordion.Body className="p-1" >
-                            <RecordingTable recordings={session.recordings} participant={participant} session_date={session.session_date} callback={callback} />
+                            <RecordingTable recordings={session.recordings} participant={participant} session_date={session.session_date} imported={session.imported} callback={callback} />
                         </Accordion.Body>
                     </Accordion.Item>
                 ))
