@@ -9,7 +9,7 @@ import { GUI } from 'lil-gui';
 
 import { Animator } from './animator.js';
 import { Selector } from './selector.js';
-import { createScene, createTrajectory, createKeypointTrajectory, createSmplTrajectories, appendSmplFrame, createBiomechanicalMesh, createBiomechanicalTrajectory } from './system.js';
+import { createScene, createTrajectory, createKeypointTrajectory, appendSmplFrame, createBiomechanicalMesh, createBiomechanicalTrajectory } from './system.js';
 
 function downloadDataUri(name, uri) {
     let link = document.createElement('a');
@@ -87,7 +87,7 @@ class Viewer {
         this.scene = createScene(system);
 
         //this.trajectory = createTrajectory(system);
-        this.trajectory = createKeypointTrajectory(system);
+        //this.trajectory = createKeypointTrajectory(system);
 
         /*this.smplMeshes = createSmplTrajectories(system);
         this.smplMeshes.forEach((mesh) => {
@@ -96,6 +96,8 @@ class Viewer {
         });*/
 
         this.smplMeshes = [];
+        this.smplKeyframeTracks = []
+        this.trajectory = undefined;
 
 
         /* set up renderer, camera, and add default scene elements */
@@ -162,7 +164,7 @@ class Viewer {
 
         /* set up animator and load trajectory */
         this.animator = new Animator(this);
-        this.animator.load(this.trajectory, {});
+        //this.animator.load(this.trajectory, {});
 
         /* add body inspectors */
         const bodiesFolder = this.gui.addFolder('Bodies');
@@ -240,11 +242,31 @@ class Viewer {
         // frameData is a list of dictionaries. each entry has a field ID with the numeric ID of the body
         // and a field with the verts for that body and the new time point
 
+        // if (this.trajectory)
+        //     return;
+
         // console.log("adding frame " + this.smpl_frames);
+        var res;
         frameData.forEach((frame) => {
-            this.smplMeshes = appendSmplFrame(frame, this.smplMeshes, this.scene, this.smpl_frames, faces);
+            res = appendSmplFrame(frame, this.smplMeshes, this.smplKeyframeTracks, this.scene, this.smpl_frames, faces);
+            this.smplMeshes = res.meshes
+            this.smplKeyframeTracks = res.tracks
             this.smpl_frames += 1;
         })
+
+        // if (this.smplKeyframeTracks.length < 5000) {
+        //     return;
+        // }
+
+        if (this.trajectory == undefined) {
+            this.trajectory = res.trajectory;
+            console.log("initial trajectories: ", this.trajectory)
+            this.animator.load(this.trajectory, {});
+        } else {
+            this.trajectory = res.trajectory;
+            console.log("trajectories: ", this.trajectory)
+            this.animator.updateTrajectory(this.trajectory)
+        }
 
         console.log("received " + frameData.length + " frames. current frame count: " + this.smpl_frames);
         this.selector.updateSelectable();
@@ -304,26 +326,26 @@ class Viewer {
         this.animator.update();
 
         const dt = this.system.dt;
-        for (let meshIndex = 0; meshIndex < this.smplMeshes.length; meshIndex++) {
-            const mesh_group = this.smplMeshes[meshIndex];
-            const mesh = mesh_group.children[0];
+        // for (let meshIndex = 0; meshIndex < this.smplMeshes.length; meshIndex++) {
+        //     const mesh_group = this.smplMeshes[meshIndex];
+        //     const mesh = mesh_group.children[0];
 
-            const num_targets = this.smpl_frames;
-            const timeIndex = Math.floor(this.animator.time / dt) % num_targets;
-            //console.log("Time calculated: " + timeIndex + " this.animator.time: " + this.animator.time + ".dt: " + dt + ". num_targets: " + num_targets + ". meshIndex: " + meshIndex);
+        //     const num_targets = this.smpl_frames;
+        //     const timeIndex = Math.floor(this.animator.time / dt) % num_targets;
+        //     //console.log("Time calculated: " + timeIndex + " this.animator.time: " + this.animator.time + ".dt: " + dt + ". num_targets: " + num_targets + ". meshIndex: " + meshIndex);
 
-            // Check if the mesh should be visible for the current time index
-            if (mesh.userData.visibility[timeIndex]) {
-                mesh.visible = true;
-                for (let i = 0; i < mesh.morphTargetInfluences.length; i++) {
-                    mesh.morphTargetInfluences[i] = i === timeIndex ? 1 : 0;
-                }
-                mesh.geometry.computeVertexNormals();
-            } else {
-                mesh.visible = false;
-            }
+        //     // Check if the mesh should be visible for the current time index
+        //     if (mesh.userData.visibility[timeIndex]) {
+        //         mesh.visible = true;
+        //         for (let i = 0; i < mesh.morphTargetInfluences.length; i++) {
+        //             mesh.morphTargetInfluences[i] = i === timeIndex ? 1 : 0;
+        //         }
+        //         mesh.geometry.computeVertexNormals();
+        //     } else {
+        //         mesh.visible = false;
+        //     }
 
-        }
+        // }
 
         // make sure the orbiter is pointed at the right target
         // const targetPos = new THREE.Vector3();

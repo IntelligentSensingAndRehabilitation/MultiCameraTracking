@@ -64,6 +64,25 @@ class Animator {
         this.mixer = new THREE.AnimationMixer(this.viewer.scene);
     }
 
+    updateTrajectory(trajectory) {
+        this.action.stop();
+        this.mixer.uncacheClip(this.action);
+
+        this.action = this.mixer.clipAction(trajectory);
+        this.duration = trajectory.duration;
+
+        console.log("Resetting time at " + this.time + " duration is " + this.duration);
+
+        const priorTime = this.time;
+        this.reset();
+        this.play();
+        this.seek(priorTime);
+
+        console.log(this.timeScrubber);
+
+        this.timeScrubber._max = this.duration;
+    }
+
     load(trajectory, options) {
         this.clear();
 
