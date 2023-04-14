@@ -125,7 +125,7 @@ def init_camera(
     # use a fixed exposure time to ensure good synchronization. also want to keep this relatively
     # low to reduce blur while obtaining sufficient light
     c.ExposureAuto = "Off"
-    c.ExposureTime = 8000
+    c.ExposureTime = 15000
 
     # let the auto gain match the brightness across images as much as possible
     c.GainAuto = "Continuous"
@@ -424,6 +424,9 @@ class FlirRecorder:
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(self.cams)) as executor:
             l = list(executor.map(start_cam, range(len(self.cams))))
+
+        for c in self.cams:
+            print(f"Acquisition, Resulting, Exposure, DeviceLinkThroughputLimit: {c.AcquisitionFrameRate}, {c.AcquisitionResultingFrameRate}, {c.ExposureTime}, {c.DeviceLinkThroughputLimit} ")
 
         # schedule a command to start in 250 ms in the future
         self.cams[0].TimestampLatch()
