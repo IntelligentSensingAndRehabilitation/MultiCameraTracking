@@ -20,6 +20,11 @@ class Selector extends THREE.EventDispatcher {
         domElement.addEventListener('pointerup', this.onPointerUp.bind(this));
     }
 
+    updateSelectable() {
+        this.selectable = this.viewer.scene.children.filter(
+            o => o instanceof THREE.Group);
+    }
+
     onPointerMove(event) {
         event.preventDefault();
         this.dragging = true;
@@ -33,7 +38,7 @@ class Selector extends THREE.EventDispatcher {
 
         if (intersections.length > 0) {
             let object = intersections[0].object;
-            if (object.parent.name == 'world') {
+            if (object.parent.name === 'world') {
                 return;
             }
             while (object.parent && !object.name) {

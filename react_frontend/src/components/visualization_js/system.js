@@ -126,7 +126,7 @@ function createMesh(meshGeom, mat) {
     const mesh = new THREE.Mesh(bufferGeometry, mat);
     mesh.castShadow = true;
     mesh.baseMaterial = mesh.material;
-    mesh.layers.enable(0);
+    mesh.layers.enable(1);
     return mesh;
 }
 
@@ -354,7 +354,7 @@ function createSmplTrajectories(system) {
             const mesh = new THREE.Mesh(bufferGeometry, mat);
             mesh.castShadow = true;
             mesh.baseMaterial = mesh.material;
-            mesh.layers.enable(0);
+            mesh.layers.enable(1);
             smplMeshes.push(mesh);
 
             // End code from above
@@ -422,8 +422,8 @@ function appendSmplFrame(frameData, smplMeshes, scene, timeIndex, faces) {
         })
 
         if (!found) {
-            smplMeshes[i].userData.visibility.push(false);
-            smplMeshes[i].morphTargetInfluences.push(0);
+            smplMeshes[i].children[0].userData.visibility.push(false);
+            smplMeshes[i].children[0].morphTargetInfluences.push(0);
         }
     }
 
@@ -431,7 +431,12 @@ function appendSmplFrame(frameData, smplMeshes, scene, timeIndex, faces) {
     frameData.forEach(person => {
 
         const personId = person.id;
-        const vertices = person.verts;
+
+
+        // vertices is encoded with base64.b64encode(json.dumps(v).encode("utf-8")).decode("utf-8")
+        // so we need to decode it into a list of lists of floats
+        const base64_encoded_vertices = person.verts;
+        const vertices = JSON.parse(Buffer.from(base64_encoded_vertices, 'base64'))
 
         if (personId > 20) {
             console.log("Skipping person " + personId);
@@ -458,9 +463,9 @@ function appendSmplFrame(frameData, smplMeshes, scene, timeIndex, faces) {
             const positions = new Float32Array(vertices.length * 3);
             // Convert the coordinate system.
             vertices.forEach(function (vertice, i) {
-                positions[i * 3] = vertice[0];
-                positions[i * 3 + 1] = vertice[1];
-                positions[i * 3 + 2] = vertice[2];
+                positions[i * 3] = vertice[0] / 1000.0;
+                positions[i * 3 + 1] = vertice[1] / 1000.0;
+                positions[i * 3 + 2] = vertice[2] / 1000.0;
             });
             const indices = new Uint16Array(faces.flat());
             bufferGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
@@ -479,7 +484,7 @@ function appendSmplFrame(frameData, smplMeshes, scene, timeIndex, faces) {
             const mesh = new THREE.Mesh(bufferGeometry, mat);
             mesh.castShadow = true;
             mesh.baseMaterial = mesh.material;
-            mesh.layers.enable(0);
+            mesh.layers.enable(1);
 
             if (timeIndex > 0) {
                 const invisibleFrames = timeIndex - 1;
@@ -488,26 +493,36 @@ function appendSmplFrame(frameData, smplMeshes, scene, timeIndex, faces) {
                 mesh.userData.visibility = [true];
             }
 
-            smplMeshes.push(mesh);
+            const mesh_group = new THREE.Group()
+            mesh_group.add(mesh);
 
-            scene.add(mesh);
+            smplMeshes.push(mesh_group);
+
+            scene.add(mesh_group);
         }
 
-        const bufferGeometry = smplMeshes[personId].geometry;
+        const mesh_group = smplMeshes[personId];
+        // now fetch mesh from group
+        const mesh = mesh_group.children[0];
+
+        const bufferGeometry = mesh.geometry;
         const morphVertices = new Float32Array(vertices.flat());
+
+        // scale morphVertices down by dividing by 1000
+        for (let i = 0; i < morphVertices.length; i++) {
+            morphVertices[i] = morphVertices[i] / 1000.0;
+        }
         bufferGeometry.morphAttributes.position.push(new THREE.Float32BufferAttribute(morphVertices, 3));
-        console.log("Added morp target " + timeIndex + " to " + personId);
 
         // Let Three.js know that the existing morph attributes have been updated
         bufferGeometry.attributes.position.needsUpdate = true;
 
         // Add a new morph target influence to the mesh and mark visible
-        smplMeshes[personId].morphTargetInfluences.push(0);
-        smplMeshes[personId].userData.visibility.push(true);
+        mesh.morphTargetInfluences.push(0);
+        mesh.userData.visibility.push(true);
 
         // Check that the mesh.morphTargetInfluences has changed
         // console.log(mesh.morphTargetInfluences.length);
-        console.log("morphTargetInfluences length: " + smplMeshes[personId].morphTargetInfluences.length);
     });
 
     return smplMeshes;
