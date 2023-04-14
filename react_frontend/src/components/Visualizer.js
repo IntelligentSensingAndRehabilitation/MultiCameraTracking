@@ -3,7 +3,6 @@ import React, { useEffect, useRef, useContext } from 'react';
 import { Viewer } from './visualization_js/viewer.js';
 import { AcquisitionState, useEffectOnce } from "../AcquisitionApi";
 
-
 const system = {
     'meshes': {},
     'geoms': {
@@ -84,8 +83,6 @@ const BiomechanicalReconstruction = ({ data }) => {
 
                 if (faces === null) {
                     // unpack as json for first message:
-
-                    console.log("faces: ", faces, data.faces);
                     faces = data.faces;
                 } else {
                     viewerRef.current.addFrame(data, faces);

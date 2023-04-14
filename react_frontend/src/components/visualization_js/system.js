@@ -311,87 +311,7 @@ function createKeypointTrajectory(system) {
     return new THREE.AnimationClip("Action", -1, tracks);
 }
 
-function createSmplTrajectories(system) {
-    const smplMeshes = [];
-
-    Object.entries(system.geoms).forEach(function (geom) {
-        const name = geom[0];
-        const parent = new THREE.Group();
-        parent.name = name.replaceAll('/', '_');  // sanitize node name
-
-
-        geom[1].forEach(function (meshData) {
-
-            const rgba = meshData.rgba;
-            const color = new THREE.Color(rgba[0], rgba[1], rgba[2]);
-            const mat = new THREE.MeshPhongMaterial({ color: color });
-
-            // Try using code from above
-            const bufferGeometry = new THREE.BufferGeometry();
-
-            const vertices = meshData.vert;
-            const positions = new Float32Array(vertices.length * 3);
-            // Convert the coordinate system.
-            vertices.forEach(function (vertice, i) {
-                positions[i * 3] = vertice[0];
-                positions[i * 3 + 1] = vertice[1];
-                positions[i * 3 + 2] = vertice[2];
-            });
-            const indices = new Uint16Array(meshData.face.flat());
-            bufferGeometry.setAttribute(
-                'position', new THREE.BufferAttribute(positions, 3));
-            bufferGeometry.setIndex(new THREE.BufferAttribute(indices, 1));
-            bufferGeometry.computeVertexNormals();
-
-            bufferGeometry.morphTargetsRelative = true;
-            bufferGeometry.morphAttributes.position = [];
-            for (let timeIndex = 0; timeIndex < meshData.vert_anim.length; timeIndex++) {
-                const morphVertices = new Float32Array(meshData.vert_anim[timeIndex].flat());
-                bufferGeometry.morphAttributes.position.push(new THREE.Float32BufferAttribute(morphVertices, 3));
-                console.log("Added morph target " + timeIndex + " to " + name);
-            }
-
-            const mesh = new THREE.Mesh(bufferGeometry, mat);
-            mesh.castShadow = true;
-            mesh.baseMaterial = mesh.material;
-            mesh.layers.enable(1);
-            smplMeshes.push(mesh);
-
-            // End code from above
-
-            if (false) {
-
-                const rgba = meshData.rgba;
-                const color = new THREE.Color(rgba[0], rgba[1], rgba[2]);
-                const mat = new THREE.MeshPhongMaterial({ color: color });
-
-                const baseGeometry = new THREE.BufferGeometry().setFromPoints(meshData.vert.map(v => new THREE.Vector3(...v)));
-                baseGeometry.setIndex(meshData.face);
-                baseGeometry.computeVertexNormals();
-                baseGeometry.morphTargetsRelative = true;
-                baseGeometry.morphAttributes.position = [];
-
-                for (let timeIndex = 0; timeIndex < meshData.vert_anim.length; timeIndex++) {
-                    const morphVertices = new Float32Array(meshData.vert_anim[timeIndex].flat());
-                    baseGeometry.morphAttributes.position = baseGeometry.morphAttributes.position || [];
-                    baseGeometry.morphAttributes.position.push(new THREE.Float32BufferAttribute(morphVertices, 3));
-                    console.log("Added morph target " + timeIndex + " to " + name);
-                }
-                console.log("Created mesh with " + baseGeometry.morphAttributes.position.length + " morph targets.  ")
-
-                const smplMesh = new THREE.Mesh(baseGeometry, mat);
-                smplMesh.position.set(...meshData.transform.pos);
-                smplMeshes.push(smplMesh);
-            }
-        });
-    });
-
-    console.log("Created " + smplMeshes.length + " SMPL meshes.");
-
-    return smplMeshes;
-}
-
-function appendSmplFrame(frameData, smplMeshes, scene, timeIndex, faces) {
+function appendSmplFrame(frameData, smplMeshes, keyframeTracks, scene, timeIndex, faces) {
     /*
     frameData contains the data for a single frame of the SMPL animation. it is a list of dictionaries,
     where each dictionary element has an ID field with the numerical identity for that person and a verts
@@ -428,20 +348,16 @@ function appendSmplFrame(frameData, smplMeshes, scene, timeIndex, faces) {
     }
 
     console.log("smpMeshes length: " + smplMeshes.length + " frameData length: " + frameData.length);
+
     frameData.forEach(person => {
 
         const personId = person.id;
-
+        const name = "person_" + personId;
 
         // vertices is encoded with base64.b64encode(json.dumps(v).encode("utf-8")).decode("utf-8")
         // so we need to decode it into a list of lists of floats
         const base64_encoded_vertices = person.verts;
         const vertices = JSON.parse(Buffer.from(base64_encoded_vertices, 'base64'))
-
-        if (personId > 20) {
-            console.log("Skipping person " + personId);
-            return;
-        }
 
         if (personId >= smplMeshes.length) {
 
@@ -485,6 +401,7 @@ function appendSmplFrame(frameData, smplMeshes, scene, timeIndex, faces) {
             mesh.castShadow = true;
             mesh.baseMaterial = mesh.material;
             mesh.layers.enable(1);
+            mesh.name = name;
 
             if (timeIndex > 0) {
                 const invisibleFrames = timeIndex - 1;
@@ -523,9 +440,36 @@ function appendSmplFrame(frameData, smplMeshes, scene, timeIndex, faces) {
 
         // Check that the mesh.morphTargetInfluences has changed
         // console.log(mesh.morphTargetInfluences.length);
+
+        function createVectorKeyframeTrack(keyframeNumber) {
+            const dt = 1 / 30;
+            const times = [keyframeNumber - 1, keyframeNumber, keyframeNumber + 1].map(t => t * dt);
+            const values = [0, 1, 0];
+
+            const track = new THREE.VectorKeyframeTrack(
+                `scene/${name}.morphTargetInfluences[keyframe${keyframeNumber}]`,
+                times,
+                values,
+                THREE.InterpolateLinear
+            );
+
+            return track;
+        }
+
+        const keyframeNumber = timeIndex;
+
+        // Create a new VectorKeyframeTrack and append it to the vectorKeyframeTracks list
+        const track = createVectorKeyframeTrack(keyframeNumber);
+        keyframeTracks.push(track);
+
+        // Update the mesh.morphTargetDictionary with the keyframe number
+        mesh.morphTargetDictionary[`keyframe${keyframeNumber}`] = keyframeNumber;
+
     });
 
-    return smplMeshes;
+    const trajectory = new THREE.AnimationClip('Action', -1, keyframeTracks);
+
+    return { 'meshes': smplMeshes, 'tracks': keyframeTracks, 'trajectory': trajectory };
 };
 
 function createBiomechanicalMesh(meshData) {
@@ -587,6 +531,6 @@ function createBiomechanicalTrajectory(trajectoryData, dt) {
 }
 
 export {
-    createScene, createTrajectory, createKeypointTrajectory, createSmplTrajectories, appendSmplFrame,
+    createScene, createTrajectory, createKeypointTrajectory, appendSmplFrame,
     createBiomechanicalMesh, createBiomechanicalTrajectory
 };
