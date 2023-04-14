@@ -29,8 +29,11 @@ function App() {
             <LinkContainer to="/analysis">
               <Nav.Link>Analyze</Nav.Link>
             </LinkContainer>
-            <LinkContainer to="/visualize">
-              <Nav.Link>Visualize</Nav.Link>
+            <LinkContainer to="/visualize_mesh">
+              <Nav.Link>Visualize Mesh</Nav.Link>
+            </LinkContainer>
+            <LinkContainer to="/visualize_biomechanics">
+              <Nav.Link>Visualize Biomechanics</Nav.Link>
             </LinkContainer>
           </Nav>
         </Container>
@@ -40,7 +43,8 @@ function App() {
         <Routes>
           <Route path="/" element={<AcquisitionHome />} />
           <Route path="/analysis" element={<AnalysisHome />} />
-          <Route path="/visualize" element={<BiomechanicalReconstruction />} />
+          <Route path="/visualize_mesh" element={<BiomechanicalReconstruction data="true" />} />
+          <Route path="/visualize_biomechanics" element={<BiomechanicalReconstruction data="false" />} />
         </Routes>
       </AquisitionApi>
 

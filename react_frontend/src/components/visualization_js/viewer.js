@@ -247,6 +247,7 @@ class Viewer {
         })
 
         console.log("received " + frameData.length + " frames. current frame count: " + this.smpl_frames);
+        this.selector.updateSelectable();
     }
 
     addBiomechanics(meshes, trajectories) {
@@ -259,6 +260,8 @@ class Viewer {
 
         this.trajectory = createBiomechanicalTrajectory(trajectories, this.system.dt);
         this.animator.load(this.trajectory, {});
+
+        this.selector.updateSelectable();
     }
 
     setDirty() {
@@ -302,7 +305,8 @@ class Viewer {
 
         const dt = this.system.dt;
         for (let meshIndex = 0; meshIndex < this.smplMeshes.length; meshIndex++) {
-            const mesh = this.smplMeshes[meshIndex];
+            const mesh_group = this.smplMeshes[meshIndex];
+            const mesh = mesh_group.children[0];
 
             const num_targets = this.smpl_frames;
             const timeIndex = Math.floor(this.animator.time / dt) % num_targets;
@@ -401,6 +405,7 @@ class Viewer {
     }
 
     setSelected(object, selected) {
+        console.log("setSelected: " + object.name + " " + selected)
         object.selected = selected;
         this.target = selected ? object : this.defaultTarget;
         object.traverse((child) => {

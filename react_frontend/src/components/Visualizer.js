@@ -49,7 +49,10 @@ const BiomechanicalReconstruction = ({ data }) => {
 
     const ws = useRef(null);
 
-    const showMesh = false;
+    // set showMesh true if data is not none
+    const showMesh = { data }.data == "true";
+
+    console.log("data: ", data, "showMesh: ", showMesh);
 
     useEffectOnce(async () => {
 
@@ -80,6 +83,8 @@ const BiomechanicalReconstruction = ({ data }) => {
                 const data = JSON.parse(event.data);
 
                 if (faces === null) {
+                    // unpack as json for first message:
+
                     console.log("faces: ", faces, data.faces);
                     faces = data.faces;
                 } else {
@@ -115,8 +120,8 @@ const BiomechanicalReconstruction = ({ data }) => {
 
     // Set the height of the brax-viewer div to 400 pixels
     const viewerStyle = {
-        height: '600px',
-        width: '1200px'
+        height: '900px',
+        width: '100%'
     };
 
     return <div ref={containerRef} id="brax-viewer" style={viewerStyle}></div>;
