@@ -26,6 +26,7 @@ class Session(Base):
 
     participant = relationship("Participant", back_populates="sessions")
     recordings = relationship("Recording", back_populates="session")
+    imported = relationship("Imported", uselist=False, back_populates="session")
 
 
 class Recording(Base):
@@ -41,6 +42,17 @@ class Recording(Base):
     timestamp_spread = Column(Integer, nullable=True)  # Add timestamp_spread field
 
     session = relationship("Session", back_populates="recordings")
+
+
+class Imported(Base):
+    """A row in table indicates that a session has been imported into DataJoint"""
+
+    __tablename__ = "imported"
+
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(Integer, ForeignKey("sessions.id"))
+
+    session = relationship("Session", back_populates="imported")
 
 
 def add_recording(
@@ -122,6 +134,7 @@ class SessionOut(BaseModel):
     session_date: date
     session_path: str
     recordings: List[RecordingOut]
+    imported: bool
 
 
 class ParticipantOut(BaseModel):
@@ -153,8 +166,15 @@ def get_recordings(
                 RecordingOut(**{k: v for k, v in recording.__dict__.items() if k != "_sa_instance_state"})
                 for recording in session.recordings
             ]
+
+            # check if there is an imported entry for this session
+            imported = db.query(Imported).filter(Imported.session_id == session.id).first()
+
             session_out = SessionOut(
-                session_date=session.session_date, session_path=session.session_path, recordings=recording_out_list
+                session_date=session.session_date,
+                session_path=session.session_path,
+                recordings=recording_out_list,
+                imported=imported is not None,
             )
             session_out_list.append(session_out)
 
@@ -197,6 +217,98 @@ def modify_recording_entry(db: Session, participant: ParticipantOut, updated_rec
 
     # commit the changes
     db.commit()
+
+
+### DataJoint bridge
+
+
+def normalize_participant_id(participant_id):
+    # historically, my experiments use an identifier like pXXX where XXX is a number
+    # the subject_id field was purely numeric. Now, we are allowing alphanumeric
+    # identifiers (distinguished by the more modern term participant). We also use
+    # tXXXX for test users. Right now having some stay purely numeric provides
+    # easier consistency with data collected with the portable system.
+
+    # detect if particpant_name has the format p## or t## where ## is numeric, in which
+    # case strip off the first character
+    if participant_id[0] in ("p", "t") and participant_id[1:].isnumeric():
+        participant_id = participant_id[1:]
+
+    return participant_id
+
+
+def synchronize_to_datajoint(db: Session):
+    """Synchronize the recording database with DataJoint"""
+
+    from multi_camera.datajoint.sessions import Session as SessionDJ
+
+    sessions = db.query(Session).all()
+
+    for session in sessions:
+        # see if there is an imported entry for this session or if imported is False
+
+        participant_id = session.participant.name
+        session_date = session.session_date
+
+        participant_id = normalize_participant_id(participant_id)
+
+        in_datajoint = len(SessionDJ & {"participant_id": participant_id, "session_date": session_date}) == 1
+        imported = db.query(Imported).filter(Imported.session_id == session.id).first()
+
+        print(
+            "participant_id: ",
+            participant_id,
+            "session_date: ",
+            session_date,
+            "in_datajoint: ",
+            in_datajoint,
+            "imported: ",
+            imported,
+        )
+        if not imported and in_datajoint:
+            print("Session already imported", participant_id, session_date)
+
+            # need to make an imported entry in SQLlite for this session
+            imported_entry = Imported(session_id=session.id)
+            db.add(imported_entry)
+            db.commit()
+
+        elif imported and not in_datajoint:
+            print("Session must have been removed from DJ", participant_id, session_date)
+
+            # need to delete the imported entry in SQLlite for this session
+            db.delete(imported)
+            db.commit()
+
+
+def push_to_datajoint(db: Session, participant_id: str, session_date: date, video_project: str):
+    from multi_camera.datajoint.sessions import import_session
+
+    # get the list of recordings from the database with their comments
+    # that match the participant and session date
+    db_recordings: ParticipantOut = get_recordings(
+        db, participant_name=participant_id, filter_by_session_date=session_date
+    )
+    assert len(db_recordings) == 1, "Did not find exactly one participant for this name."
+    sessions: SessionOut = db_recordings[0].sessions
+    assert len(sessions) == 1, "Did not find exactly one session for this participant and date."
+    recordings: List[RecordingOut] = sessions[0].recordings
+
+    # filter out the recordings that should not be processed and retain the
+    # filename and comment
+    recordings = [
+        (rec.filename, rec.comment) for rec in recordings if rec.should_process and rec.comment != "calibration"
+    ]
+
+    print("Processing recordings: ", recordings)
+
+    # TODO: confirm calibration has been performed
+
+    participant_id = normalize_participant_id(participant_id)
+
+    import_session(participant_id, session_date, video_project=video_project, recordings=recordings)
+
+    synchronize_to_datajoint(db)
 
 
 def get_db():
