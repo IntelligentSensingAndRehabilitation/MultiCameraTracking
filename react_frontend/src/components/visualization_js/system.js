@@ -209,17 +209,27 @@ function createScene(system) {
     });
 
     if (system.smpl) {
+        const ids = system.smpl.ids;
         const faces = system.smpl.faces;
-        const frameData = system.smpl.meshes;
 
-        var smplMeshes = []
-        var smplKeyframeTracks = []
+        // meshes is an list of list of dictionaries that include the ids visible and the vertices on that frame
+        const meshes = system.smpl.meshes;
 
-        frameData.forEach((frame, index) => {
-            const res = appendSmplFrame(frame, smplMeshes, smplKeyframeTracks, scene, index, faces);
-            smplMeshes = res.meshes
-            smplKeyframeTracks = res.tracks
+        const smplGroup = new THREE.Group();
+        smplGroup.name = 'smpl';
+
+        ids.forEach((id) => {
+            // filter out all the data for this specific ID
+            const firstFrame = meshes.filter((mesh) => mesh.some((m) => m.id == id))[0];
+            const verts = firstFrame.filter((m) => m.id == id)[0].verts;
+
+            console.log(firstFrame, verts)
+
+            const smpl = createSmplPerson(id, faces, verts);
+            smplGroup.add(smpl);
         });
+
+        scene.add(smplGroup);
     }
 
     if (system.states.contact) {
@@ -284,6 +294,7 @@ function createTrajectory(system) {
         tracks.push(new THREE.QuaternionKeyframeTrack(
             'scene/' + group + '.quaternion', times, rot.flat()));
     });
+
 
     if (system.states.contact) {
         /* add contact debug point trajectory */
@@ -360,159 +371,136 @@ function createInvisibilityKeyframeTrack(name, showIdx, hideIdx) {
     return track;
 }
 
-function appendSmplFrame(frameData, smplMeshes, keyframeTracks, scene, timeIndex, faces) {
-    /*
-    frameData contains the data for a single frame of the SMPL animation. it is a list of dictionaries,
-    where each dictionary element has an ID field with the numerical identity for that person and a verts
-    field with the vertices for that person for the specified frame. This is used to update teh smplMeshes
-    data.
+function createSmplPerson(personId, faces, vertices) {
 
-    smplMeshes is a list of THREE.Mesh objects, one for each person in the scene. The order of the meshes
-    in the list should match the numeric IDs for the people in the frameData list.
+    const name = "person_" + personId;
 
-    faces are the face vertex ids used when creating new meshes
+    // compute the number of vertices as the maximum index in the faces (list of list)
+    const numVertices = faces.reduce((max, face) => Math.max(max, ...face), 0) + 1;
 
-    scene is the scene object to which the meshes should be added.
+    // This person isn't yet in the scene so we need to create a new mesh for them.
+    const bufferGeometry = new THREE.BufferGeometry();
 
-    timeIndex is only used when creating new meshes to add the appropriate invisible frames when people
-    were not visible in earlier frames. for any frames wehre an ID is not in the frameData list, we need
-    to set the visible user data to false so the animation layer will not show the mesh for that frame.
-    */
+    // generate a unique color based on the personId. use a color map so that each person has a unique color
+    function idToColor(personId) {
+        const goldenRatioConjugate = 0.618033988749895;
+        const hue = ((personId * goldenRatioConjugate) % 1) * 360;
 
-
-    // loop through all the meshes and if there is not a personId that matches
-    // that index we will mark it as invisible for this frame.
-    for (let i = 0; i < smplMeshes.length; i++) {
-
-        let found = false;
-        frameData.forEach(person => {
-            if (person.id == i) {
-                found = true;
-            }
-        })
-
-        if (!found) {
-            // now fetch mesh from group
-            const mesh_group = smplMeshes[i];
-            const mesh = mesh_group.children[0];
-            if (mesh.userData.visibility.invisibleIdx === undefined) {
-                console.log("Person " + i + " track ends on frame " + timeIndex);
-
-                mesh.userData.visibility.invisibleIdx = timeIndex;
-
-                // Note this is duplicating the visible keyframes but that seems to blend without issue
-                const opacityKF = createInvisibilityKeyframeTrack(mesh.name, mesh.userData.visibility.visibleIdx, mesh.userData.visibility.invisibleIdx);
-                keyframeTracks.push(opacityKF);
-            }
-        }
+        return new THREE.Color(`hsl(${hue}, 100%, 50%)`);
     }
 
-    console.log("smpMeshes length: " + smplMeshes.length + " frameData length: " + frameData.length);
+    const mat = new THREE.MeshPhongMaterial({ color: idToColor(personId) });
 
-    frameData.forEach(person => {
+    // Initialize a positiosn array of numVertices * 3 that is all zeros
+    const positions = new Float32Array(vertices.length * 3);
+    // Convert the coordinate system.
+    vertices.forEach(function (vertice, i) {
+        positions[i * 3] = vertice[0] / 1000.0;
+        positions[i * 3 + 1] = vertice[1] / 1000.0;
+        positions[i * 3 + 2] = vertice[2] / 1000.0;
+    });
 
-        const personId = person.id;
-        const name = "person_" + personId;
+    const indices = new Uint16Array(faces.flat());
+    bufferGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    bufferGeometry.setIndex(new THREE.BufferAttribute(indices, 1));
+    bufferGeometry.computeVertexNormals();
 
-        const vertices = person.verts;
+    // Prepare to add the morph targets and fill in the prior frames with invisible meshes
+    bufferGeometry.morphTargetsRelative = false;
+    bufferGeometry.morphAttributes.position = [];
 
-        if (personId >= smplMeshes.length) {
+    const mesh = new THREE.Mesh(bufferGeometry, mat);
+    mesh.castShadow = false;
+    mesh.baseMaterial = mesh.material;
+    mesh.layers.enable(1);
+    mesh.name = name;
+    mesh.updateMorphTargets();
 
-            console.log("Creating new mesh for person " + personId);
+    return mesh;
+}
 
-            // This person isn't yet in the scene so we need to create a new mesh for them.
-            const bufferGeometry = new THREE.BufferGeometry();
+function createSmplTrajectory(system, scene) {
+    const allFrames = system.smpl.meshes;
 
-            // generate a unique color based on the personId. use a color map so that each person has a unique color
-            function idToColor(personId) {
-                const goldenRatioConjugate = 0.618033988749895;
-                const hue = ((personId * goldenRatioConjugate) % 1) * 360;
+    // get the smplGroup from the scene, which has a group name of "smpl"
+    const smplGroup = scene.getObjectByName("smpl");
 
-                return new THREE.Color(`hsl(${hue}, 100%, 50%)`);
+    // get the meshes from the smplGroup, which are each the only child in their group
+    const smplMeshes = smplGroup.children;
+
+    const keyframeTracks = [];
+
+    smplMeshes.forEach((_, index) => {
+        // want to get a list of ids where the mesh is visible, need to first map each frame to include
+        // the frame id, then filter
+        const visibleFrames = allFrames.map((frame, frameId) => {
+            return { frameId: frameId, visible: frame.some((m) => m.id == index) };
+        }
+        ).filter((frame) => frame.visible);
+        const firstVisible = visibleFrames[0].frameId;
+        const lastVisible = visibleFrames[visibleFrames.length - 1].frameId;
+
+        const track = createInvisibilityKeyframeTrack("person_" + index, firstVisible, lastVisible);
+        keyframeTracks.push(track);
+    });
+
+    allFrames.forEach((frameData, index) => {
+        const timeIndex = index;
+
+        console.log("frame " + timeIndex + " has " + frameData.length + " people");
+
+        console.log("smpMeshes length: " + smplMeshes.length + " frameData length: " + frameData.length);
+
+        frameData.forEach(person => {
+
+            const personId = person.id;
+            const name = "person_" + personId;
+
+            const vertices = person.verts;
+
+            // now fetch mesh from group
+            const mesh = smplMeshes[personId];
+            const bufferGeometry = mesh.geometry;
+            const morphVertices = new Float32Array(vertices.flat());
+
+            const keyframeNumber = bufferGeometry.morphAttributes.position.length;
+
+            // scale morphVertices down by dividing by 1000
+            for (let i = 0; i < morphVertices.length; i++) {
+                morphVertices[i] = morphVertices[i] / 1000.0;
+            }
+            bufferGeometry.morphAttributes.position.push(new THREE.Float32BufferAttribute(morphVertices, 3));
+
+            // Let Three.js know that the existing morph attributes have been updated
+            bufferGeometry.attributes.position.needsUpdate = true;
+
+            function createVectorKeyframeTrack(timeIndex) {
+                const dt = 5 / 30;
+                const times = [timeIndex - 1, timeIndex, timeIndex + 1].map(t => t * dt);
+                const values = [0, 1, 0];
+
+                const track = new THREE.VectorKeyframeTrack(
+                    `scene/${name}.morphTargetInfluences[keyframe${keyframeNumber}]`,
+                    times,
+                    values,
+                    THREE.InterpolateLinear
+                );
+
+                return track;
             }
 
-            const mat = new THREE.MeshPhongMaterial({ color: idToColor(personId) });
+            // Create a new VectorKeyframeTrack and append it to the vectorKeyframeTracks list
+            const track = createVectorKeyframeTrack(timeIndex);
+            keyframeTracks.push(track);
 
-            const positions = new Float32Array(vertices.length * 3);
-            // Convert the coordinate system.
-            vertices.forEach(function (vertice, i) {
-                positions[i * 3] = vertice[0] / 1000.0;
-                positions[i * 3 + 1] = vertice[1] / 1000.0;
-                positions[i * 3 + 2] = vertice[2] / 1000.0;
-            });
-            const indices = new Uint16Array(faces.flat());
-            bufferGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-            bufferGeometry.setIndex(new THREE.BufferAttribute(indices, 1));
-            bufferGeometry.computeVertexNormals();
+            // Update the mesh.morphTargetDictionary with the keyframe number
+            mesh.morphTargetDictionary[`keyframe${keyframeNumber}`] = keyframeNumber;
 
-            // Prepare to add the morph targets and fill in the prior frames with invisible meshes
-            bufferGeometry.morphTargetsRelative = false;
-            bufferGeometry.morphAttributes.position = [];
-
-            const mesh = new THREE.Mesh(bufferGeometry, mat);
-            mesh.castShadow = false;
-            mesh.baseMaterial = mesh.material;
-            mesh.layers.enable(1);
-            mesh.name = name;
-            mesh.updateMorphTargets();
-
-            const mesh_group = new THREE.Group()
-            mesh_group.add(mesh);
-
-            const opacityKF = createVisibilityKeyframeTrack(name, timeIndex);
-            keyframeTracks.push(opacityKF);
-
-            mesh.userData.visibility = { 'opacityTrack': opacityKF, 'visibleIdx': timeIndex, 'invisibleIdx': undefined };
-
-            smplMeshes.push(mesh_group);
-
-            scene.add(mesh_group);
-        }
-
-        // now fetch mesh from group
-        const mesh_group = smplMeshes[personId];
-        const mesh = mesh_group.children[0];
-        const bufferGeometry = mesh.geometry;
-        const morphVertices = new Float32Array(vertices.flat());
-
-        const keyframeNumber = bufferGeometry.morphAttributes.position.length;
-
-        // scale morphVertices down by dividing by 1000
-        for (let i = 0; i < morphVertices.length; i++) {
-            morphVertices[i] = morphVertices[i] / 1000.0;
-        }
-        bufferGeometry.morphAttributes.position.push(new THREE.Float32BufferAttribute(morphVertices, 3));
-
-        // Let Three.js know that the existing morph attributes have been updated
-        bufferGeometry.attributes.position.needsUpdate = true;
-
-        function createVectorKeyframeTrack(timeIndex) {
-            const dt = 5 / 30;
-            const times = [timeIndex - 1, timeIndex, timeIndex + 1].map(t => t * dt);
-            const values = [0, 1, 0];
-
-            const track = new THREE.VectorKeyframeTrack(
-                `scene/${name}.morphTargetInfluences[keyframe${keyframeNumber}]`,
-                times,
-                values,
-                THREE.InterpolateLinear
-            );
-
-            return track;
-        }
-
-        // Create a new VectorKeyframeTrack and append it to the vectorKeyframeTracks list
-        const track = createVectorKeyframeTrack(timeIndex);
-        keyframeTracks.push(track);
-
-        // Update the mesh.morphTargetDictionary with the keyframe number
-        mesh.morphTargetDictionary[`keyframe${keyframeNumber}`] = keyframeNumber;
+        });
 
     });
 
-    const trajectory = new THREE.AnimationClip('Action', -1, keyframeTracks);
-
-    return { 'meshes': smplMeshes, 'tracks': keyframeTracks, 'trajectory': trajectory };
+    return new THREE.AnimationClip('Action', -1, keyframeTracks);
 };
 
 function createBiomechanicalMesh(meshData) {
@@ -574,6 +562,6 @@ function createBiomechanicalTrajectory(trajectoryData, dt) {
 }
 
 export {
-    createScene, createTrajectory, createKeypointTrajectory, appendSmplFrame,
+    createScene, createTrajectory, createKeypointTrajectory, createSmplTrajectory,
     createBiomechanicalMesh, createBiomechanicalTrajectory
 };

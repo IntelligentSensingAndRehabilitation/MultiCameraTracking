@@ -9,7 +9,7 @@ import { GUI } from 'lil-gui';
 
 import { Animator } from './animator.js';
 import { Selector } from './selector.js';
-import { createScene, createTrajectory, createKeypointTrajectory, appendSmplFrame, createBiomechanicalMesh, createBiomechanicalTrajectory } from './system.js';
+import { createScene, createTrajectory, createSmplTrajectory, createBiomechanicalMesh, createBiomechanicalTrajectory } from './system.js';
 
 function downloadDataUri(name, uri) {
     let link = document.createElement('a');
@@ -92,19 +92,12 @@ class Viewer {
         console.log('system', system)
         this.scene = createScene(system);
 
-        //this.trajectory = createTrajectory(system);
-        //this.trajectory = createKeypointTrajectory(system);
-
-        /*this.smplMeshes = createSmplTrajectories(system);
-        this.smplMeshes.forEach((mesh) => {
-            console.log('adding SMPL mesh for trajectory', mesh)
-            this.scene.add(mesh)
-        });*/
-
-        this.smplMeshes = [];
-        this.smplKeyframeTracks = []
-        this.trajectory = undefined;
-
+        if (system.smpl) {
+            this.trajectory = createSmplTrajectory(system, this.scene);
+            //this.smplMeshes = this.scene.getObjectById("smpl").children;
+        } else {
+            this.trajectory = createTrajectory(system);
+        }
 
         /* set up renderer, camera, and add default scene elements */
         this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
@@ -176,7 +169,10 @@ class Viewer {
 
         /* set up animator and load trajectory */
         this.animator = new Animator(this);
-        //this.animator.load(this.trajectory, {});
+        if (this.trajectory) {
+            console.log('trajectory', this.trajectory)
+            this.animator.load(this.trajectory, {});
+        }
 
         /* add body inspectors */
         const bodiesFolder = this.gui.addFolder('Bodies');
@@ -327,70 +323,6 @@ class Viewer {
         requestAnimationFrame(() => this.animate());
         this.animator.update();
 
-        const dt = this.system.dt;
-        // for (let meshIndex = 0; meshIndex < this.smplMeshes.length; meshIndex++) {
-        //     const mesh_group = this.smplMeshes[meshIndex];
-        //     const mesh = mesh_group.children[0];
-
-        //     const num_targets = this.smpl_frames;
-        //     const timeIndex = Math.floor(this.animator.time / dt) % num_targets;
-        //     //console.log("Time calculated: " + timeIndex + " this.animator.time: " + this.animator.time + ".dt: " + dt + ". num_targets: " + num_targets + ". meshIndex: " + meshIndex);
-
-        //     // Check if the mesh should be visible for the current time index
-        //     if (mesh.userData.visibility[timeIndex]) {
-        //         mesh.visible = true;
-        //         for (let i = 0; i < mesh.morphTargetInfluences.length; i++) {
-        //             mesh.morphTargetInfluences[i] = i === timeIndex ? 1 : 0;
-        //         }
-        //         mesh.geometry.computeVertexNormals();
-        //     } else {
-        //         mesh.visible = false;
-        //     }
-
-        // }
-
-        // make sure the orbiter is pointed at the right target
-        // const targetPos = new THREE.Vector3();
-        // this.target.getWorldPosition(targetPos);
-
-        // // if the target gets too far from the camera, nudge the camera
-        // if (this.camera.follow) {
-        //     this.controls.target.lerp(targetPos, 0.1);
-        //     if (this.camera.position.distanceTo(this.controls.target) >
-        //         this.camera.followDistance) {
-        //         const followBehind = this.controls.target.clone()
-        //             .sub(this.camera.position)
-        //             .normalize()
-        //             .multiplyScalar(this.camera.followDistance)
-        //             .sub(this.controls.target)
-        //             .negate();
-        //         this.camera.position.lerp(followBehind, 0.5);
-        //         this.setDirty();
-        //     }
-        // }
-
-        // // make sure target stays within shadow map region
-        // this.dirLight.position.set(
-        //     targetPos.x + 3, targetPos.y + 10, targetPos.z + 10);
-        // this.dirLight.target = this.target;
-
-        // if (this.controls.update()) {
-        //     this.setDirty();
-        // }
-
-        // // if freezeAngle requested, move the camera on xz plane to match target
-        // if (this.camera.freezeAngle) {
-        //     const off = new THREE.Vector3();
-        //     off.add(this.controls.target).sub(this.controlTargetPos);
-        //     off.setComponent(1, 0);
-        //     if (off.lengthSq() > 0) {
-        //         this.camera.position.add(off);
-        //         this.setDirty();
-        //     }
-        // }
-        // this.controlTargetPos.copy(this.controls.target);
-
-
         if (this.needsRender) {
             this.render();
         }
@@ -399,7 +331,7 @@ class Viewer {
     saveImage() {
         this.render();
         const imageData = this.renderer.domElement.toDataURL();
-        downloadDataUri('brax.png', imageData);
+        downloadDataUri('markerlessmocap.png', imageData);
     }
 
     saveScene() {
