@@ -51,8 +51,6 @@ const BiomechanicalReconstruction = ({ data }) => {
     // set showMesh true if data is not none
     const showMesh = { data }.data == "true";
 
-    console.log("data: ", data, "showMesh: ", showMesh);
-
     useEffectOnce(async () => {
 
         console.log('Initializing viewer');
