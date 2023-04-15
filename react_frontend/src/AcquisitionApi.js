@@ -247,6 +247,16 @@ export const AquisitionApi = (props) => {
         return recordings.data.video_base_filenames;
     };
 
+    const annotateRecording = async (filename, ids) => {
+        const response = await axios.post(`${API_BASE_URL}/annotation`,
+            {
+                video_base_filename: filename,
+                ids: ids
+            }
+        );
+        return response.data.success;
+    };
+
     async function fetchMesh(filename) {
         const response = await axios.get(`${API_BASE_URL}/mesh`, {
             params: {
@@ -408,6 +418,7 @@ export const AquisitionApi = (props) => {
         processSession,
         fetchKeypoints,
         fetchUnannotatedRecordings,
+        annotateRecording,
         fetchMesh,
         fetchBiomechanics
     }}> {props.children} </AcquisitionState.Provider >)

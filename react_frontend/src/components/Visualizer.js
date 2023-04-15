@@ -20,18 +20,23 @@ const BiomechanicalReconstruction = ({ data }) => {
 
     const [filter, setFilter] = useState(false);
 
-    const { meshUrl, fetchKeypoints, fetchMesh, fetchUnannotatedRecordings, fetchBiomechanics } = useContext(AcquisitionState);
+    const { meshUrl, fetchKeypoints, fetchMesh, fetchUnannotatedRecordings, annotateRecording, fetchBiomechanics } = useContext(AcquisitionState);
 
     const [currentRecording, setCurrentRecording] = useState(null);
     const [recordingValidated, setRecordingValidated] = useState(false);
     const [unannotatedRecordings, setUnannotatedRecordings] = useState([]);
-    useEffect(() => {
-        console.log("Fetching unannotated recordings...")
+
+    const refreshRecordings = () => {
         fetchUnannotatedRecordings().then((data) => {
             // prepend an empty string to the list
             data.unshift("");
             setUnannotatedRecordings(data);
         });
+    }
+
+    useEffect(() => {
+        console.log("Fetching unannotated recordings...")
+        refreshRecordings();
     }, []);
 
     // variable to store the websocket connection
@@ -61,23 +66,43 @@ const BiomechanicalReconstruction = ({ data }) => {
             }
 
             setRecordingValidated(false);
-            fetchMesh(currentRecording).then((data) => {
-                console.log("Mesh data: ", data)
-                system.smpl = data;
 
-                const domElement = containerRef.current;
-                const guiElement = guiRef.current;
-                viewerRef.current = new Viewer(domElement, system, guiElement);
+            if (currentRecording != null && currentRecording !== "") {
+                fetchMesh(currentRecording).then((data) => {
+                    console.log("Mesh data: ", data)
+                    system.smpl = data;
 
-                setRecordingValidated(true);
-            });
+                    const domElement = containerRef.current;
+                    const guiElement = guiRef.current;
+                    viewerRef.current = new Viewer(domElement, system, guiElement);
+
+                    setRecordingValidated(true);
+                });
+            }
         }
     }, [currentRecording]);
 
-    const annotateRecording = () => {
-        console.log("Annotating recording: ", currentRecording)
-        const ids = viewerRef.current.getSelectedIds();
-        console.log("Selected ids: ", ids)
+    const onAnnotate = () => {
+        if (recordingValidated) {
+            console.log("Annotating recording: ", currentRecording)
+            const ids = viewerRef.current.getSelectedIds();
+            console.log("Selected ids: ", ids)
+            if (ids != null && ids.length > 0) {
+                annotateRecording(currentRecording, ids).then((data) => {
+                    console.log("Annotate response: ", data)
+                    if (data) {
+                        // close the viewer
+                        viewerRef.current.close();
+                        // delete the viewerRef.current
+                        viewerRef.current = null;
+                        // set the current recording to null
+                        setCurrentRecording("");
+                        // fetch the unannotated recordings again
+                        refreshRecordings();
+                    }
+                });
+            }
+        }
     }
 
     // Set the height of the brax-viewer div to 400 pixels
@@ -141,7 +166,7 @@ const BiomechanicalReconstruction = ({ data }) => {
                 <div className='p-2'></div>
                 <Button className='p-2'
                     variant="primary"
-                    onClick={annotateRecording}>
+                    onClick={onAnnotate}>
                     Annotate</Button>
             </Row>
         </Container>
