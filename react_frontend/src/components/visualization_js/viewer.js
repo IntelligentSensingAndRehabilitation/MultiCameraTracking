@@ -72,9 +72,14 @@ function toggleContactDebug(obj, debug) {
     }
 }
 
-const hoverMaterial =
-    new THREE.MeshPhongMaterial({ color: 0x332722, emissive: 0x114a67 });
-const selectMaterial = new THREE.MeshPhongMaterial({ color: 0x2194ce });
+const hoverMaterial = new THREE.MeshPhongMaterial({ color: 0x332722, emissive: 0x114a67 });
+const selectMaterial = new THREE.MeshPhongMaterial({
+    color: 0x1a1a1a, // A darker color
+    //emissive: 0x2194ce, // Add some emissive color to make it stand out
+    shininess: 50, // Increase shininess for a more polished look
+    opacity: 1.0,
+    transparent: false
+});
 
 class Viewer {
     constructor(domElement, system) {
@@ -307,7 +312,7 @@ class Viewer {
     }
 
     render() {
-        toggleContactDebug(this.scene, this.contactDebug);
+        //toggleContactDebug(this.scene, this.contactDebug);
         this.renderer.render(this.scene, this.camera);
         this.needsRender = false;
     }
@@ -424,6 +429,7 @@ class Viewer {
         object.traverse((child) => {
             if (child instanceof THREE.Mesh) {
                 child.material = selected ? selectMaterial : child.baseMaterial;
+                child.castShadow = selected ? true : false;
             }
         });
         if (object.name in this.bodyFolders) {

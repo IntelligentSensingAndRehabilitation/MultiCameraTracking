@@ -8,7 +8,7 @@ class Selector extends THREE.EventDispatcher {
         this.raycaster = new THREE.Raycaster();
         this.raycaster.layers.set(1);
         this.mousePos = new THREE.Vector2();
-        this.selected = null;
+        this.selected = [];
         this.hovered = null;
         this.dragging = false;
         this.selectable = viewer.scene.children.filter(
@@ -77,16 +77,16 @@ class Selector extends THREE.EventDispatcher {
             while (object.parent && !object.name) {
                 object = object.parent;
             }
-            if (this.selected !== object) {
-                if (this.selected) {
-                    this.dispatchEvent({ type: 'deselect', object: this.selected });
-                }
-                this.selected = object;
-                this.dispatchEvent({ type: 'select', object: this.selected });
+            // check if object in the list this.selected
+            if (this.selected.includes(object)) {
+                // remove object from the list
+                this.selected = this.selected.filter(item => item !== object);
+                this.dispatchEvent({ type: 'deselect', object: object });
+            } else {
+                // add object to the list
+                this.selected.push(object);
+                this.dispatchEvent({ type: 'select', object: object });
             }
-        } else if (this.selected !== null) {
-            this.dispatchEvent({ type: 'deselect', object: this.selected });
-            this.selected = null;
         }
     }
 }
