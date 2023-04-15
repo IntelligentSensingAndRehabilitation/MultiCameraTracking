@@ -242,10 +242,7 @@ class Viewer {
         // frameData is a list of dictionaries. each entry has a field ID with the numeric ID of the body
         // and a field with the verts for that body and the new time point
 
-        // if (this.trajectory)
-        //     return;
 
-        // console.log("adding frame " + this.smpl_frames);
         var res;
         frameData.forEach((frame) => {
             res = appendSmplFrame(frame, this.smplMeshes, this.smplKeyframeTracks, this.scene, this.smpl_frames, faces);
@@ -254,17 +251,11 @@ class Viewer {
             this.smpl_frames += 1;
         })
 
-        // if (this.smplKeyframeTracks.length < 5000) {
-        //     return;
-        // }
-
         if (this.trajectory == undefined) {
             this.trajectory = res.trajectory;
-            console.log("initial trajectories: ", this.trajectory)
             this.animator.load(this.trajectory, {});
         } else {
             this.trajectory = res.trajectory;
-            console.log("trajectories: ", this.trajectory)
             this.animator.updateTrajectory(this.trajectory)
         }
 
