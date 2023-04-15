@@ -311,6 +311,41 @@ function createKeypointTrajectory(system) {
     return new THREE.AnimationClip("Action", -1, tracks);
 }
 
+
+function createVisibilityKeyframeTrack(name, showIdx) {
+    const dt = 5 / 30;
+
+    const times = [showIdx - 0.01, showIdx].map(t => t * dt);
+    const values = [false, true, true, false];
+
+    console.log(name, times, values);
+
+    const track = new THREE.BooleanKeyframeTrack(
+        `scene/${name}.visible`,
+        times,
+        values
+    );
+
+    return track;
+}
+
+function createInvisibilityKeyframeTrack(name, showIdx, hideIdx) {
+    const dt = 5 / 30;
+
+    const times = [showIdx - 0.01, showIdx, hideIdx - 1, hideIdx - 1 + 0.01].map(t => t * dt);
+    const values = [false, true, true, false];
+
+    console.log(name, times, values);
+
+    const track = new THREE.BooleanKeyframeTrack(
+        `scene/${name}.visible`,
+        times,
+        values
+    );
+
+    return track;
+}
+
 function appendSmplFrame(frameData, smplMeshes, keyframeTracks, scene, timeIndex, faces) {
     /*
     frameData contains the data for a single frame of the SMPL animation. it is a list of dictionaries,
@@ -334,6 +369,7 @@ function appendSmplFrame(frameData, smplMeshes, keyframeTracks, scene, timeIndex
     // loop through all the meshes and if there is not a personId that matches
     // that index we will mark it as invisible for this frame.
     for (let i = 0; i < smplMeshes.length; i++) {
+
         let found = false;
         frameData.forEach(person => {
             if (person.id == i) {
@@ -342,8 +378,18 @@ function appendSmplFrame(frameData, smplMeshes, keyframeTracks, scene, timeIndex
         })
 
         if (!found) {
-            smplMeshes[i].children[0].userData.visibility.push(false);
-            smplMeshes[i].children[0].morphTargetInfluences.push(0);
+            // now fetch mesh from group
+            const mesh_group = smplMeshes[i];
+            const mesh = mesh_group.children[0];
+            if (mesh.userData.visibility.invisibleIdx === undefined) {
+                console.log("Person " + i + " track ends on frame " + timeIndex);
+
+                mesh.userData.visibility.invisibleIdx = timeIndex;
+
+                // Note this is duplicating the visible keyframes but that seems to blend without issue
+                const opacityKF = createInvisibilityKeyframeTrack(mesh.name, mesh.userData.visibility.visibleIdx, mesh.userData.visibility.invisibleIdx);
+                keyframeTracks.push(opacityKF);
+            }
         }
     }
 
@@ -389,41 +435,36 @@ function appendSmplFrame(frameData, smplMeshes, keyframeTracks, scene, timeIndex
             bufferGeometry.computeVertexNormals();
 
             // Prepare to add the morph targets and fill in the prior frames with invisible meshes
-            bufferGeometry.morphTargetsRelative = true;
+            bufferGeometry.morphTargetsRelative = false;
             bufferGeometry.morphAttributes.position = [];
 
-            for (let i = 0; i < timeIndex; i++) {
-                bufferGeometry.morphAttributes.position.push(new THREE.Float32BufferAttribute(positions, 3));
-                // TODO: handle visibility
-            }
-
             const mesh = new THREE.Mesh(bufferGeometry, mat);
-            mesh.castShadow = true;
+            mesh.castShadow = false;
             mesh.baseMaterial = mesh.material;
             mesh.layers.enable(1);
             mesh.name = name;
-
-            if (timeIndex > 0) {
-                const invisibleFrames = timeIndex - 1;
-                mesh.userData.visibility = Array(invisibleFrames).fill(false).concat(true);
-            } else {
-                mesh.userData.visibility = [true];
-            }
+            mesh.updateMorphTargets();
 
             const mesh_group = new THREE.Group()
             mesh_group.add(mesh);
+
+            const opacityKF = createVisibilityKeyframeTrack(name, timeIndex);
+            keyframeTracks.push(opacityKF);
+
+            mesh.userData.visibility = { 'opacityTrack': opacityKF, 'visibleIdx': timeIndex, 'invisibleIdx': undefined };
 
             smplMeshes.push(mesh_group);
 
             scene.add(mesh_group);
         }
 
-        const mesh_group = smplMeshes[personId];
         // now fetch mesh from group
+        const mesh_group = smplMeshes[personId];
         const mesh = mesh_group.children[0];
-
         const bufferGeometry = mesh.geometry;
         const morphVertices = new Float32Array(vertices.flat());
+
+        const keyframeNumber = bufferGeometry.morphAttributes.position.length;
 
         // scale morphVertices down by dividing by 1000
         for (let i = 0; i < morphVertices.length; i++) {
@@ -434,16 +475,9 @@ function appendSmplFrame(frameData, smplMeshes, keyframeTracks, scene, timeIndex
         // Let Three.js know that the existing morph attributes have been updated
         bufferGeometry.attributes.position.needsUpdate = true;
 
-        // Add a new morph target influence to the mesh and mark visible
-        mesh.morphTargetInfluences.push(0);
-        mesh.userData.visibility.push(true);
-
-        // Check that the mesh.morphTargetInfluences has changed
-        // console.log(mesh.morphTargetInfluences.length);
-
-        function createVectorKeyframeTrack(keyframeNumber) {
-            const dt = 1 / 30;
-            const times = [keyframeNumber - 1, keyframeNumber, keyframeNumber + 1].map(t => t * dt);
+        function createVectorKeyframeTrack(timeIndex) {
+            const dt = 5 / 30;
+            const times = [timeIndex - 1, timeIndex, timeIndex + 1].map(t => t * dt);
             const values = [0, 1, 0];
 
             const track = new THREE.VectorKeyframeTrack(
@@ -456,10 +490,8 @@ function appendSmplFrame(frameData, smplMeshes, keyframeTracks, scene, timeIndex
             return track;
         }
 
-        const keyframeNumber = timeIndex;
-
         // Create a new VectorKeyframeTrack and append it to the vectorKeyframeTracks list
-        const track = createVectorKeyframeTrack(keyframeNumber);
+        const track = createVectorKeyframeTrack(timeIndex);
         keyframeTracks.push(track);
 
         // Update the mesh.morphTargetDictionary with the keyframe number

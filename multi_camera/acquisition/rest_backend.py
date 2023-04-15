@@ -697,15 +697,21 @@ mesh_queue = asyncio.Queue()
 
 
 async def compute_mesh(model_path: str = "/home/jcotton/projects/pose/MultiCameraTracking/model_data/smpl_clean/"):
+    from multi_camera.datajoint.sessions import Recording
+    from multi_camera.datajoint.multi_camera_dj import MultiCameraRecording, SingleCameraVideo
     from multi_camera.datajoint.easymocap import EasymocapSmpl
+    from pose_pipeline.pipeline import PersonBbox
     from easymocap.smplmodel.body_model import SMPLlayer
     from tqdm import tqdm
 
     # TODO: make this a parameter
-    keys = EasymocapSmpl.fetch("KEY")
-    key = keys[400]
+    keys = (EasymocapSmpl * MultiCameraRecording * Recording - SingleCameraVideo * PersonBbox).fetch("KEY")
+    # keys = EasymocapSmpl.fetch("KEY")
+    key = keys[-5]
 
-    smpl_results = (EasymocapSmpl & key).fetch1("smpl_results")
+    print((MultiCameraRecording & key).fetch1("video_base_filename"))
+
+    smpl_results = (EasymocapSmpl & key).fetch1("smpl_results")[::5]
     smpl = SMPLlayer(model_path, model_type="smpl", gender="neutral")
 
     # get the unique list of ids
@@ -719,11 +725,12 @@ async def compute_mesh(model_path: str = "/home/jcotton/projects/pose/MultiCamer
         "type": "smpl",
         "faces": smpl.faces.astype(int).tolist(),
     }
+    print(info["frames"])
     mesh_messages.append(info)
     await mesh_queue.put(info)
 
     # use concurrent futures to process batches of 10 frames in parallel
-    batch_size = 30
+    batch_size = 1000
 
     def process_frame(frame, smpl):
         smpl_fields = ["poses", "shapes", "Rh", "Th"]
