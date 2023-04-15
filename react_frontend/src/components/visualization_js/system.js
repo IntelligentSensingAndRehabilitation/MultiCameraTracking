@@ -208,6 +208,20 @@ function createScene(system) {
         scene.add(parent);
     });
 
+    if (system.smpl) {
+        const faces = system.smpl.faces;
+        const frameData = system.smpl.meshes;
+
+        var smplMeshes = []
+        var smplKeyframeTracks = []
+
+        frameData.forEach((frame, index) => {
+            const res = appendSmplFrame(frame, smplMeshes, smplKeyframeTracks, scene, index, faces);
+            smplMeshes = res.meshes
+            smplKeyframeTracks = res.tracks
+        });
+    }
+
     if (system.states.contact) {
         /* add contact point spheres  */
         for (let i = 0; i < system.states.contact.pos[0].length; i++) {
@@ -400,10 +414,7 @@ function appendSmplFrame(frameData, smplMeshes, keyframeTracks, scene, timeIndex
         const personId = person.id;
         const name = "person_" + personId;
 
-        // vertices is encoded with base64.b64encode(json.dumps(v).encode("utf-8")).decode("utf-8")
-        // so we need to decode it into a list of lists of floats
-        const base64_encoded_vertices = person.verts;
-        const vertices = JSON.parse(Buffer.from(base64_encoded_vertices, 'base64'))
+        const vertices = person.verts;
 
         if (personId >= smplMeshes.length) {
 

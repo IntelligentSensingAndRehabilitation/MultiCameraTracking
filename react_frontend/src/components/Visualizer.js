@@ -1,12 +1,12 @@
-import React, { useState, useRef, useContext } from 'react';
-import { Container, Row, Button, ToggleButton } from "react-bootstrap";
+import React, { useState, useEffect, useRef, useContext } from 'react';
+import { Container, Row, Col, Form, Button, ToggleButton } from "react-bootstrap";
 import { Viewer } from './visualization_js/viewer.js';
 import { AcquisitionState, useEffectOnce } from "../AcquisitionApi";
 
 const system = {
     'meshes': {},
-    'geoms': {
-    },
+    'geoms': {},
+    'smpl': {},
     'keypoints': null,
     'states': {},
     'dt': 0.033
@@ -20,7 +20,20 @@ const BiomechanicalReconstruction = ({ data }) => {
 
     const [filter, setFilter] = useState(false);
 
-    const { meshUrl, fetchKeypoints, fetchMesh, fetchBiomechanics } = useContext(AcquisitionState);
+    const { meshUrl, fetchKeypoints, fetchMesh, fetchUnannotatedRecordings, fetchBiomechanics } = useContext(AcquisitionState);
+
+    const [currentRecording, setCurrentRecording] = useState(null);
+    const [recordingValidated, setRecordingValidated] = useState(false);
+    const [unannotatedRecordings, setUnannotatedRecordings] = useState([]);
+    useEffect(() => {
+        console.log("Fetching unannotated recordings...")
+        fetchUnannotatedRecordings().then((data) => {
+            console.log("Unannotated recordings: ", data)
+            // prepend an empty string to the list
+            data.unshift("");
+            setUnannotatedRecordings(data);
+        });
+    }, []);
 
     // variable to store the websocket connection
     const ws = useRef(null);
@@ -35,69 +48,38 @@ const BiomechanicalReconstruction = ({ data }) => {
         viewerRef.current.setFilter(val);
     };
 
-    useEffectOnce(async () => {
-
-        console.log('Initializing viewer');
-
-
-        // You can load data here and update the state accordingly
-        //system.keypoints = await fetchKeypoints();
-        //console.log("keypoints shape: ", system.keypoints.length, system.keypoints[0].length);
-
-        var faces = null;
-
-        const domElement = containerRef.current;
-        const guiElement = guiRef.current;
-        viewerRef.current = new Viewer(domElement, system, guiElement);
-
-
-
-        if (showMesh) {
-            console.log('Connecting to mesh websocket...');
-
-            ws.current = new WebSocket(meshUrl);
-
-            ws.current.onopen = () => {
-                console.log("Mesh WebSocket connected");
-            };
-
-            ws.current.onmessage = (event) => {
-                // convert event.data from JSON to JS object
-                const data = JSON.parse(event.data);
-
-                if (faces === null) {
-                    // unpack as json for first message:
-                    faces = data.faces;
-                } else {
-                    viewerRef.current.addFrame(data, faces);
-                }
-
-            };
-
-            ws.current.onclose = () => {
-                console.log("Mesh WebSocket disconnected");
-            };
-
-            ws.current.onerror = (event) => {
-                console.log("Mesh WebSocket error observed:", event);
-            }
-
-            return () => {
-                if (ws.current) {
-                    ws.current.close();
-                }
-            };
-        } else {
-            const biomechanics = await fetchBiomechanics();
-            viewerRef.current.addBiomechanics(biomechanics.meshes, biomechanics.trajectories);
-            console.log("biomechanics: ", biomechanics);
-
-            return () => {
-                console.log("Closed biomechanics")
-            };
+    useEffect(() => {
+        console.log("Current recording: ", currentRecording)
+        if (currentRecording === "") {
+            // TODO: close the viewer data
+            setRecordingValidated(true);
         }
+        else {
+            setRecordingValidated(false);
+            fetchMesh(currentRecording).then((data) => {
+                console.log("Mesh data: ", data)
+                system.smpl = data;
 
-    }, []);
+                if (viewerRef.current != null) {
+                    viewerRef.current.close();
+                    // delete the viewerRef.current
+                    viewerRef.current = null;
+                }
+
+                const domElement = containerRef.current;
+                const guiElement = guiRef.current;
+                viewerRef.current = new Viewer(domElement, system, guiElement);
+
+                setRecordingValidated(true);
+            });
+        }
+    }, [currentRecording]);
+
+    const annotateRecording = () => {
+        console.log("Annotating recording: ", currentRecording)
+        const ids = viewerRef.current.getSelectedIds();
+        console.log("Selected ids: ", ids)
+    }
 
     // Set the height of the brax-viewer div to 400 pixels
     const viewerStyle = {
@@ -119,6 +101,28 @@ const BiomechanicalReconstruction = ({ data }) => {
 
     return (
         <Container>
+
+            <Form noValidate validated={recordingValidated} className="p-2">
+                <Form.Group controlId="recording" as={Row}>
+                    <Form.Label column sm={3}>Recording:</Form.Label>
+                    <Col sm={6}>
+                        <Form.Control
+                            as="select"
+                            value={currentRecording}
+                            onChange={(e) => setCurrentRecording(e.target.value)}
+                            className="flex-grow-1"
+                        >
+                            {unannotatedRecordings.map((recording) => (
+                                <option value={recording} key={recording}>
+                                    {recording}
+                                </option>
+                            ))}
+                        </Form.Control>
+                    </Col>
+
+                </Form.Group>
+            </Form>
+
             <Row className='p-2'>
                 <div ref={guiRef} id="gui" style={guiStyle}></div>
                 <div ref={containerRef} id="brax-viewer" style={viewerStyle}></div>
@@ -136,7 +140,10 @@ const BiomechanicalReconstruction = ({ data }) => {
                 </ToggleButton>
                 {/* add space between buttons */}
                 <div className='p-2'></div>
-                <Button className='p-2'>Annotate</Button>
+                <Button className='p-2'
+                    variant="primary"
+                    onClick={annotateRecording}>
+                    Annotate</Button>
             </Row>
         </Container>
     );
