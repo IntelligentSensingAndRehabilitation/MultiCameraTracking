@@ -274,31 +274,6 @@ class Viewer {
         });
     }
 
-    addFrame(frameData, faces) {
-        // frameData is a list of dictionaries. each entry has a field ID with the numeric ID of the body
-        // and a field with the verts for that body and the new time point
-
-
-        var res;
-        frameData.forEach((frame) => {
-            res = appendSmplFrame(frame, this.smplMeshes, this.smplKeyframeTracks, this.scene, this.smpl_frames, faces);
-            this.smplMeshes = res.meshes
-            this.smplKeyframeTracks = res.tracks
-            this.smpl_frames += 1;
-        })
-
-        if (this.trajectory == undefined) {
-            this.trajectory = res.trajectory;
-            this.animator.load(this.trajectory, {});
-        } else {
-            this.trajectory = res.trajectory;
-            this.animator.updateTrajectory(this.trajectory)
-        }
-
-        console.log("received " + frameData.length + " frames. current frame count: " + this.smpl_frames);
-        this.selector.updateSelectable();
-    }
-
     addBiomechanics(meshes, trajectories) {
         const boneMeshes = createBiomechanicalMesh(meshes)
 
@@ -471,6 +446,14 @@ class Viewer {
             }
         }
         this.setDirty();
+    }
+
+    close() {
+        // Remove the canvas from the DOM
+        this.domElement.removeChild(this.renderer.domElement);
+
+        // Remove the GUI from the DOM
+        this.gui.domElement.parentElement.removeChild(this.gui.domElement);
     }
 }
 

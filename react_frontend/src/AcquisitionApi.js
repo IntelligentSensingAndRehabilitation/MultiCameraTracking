@@ -242,8 +242,21 @@ export const AquisitionApi = (props) => {
         return response.data;
     }
 
-    async function fetchMesh() {
-        const response = await axios.get(`${API_BASE_URL}/mesh`);
+    const fetchUnannotatedRecordings = async () => {
+        const recordings = await axios.get(`${API_BASE_URL}/unannotated_recordings`);
+        return recordings.data.video_base_filenames;
+    };
+
+    async function fetchMesh(filename) {
+        const response = await axios.get(`${API_BASE_URL}/mesh`, {
+            params: {
+                filename: filename,
+                downsample: 5
+            }
+        });
+        const data = response.data;
+        // unpack the base64 encoded mesh data
+        data.meshes = JSON.parse(Buffer.from(data.meshes, 'base64'))
         return response.data;
     }
 
@@ -394,6 +407,7 @@ export const AquisitionApi = (props) => {
         runCalibration,
         processSession,
         fetchKeypoints,
+        fetchUnannotatedRecordings,
         fetchMesh,
         fetchBiomechanics
     }}> {props.children} </AcquisitionState.Provider >)

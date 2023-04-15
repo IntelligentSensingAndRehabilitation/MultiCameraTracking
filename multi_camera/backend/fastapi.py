@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, Request, APIRouter, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, Depends, Request, APIRouter, WebSocket, WebSocketDisconnect, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
@@ -640,181 +640,33 @@ async def get_keypoints():
 
 
 class SMPLData(BaseModel):
-    verts: List[List[List[float]]]
+    ids: List[int]
+    frames: int
+    type: str
     faces: List[List[int]]
+    meshes: str  # base64 encoded
 
 
 @api_router.get("/mesh", response_model=SMPLData)
-async def get_mesh() -> SMPLData:
-    def get_mesh_info(
-        return_id=None, model_path: str = "/home/jcotton/projects/pose/MultiCameraTracking/model_data/smpl_clean/"
-    ):
-        from multi_camera.datajoint.easymocap import EasymocapSmpl
-        from easymocap.smplmodel.body_model import SMPLlayer
+async def get_mesh(
+    filename: str = Query(None, description="Name of the file to be used."), downsample: int = Query(default=5)
+) -> SMPLData:
+    from .annotation import get_mesh
 
-        keys = EasymocapSmpl.fetch("KEY")
-        key = keys[200]
-
-        smpl_results = (EasymocapSmpl & key).fetch1("smpl_results")[:20]
-        smpl = SMPLlayer(model_path, model_type="smpl", gender="neutral")
-
-        def zero_position(r):
-            # r["Th"] = np.array([[0, 0, 0]])
-            return r
-
-        if return_id is not None:
-            verts = [
-                [
-                    smpl(**zero_position(r), return_verts=True, return_tensor=False)[0].tolist()
-                    for r in frame
-                    if r["id"] == return_id
-                ][0]
-                for frame in smpl_results
-            ]
-        else:
-            verts = [
-                [smpl(**r, return_verts=True, return_tensor=False)[0].tolist() for r in frame] for frame in smpl_results
-            ]
-
-        return {"verts": verts, "faces": smpl.faces.tolist()}
-
-    print("retrieving mesh")
-    res = get_mesh_info(1)
-    print("done retrieving mesh")
+    res = get_mesh(filename, downsample)
     return SMPLData(**res)
 
 
-def process_frame(frame_data, smpl):
-    return [
-        {"id": int(r["id"]), "verts": smpl(**r, return_verts=True, return_tensor=False)[0].tolist()} for r in frame_data
-    ]
+class UnannotatedRecordings(BaseModel):
+    video_base_filenames: List[str]
 
 
-# dirty caching method for now during development since computing these
-# is a bit slow
-mesh_messages = []
-mesh_queue = asyncio.Queue()
+@api_router.get("/unannotated_recordings")
+async def get_unannotated_recordings():
+    from .annotation import get_unannotated_recordings
 
-
-async def compute_mesh(model_path: str = "/home/jcotton/projects/pose/MultiCameraTracking/model_data/smpl_clean/"):
-    from multi_camera.datajoint.sessions import Recording
-    from multi_camera.datajoint.multi_camera_dj import MultiCameraRecording, SingleCameraVideo
-    from multi_camera.datajoint.easymocap import EasymocapSmpl
-    from pose_pipeline.pipeline import PersonBbox
-    from easymocap.smplmodel.body_model import SMPLlayer
-    from tqdm import tqdm
-
-    # TODO: make this a parameter
-    keys = (EasymocapSmpl * MultiCameraRecording * Recording - SingleCameraVideo * PersonBbox).fetch("KEY")
-    # keys = EasymocapSmpl.fetch("KEY")
-    key = keys[-5]
-
-    print((MultiCameraRecording & key).fetch1("video_base_filename"))
-
-    smpl_results = (EasymocapSmpl & key).fetch1("smpl_results")[::5]
-    smpl = SMPLlayer(model_path, model_type="smpl", gender="neutral")
-
-    # get the unique list of ids
-    ids = [[r["id"] for r in frame] for frame in smpl_results]
-    ids = list(set([id for frame in ids for id in frame]))
-
-    # send the mesh info
-    info = {
-        "ids": [int(x) for x in ids],
-        "frames": len(smpl_results),
-        "type": "smpl",
-        "faces": smpl.faces.astype(int).tolist(),
-    }
-    print(info["frames"])
-    mesh_messages.append(info)
-    await mesh_queue.put(info)
-
-    # use concurrent futures to process batches of 10 frames in parallel
-    batch_size = 1000
-
-    def process_frame(frame, smpl):
-        smpl_fields = ["poses", "shapes", "Rh", "Th"]
-        smpl_batch = {}
-        for f in smpl_fields:
-            smpl_batch[f] = np.concatenate([person[f] for person in frame], axis=0)
-
-        ids = [int(person["id"]) for person in frame]
-
-        verts = smpl(**smpl_batch, return_verts=True, return_tensor=False)
-        verts = (verts * 1000.0).astype(int)
-
-        def encode(v):
-            import json
-
-            return base64.b64encode(json.dumps(v.tolist()).encode("utf-8")).decode("utf-8")
-
-        return [{"id": i, "verts": encode(v)} for i, v in zip(ids, verts)]
-
-    def frame_batch_generator():
-        for i in range(0, len(smpl_results), batch_size):
-            yield smpl_results[i : i + batch_size]
-
-    for frame_batch in tqdm(frame_batch_generator()):
-        import concurrent.futures
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=batch_size) as executor:
-            futures = [executor.submit(process_frame, frame, smpl) for frame in frame_batch]
-            # now collect gather the futures results
-            to_send = [f.result() for f in futures]
-
-        mesh_messages.append(to_send)
-        await mesh_queue.put(to_send)
-
-        # sleep to allow the client to process the messages
-        await asyncio.sleep(0.01)
-
-    mesh_messages.append(None)
-    await mesh_queue.put(None)
-
-
-@api_router.websocket("/mesh_ws")
-async def mesh_websocket_endpoint(websocket: WebSocket):
-    import time
-
-    await websocket.accept()
-    logger.info("Mesh Websocket connected")
-
-    try:
-        if len(mesh_messages) == 0:
-            print
-            # dispatch compute mesh task then listen for queue messages
-            # and send them to the client
-            asyncio.create_task(compute_mesh())
-
-            while not AppStatus.should_exit:
-                msg = await mesh_queue.get()
-                if msg is None:
-                    break
-                print("sending while computing")
-
-                start_send = time.time()
-                await websocket.send_json(msg)
-                print("sent in ", time.time() - start_send)
-
-        else:
-            print("Length of cache messages is ", len(mesh_messages))
-
-            # send all the messages in the queue
-            for msg in mesh_messages:
-                if msg is None:
-                    break
-                print("sending from cache")
-                start_send = time.time()
-                await websocket.send_json(msg)
-
-                print("sent in ", time.time() - start_send)
-
-    except WebSocketDisconnect as e:
-        logger.info("Mesh Websocket disconnected with WebSocketDisconnect: %s", e)
-    except ConnectionClosedOK as e:
-        logger.info("Mesh  Websocket disconnected with ConnectionClosedOK: %s", e)
-
-    logger.info("Mesh websocket exited")
+    video_base_filenames = get_unannotated_recordings()
+    return UnannotatedRecordings(video_base_filenames=video_base_filenames.tolist())
 
 
 class MeshData(BaseModel):
