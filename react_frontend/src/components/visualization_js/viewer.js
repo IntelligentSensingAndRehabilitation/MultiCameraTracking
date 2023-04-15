@@ -80,9 +80,10 @@ const selectMaterial = new THREE.MeshPhongMaterial({
     opacity: 1.0,
     transparent: false
 });
+const invisibleMaterial = new THREE.MeshPhongMaterial({ color: 0x000000, opacity: 0.0, transparent: true });
 
 class Viewer {
-    constructor(domElement, system) {
+    constructor(domElement, system, guiElement) {
         // Set +z as pointing up, instead of +y which is the default.
         THREE.Object3D.DEFAULT_UP.set(0, 0, 1);
 
@@ -151,12 +152,17 @@ class Viewer {
         });
         this.controlTargetPos = this.controls.target.clone();
 
-        /* set up gui */
         this.gui = new GUI({ autoPlace: false });
-        this.domElement.parentElement.appendChild(this.gui.domElement);
-        this.gui.domElement.style.position = 'absolute';
-        this.gui.domElement.style.right = 0;
-        this.gui.domElement.style.top = 0;
+
+        if (guiElement != undefined) {
+            guiElement.appendChild(this.gui.domElement);
+        } else {
+            // if full screen or in an iframe, this works. 
+            this.domElement.parentElement.appendChild(this.gui.domElement);
+            this.gui.domElement.style.position = 'absolute';
+            this.gui.domElement.style.right = '0%';
+            this.gui.domElement.style.top = '0%';
+        }
 
         /* add camera inspectors */
         const cameraFolder = this.gui.addFolder('Camera');
@@ -166,6 +172,7 @@ class Viewer {
             .name('Follow Distance')
             .min(1)
             .max(50);
+        cameraFolder.close()
 
         /* set up animator and load trajectory */
         this.animator = new Animator(this);
@@ -197,20 +204,20 @@ class Viewer {
                 folder.add(c.rotation, 'z').name('rot.z'),
             );
         }
-        let saveFolder = this.gui.addFolder('Save / Capture');
-        saveFolder.add(this, 'saveScene').name('Save Scene');
-        saveFolder.add(this, 'saveImage').name('Capture Image');
-        saveFolder.close();
+        // let saveFolder = this.gui.addFolder('Save / Capture');
+        // saveFolder.add(this, 'saveScene').name('Save Scene');
+        // saveFolder.add(this, 'saveImage').name('Capture Image');
+        // saveFolder.close();
 
         /* debugger */
-        this.contactDebug = system.states.contact !== null;
-        let debugFolder = this.gui.addFolder('Debugger');
-        debugFolder.add(this, 'contactDebug')
-            .name(system.states.contact ? 'contacts' : 'axis')
-            .onChange((value) => this.setContactDebug(value));
+        // this.contactDebug = system.states.contact !== null;
+        // let debugFolder = this.gui.addFolder('Debugger');
+        // debugFolder.add(this, 'contactDebug')
+        //     .name(system.states.contact ? 'contacts' : 'axis')
+        //     .onChange((value) => this.setContactDebug(value));
 
         /* done setting up the gui */
-        this.gui.close();
+        //this.gui.close();
 
         /* set up body selector */
         this.selector = new Selector(this);
@@ -241,6 +248,30 @@ class Viewer {
         this.animate();
 
         this.smpl_frames = 0;
+    }
+
+    setFilter(filter) {
+        /* if true, then only show the meshes that are in the selected list and make the others 
+        transparent */
+
+        this.filter = filter;
+        const selected = this.selector.selected;
+
+        this.smplMeshes.forEach((meshGroup) => {
+            console.log(mesh, selected)
+            const mesh = meshGroup.children[0];
+            if (filter) {
+                // now see if object is in the list
+                if (selected.includes(mesh)) {
+                    mesh.material = selectMaterial;
+                } else {
+                    mesh.material = invisibleMaterial;
+                }
+            } else {
+                // default behavior for being selected
+                mesh.material = selected.includes(mesh) ? selectMaterial : mesh.baseMaterial;
+            }
+        });
     }
 
     addFrame(frameData, faces) {

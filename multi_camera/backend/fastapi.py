@@ -20,7 +20,7 @@ import os
 import asyncio
 
 from multi_camera.acquisition.flir_recording_api import FlirRecorder, CameraStatus
-from multi_camera.acquisition.recording_db import (
+from multi_camera.backend.recording_db import (
     get_db,
     add_recording,
     get_recordings,
@@ -931,7 +931,7 @@ if __name__ == "__main__":
 
     # Start the server
     uvicorn.run(
-        "multi_camera.acquisition.rest_backend:app",
+        "multi_camera.backend.fastapi:app",
         host="0.0.0.0",
         port=8000,
         reload=True,

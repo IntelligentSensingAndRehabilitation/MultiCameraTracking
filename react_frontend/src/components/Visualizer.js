@@ -1,55 +1,39 @@
-import * as THREE from 'three'
-import React, { useEffect, useRef, useContext } from 'react';
+import React, { useState, useRef, useContext } from 'react';
+import { Container, Row, Button, ToggleButton } from "react-bootstrap";
 import { Viewer } from './visualization_js/viewer.js';
 import { AcquisitionState, useEffectOnce } from "../AcquisitionApi";
 
 const system = {
     'meshes': {},
     'geoms': {
-        'mesh': [
-            {
-                'name': 'Mesh',
-                'vert': [
-                    [0, 0, 0],
-                    [1, 0, 0],
-                    [0, 1, 0],
-                    [0, 0, 1],
-                ],
-                'face': [
-                    [0, 1, 2],
-                    [0, 1, 3],
-                    [0, 2, 3],
-                    [1, 2, 3],
-                ],
-                'vert_anim': [[
-                    [0, 0, 0],
-                    [1, 0, 0],
-                    [0, 1, 0],
-                    [0, 0, 1],
-                ]],
-                'link_idx': 0,
-                'transform': {
-                    'pos': [0, 0, 1],
-                },
-                'rgba': [1, 0, 0, 1],
-            },
-        ],
     },
     'keypoints': null,
-    'states': { 'x': { 'pos': [] } }, 'dt': 0.033
+    'states': {},
+    'dt': 0.033
 }
 
 const BiomechanicalReconstruction = ({ data }) => {
 
     const viewerRef = useRef();
     const containerRef = useRef();
+    const guiRef = useRef();
+
+    const [filter, setFilter] = useState(false);
 
     const { meshUrl, fetchKeypoints, fetchMesh, fetchBiomechanics } = useContext(AcquisitionState);
 
+    // variable to store the websocket connection
     const ws = useRef(null);
 
     // set showMesh true if data is not none
     const showMesh = { data }.data == "true";
+
+    // Button callbacks
+    const onFilterToggle = (val) => {
+        console.log("Filter: ", val)
+        setFilter(val);
+        viewerRef.current.setFilter(val);
+    };
 
     useEffectOnce(async () => {
 
@@ -57,13 +41,15 @@ const BiomechanicalReconstruction = ({ data }) => {
 
 
         // You can load data here and update the state accordingly
-        system.keypoints = await fetchKeypoints();
-        console.log("keypoints shape: ", system.keypoints.length, system.keypoints[0].length);
+        //system.keypoints = await fetchKeypoints();
+        //console.log("keypoints shape: ", system.keypoints.length, system.keypoints[0].length);
 
         var faces = null;
 
         const domElement = containerRef.current;
-        viewerRef.current = new Viewer(domElement, system);
+        const guiElement = guiRef.current;
+        viewerRef.current = new Viewer(domElement, system, guiElement);
+
 
 
         if (showMesh) {
@@ -116,10 +102,44 @@ const BiomechanicalReconstruction = ({ data }) => {
     // Set the height of the brax-viewer div to 400 pixels
     const viewerStyle = {
         height: '900px',
-        width: '100%'
+        width: '98%', // magic percentage to match the padding from React
+        left: '0px',
+        top: '0px',
     };
 
-    return <div ref={containerRef} id="brax-viewer" style={viewerStyle}></div>;
+    const guiStyle = {
+        position: 'relative',
+        bottom: '0px',
+        left: '0%',
+        top: '100%',
+        width: '100%',
+        height: '0px',
+        zIndex: '1000'
+    }
+
+    return (
+        <Container>
+            <Row className='p-2'>
+                <div ref={guiRef} id="gui" style={guiStyle}></div>
+                <div ref={containerRef} id="brax-viewer" style={viewerStyle}></div>
+            </Row>
+
+            <Row className='p-4' sm={4}>
+                <ToggleButton className='mb-2'
+                    id="toggle-check"
+                    type="checkbox"
+                    variant="outline-primary"
+                    value="1"
+                    checked={filter}
+                    onChange={(e) => onFilterToggle(e.currentTarget.checked)} >
+                    Filter
+                </ToggleButton>
+                {/* add space between buttons */}
+                <div className='p-2'></div>
+                <Button className='p-2'>Annotate</Button>
+            </Row>
+        </Container>
+    );
 
 };
 
