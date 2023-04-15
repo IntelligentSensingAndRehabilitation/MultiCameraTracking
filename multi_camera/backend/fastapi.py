@@ -669,6 +669,22 @@ async def get_unannotated_recordings():
     return UnannotatedRecordings(video_base_filenames=video_base_filenames.tolist())
 
 
+class Annotation(BaseModel):
+    video_base_filename: str
+    ids: List[int]
+
+
+@api_router.post("/annotation")
+async def post_annotation(annotation: Annotation):
+    from .annotation import annotate_recording
+
+    success = annotate_recording(annotation.video_base_filename, annotation.ids)
+    return {"success": success}
+
+
+# code for working with biomechanical data
+
+
 class MeshData(BaseModel):
     vertices: List[List[float]]
     faces: List[List[int]]

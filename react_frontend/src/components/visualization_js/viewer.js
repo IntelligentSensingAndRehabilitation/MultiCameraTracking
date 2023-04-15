@@ -253,9 +253,10 @@ class Viewer {
         this.filter = filter;
         const selected = this.selector.selected;
 
-        this.smplMeshes.forEach((meshGroup) => {
-            console.log(mesh, selected)
-            const mesh = meshGroup.children[0];
+        // fetch the meshes from the "smpl" group in the scene
+        const meshes = this.scene.getObjectByName('smpl').children;
+
+        meshes.forEach((mesh) => {
             if (filter) {
                 // now see if object is in the list
                 if (selected.includes(mesh)) {
@@ -378,6 +379,13 @@ class Viewer {
             }
         }
         this.setDirty();
+    }
+
+    getSelectedIds() {
+        const names = this.selector.selected.map((object) => object.name);
+        // for names parse the numeric part after person_
+        const ids = names.map((name) => parseInt(name.split('_')[1]));
+        return ids;
     }
 
     close() {

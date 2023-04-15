@@ -223,8 +223,6 @@ function createScene(system) {
             const firstFrame = meshes.filter((mesh) => mesh.some((m) => m.id == id))[0];
             const verts = firstFrame.filter((m) => m.id == id)[0].verts;
 
-            console.log(firstFrame, verts)
-
             const smpl = createSmplPerson(id, faces, verts);
             smplGroup.add(smpl);
         });
@@ -360,8 +358,6 @@ function createInvisibilityKeyframeTrack(name, showIdx, hideIdx) {
     const times = [showIdx - 0.01, showIdx, hideIdx - 1, hideIdx - 1 + 0.01].map(t => t * dt);
     const values = [false, true, true, false];
 
-    console.log(name, times, values);
-
     const track = new THREE.BooleanKeyframeTrack(
         `scene/${name}.visible`,
         times,
@@ -446,10 +442,6 @@ function createSmplTrajectory(system, scene) {
 
     allFrames.forEach((frameData, index) => {
         const timeIndex = index;
-
-        console.log("frame " + timeIndex + " has " + frameData.length + " people");
-
-        console.log("smpMeshes length: " + smplMeshes.length + " frameData length: " + frameData.length);
 
         frameData.forEach(person => {
 
