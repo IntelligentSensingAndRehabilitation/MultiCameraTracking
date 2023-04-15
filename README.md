@@ -32,7 +32,7 @@ This project is under active development and breaking changes may be introduced.
 
 First start FastAPI backend, which provides a REST API for the acquisition software
 
-    python -m multi_camera.acquisition.rest_backend
+    python -m multi_camera.backend.fastapi
 
 Then start the web GUI
 
