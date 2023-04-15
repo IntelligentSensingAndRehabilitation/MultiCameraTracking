@@ -28,7 +28,6 @@ const BiomechanicalReconstruction = ({ data }) => {
     useEffect(() => {
         console.log("Fetching unannotated recordings...")
         fetchUnannotatedRecordings().then((data) => {
-            console.log("Unannotated recordings: ", data)
             // prepend an empty string to the list
             data.unshift("");
             setUnannotatedRecordings(data);
@@ -55,16 +54,16 @@ const BiomechanicalReconstruction = ({ data }) => {
             setRecordingValidated(true);
         }
         else {
+            if (viewerRef.current != null) {
+                viewerRef.current.close();
+                // delete the viewerRef.current
+                viewerRef.current = null;
+            }
+
             setRecordingValidated(false);
             fetchMesh(currentRecording).then((data) => {
                 console.log("Mesh data: ", data)
                 system.smpl = data;
-
-                if (viewerRef.current != null) {
-                    viewerRef.current.close();
-                    // delete the viewerRef.current
-                    viewerRef.current = null;
-                }
 
                 const domElement = containerRef.current;
                 const guiElement = guiRef.current;
@@ -104,7 +103,7 @@ const BiomechanicalReconstruction = ({ data }) => {
 
             <Form noValidate validated={recordingValidated} className="p-2">
                 <Form.Group controlId="recording" as={Row}>
-                    <Form.Label column sm={3}>Recording:</Form.Label>
+                    <Form.Label column sm={3}>Unannotated Recordings:</Form.Label>
                     <Col sm={6}>
                         <Form.Control
                             as="select"
