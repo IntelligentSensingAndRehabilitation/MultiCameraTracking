@@ -12,6 +12,7 @@ import AcquisitionHome from './AcquisitionHome';
 import AnalysisHome from './AnalysisHome';
 import { AquisitionApi } from './AcquisitionApi';
 import BiomechanicalReconstruction from './components/Visualizer';
+import BiomechanicsBrowser from './components/BiomechanicsBrowser';
 import Container from "react-bootstrap/Container";
 
 function App() {
@@ -32,6 +33,9 @@ function App() {
             <LinkContainer to="/annotator">
               <Nav.Link>Annotate</Nav.Link>
             </LinkContainer>
+            <LinkContainer to="/biomechanics_browser">
+              <Nav.Link>Biomechanics</Nav.Link>
+            </LinkContainer>
             <LinkContainer to="/visualize_biomechanics">
               <Nav.Link>Visualize Biomechanics</Nav.Link>
             </LinkContainer>
@@ -44,6 +48,7 @@ function App() {
           <Route path="/" element={<AcquisitionHome />} />
           <Route path="/analysis" element={<AnalysisHome />} />
           <Route path="/annotator" element={<BiomechanicalReconstruction data="true" />} />
+          <Route path="/biomechanics_browser" element={<BiomechanicsBrowser />} />
           <Route path="/visualize_biomechanics" element={<BiomechanicalReconstruction data="false" />} />
         </Routes>
       </AquisitionApi>

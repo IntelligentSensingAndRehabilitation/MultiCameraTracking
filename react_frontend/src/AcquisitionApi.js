@@ -242,6 +242,8 @@ export const AquisitionApi = (props) => {
         return response.data;
     }
 
+    // Mesh functions
+
     const fetchUnannotatedRecordings = async () => {
         const recordings = await axios.get(`${API_BASE_URL}/unannotated_recordings`);
         return recordings.data.video_base_filenames;
@@ -258,6 +260,7 @@ export const AquisitionApi = (props) => {
     };
 
     async function fetchMesh(filename) {
+        // Fetch the mesh data for the given recording
         const response = await axios.get(`${API_BASE_URL}/mesh`, {
             params: {
                 filename: filename,
@@ -270,8 +273,23 @@ export const AquisitionApi = (props) => {
         return response.data;
     }
 
-    async function fetchBiomechanics() {
-        const response = await axios.get(`${API_BASE_URL}/biomechanics`);
+    // Biomechanics functions
+
+    async function fetchBiomechanicsTrials() {
+        // Get a list of all biomechanics trials
+        const recordings = await axios.get(`${API_BASE_URL}/biomechanics_trials`);
+        return recordings.data;
+    }
+
+    async function fetchBiomechanics(filename) {
+        // Fetch the biomechanics data for the given recording
+        console.log("Fetching biomechanics for: " + filename)
+        const response = await axios.get(`${API_BASE_URL}/biomechanics`, {
+            params: {
+                filename: filename,
+            }
+        });
+        console.log("Received biomechanics: ", response.data)
         return response.data;
     }
 
@@ -420,6 +438,7 @@ export const AquisitionApi = (props) => {
         fetchUnannotatedRecordings,
         annotateRecording,
         fetchMesh,
+        fetchBiomechanicsTrials,
         fetchBiomechanics
     }}> {props.children} </AcquisitionState.Provider >)
     //return (<div> {children} </div>)

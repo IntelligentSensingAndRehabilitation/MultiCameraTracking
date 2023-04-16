@@ -685,6 +685,21 @@ async def post_annotation(annotation: Annotation):
 # code for working with biomechanical data
 
 
+class BiomechanicalTrials(BaseModel):
+    participant_id: str
+    session_date: date
+    video_base_filename: str
+
+
+@api_router.get("/biomechanics_trials", response_model=List[BiomechanicalTrials])
+async def get_biomechanics_trials() -> List[BiomechanicalTrials]:
+    from .biomechanics import get_biomechanics_trials
+
+    trials = get_biomechanics_trials()
+    trials = [BiomechanicalTrials(**trial) for trial in trials]
+    return trials
+
+
 class MeshData(BaseModel):
     vertices: List[List[float]]
     faces: List[List[int]]
@@ -701,73 +716,18 @@ class BiomechanicsData(BaseModel):
 
 
 @api_router.get("/biomechanics")
-async def get_biomechanics():
-    import numpy as np
-    from scipy.spatial.transform import Rotation as R
-    from multi_camera.analysis.biomechanics.render import load_skeleton_meshes, pose_skeleton
+async def get_biomechanics(filename: str = Query(None, description="Name of the file to be used.")):
+    from .biomechanics import get_biomechanics_trajectory
 
-    def getBiomechanicalMesh(skeleton):
-        meshes = load_skeleton_meshes(skeleton)
-        meshes_data = {}
-        for name, mesh in meshes.items():
-            meshes_data[name] = MeshData(
-                vertices=(mesh.vertices).tolist(),
-                faces=mesh.faces.astype(int).tolist(),
-            )
-        return meshes_data
+    # fetch the data dictionary for this trial
+    res = get_biomechanics_trajectory(filename)
 
-    def getBiomechanicalTrajectory(skeleton, poses):
-        trajectories = {}
+    meshes = res["meshes"]
+    traj = res["trajectories"]
 
-        # Create a transformation matrix that swaps Y and Z axes
-        r = np.pi / 2
-        swap_yz_matrix = np.array(
-            [[1, 0, 0, 0], [0, np.cos(r), -np.sin(r), 0], [0, np.sin(r), np.cos(r), 0], [0, 0, 0, 1]]
-        )
-
-        for pose in poses:
-            skeleton.setPositions(pose)
-
-            for b in skeleton.getBodyNodes():
-                for s in b.getShapeNodes():
-                    name = s.getName()
-                    transform_matrix = s.getWorldTransform().matrix()
-
-                    # Apply the affine transformation to the world transform matrix
-                    transformed_matrix = swap_yz_matrix @ transform_matrix
-
-                    position = transformed_matrix[:3, 3].tolist()
-
-                    rot_matrix = transformed_matrix[:3, :3]
-                    rotation = R.from_matrix(rot_matrix).as_quat().tolist()
-
-                    if name not in trajectories:
-                        trajectories[name] = {
-                            "position": [],
-                            "orientation": [],
-                        }
-
-                    trajectories[name]["position"].append(position)
-                    trajectories[name]["orientation"].append(rotation)
-
-        trajectories = {
-            k: TrajectoryData(positions=v["position"], rotations=v["orientation"]) for k, v in trajectories.items()
-        }
-        return trajectories
-
-    from multi_camera.datajoint.biomechanics import BiomechanicalReconstruction
-    from multi_camera.analysis.biomechanics import bilevel_optimization
-
-    keys = (BiomechanicalReconstruction.Trial & "model_name='Rajagopal_Neck_mbl_movi_87_rev15'").fetch("KEY")
-    key = keys[200]
-
-    model_name, skeleton_def = (BiomechanicalReconstruction & key).fetch1("model_name", "skeleton_definition")
-    # print(model_name, skeleton_def)
-    skeleton = bilevel_optimization.reload_skeleton(model_name, skeleton_def["group_scales"])
-    timestamps, poses = (BiomechanicalReconstruction.Trial & key).fetch1("timestamps", "poses")
-
-    meshes = getBiomechanicalMesh(skeleton)
-    traj = getBiomechanicalTrajectory(skeleton, poses)
+    # repackage the data with Pydantic
+    meshes = {k: MeshData(vertices=v["vertices"], faces=v["faces"]) for k, v in meshes.items()}
+    traj = {k: TrajectoryData(positions=v["positions"], rotations=v["rotations"]) for k, v in traj.items()}
 
     data = BiomechanicsData(meshes=meshes, trajectories=traj)
 
