@@ -95,6 +95,9 @@ class Viewer {
         if (system.smpl) {
             this.trajectory = createSmplTrajectory(system, this.scene);
             //this.smplMeshes = this.scene.getObjectById("smpl").children;
+        } else if (system.biomechanics) {
+            const trajectoryData = system.biomechanics.trajectories;
+            this.trajectory = createBiomechanicalTrajectory(trajectoryData, system.dt)
         } else {
             this.trajectory = createTrajectory(system);
         }
@@ -226,8 +229,14 @@ class Viewer {
         this.selector.addEventListener(
             'deselect', (evt) => this.setSelected(evt.object, false));
 
-        this.defaultTarget = this.selector.selectable[0];
-        this.target = this.defaultTarget;
+        if (system.biomechanics) {
+            console.log('setting up follower')
+            const biomechanicsGroup = this.scene.getObjectByName('biomechanics')
+            this.target = biomechanicsGroup.children[0];
+        } else {
+            this.defaultTarget = this.selector.selectable[0];
+            this.target = this.defaultTarget;
+        }
 
         /* get ready to render first frame */
         this.setDirty();
@@ -271,20 +280,6 @@ class Viewer {
         });
     }
 
-    addBiomechanics(meshes, trajectories) {
-        const boneMeshes = createBiomechanicalMesh(meshes)
-
-        for (const [name, mesh] of boneMeshes) {
-            console.log("adding mesh " + name);
-            this.scene.add(mesh);
-        }
-
-        this.trajectory = createBiomechanicalTrajectory(trajectories, this.system.dt);
-        this.animator.load(this.trajectory, {});
-
-        this.selector.updateSelectable();
-    }
-
     setDirty() {
         this.needsRender = true;
     }
@@ -323,6 +318,47 @@ class Viewer {
     animate() {
         requestAnimationFrame(() => this.animate());
         this.animator.update();
+
+        // make sure the orbiter is pointed at the right target
+        const targetPos = new THREE.Vector3();
+        this.target.getWorldPosition(targetPos);
+
+        // if the target gets too far from the camera, nudge the camera
+        if (this.camera.follow) {
+            this.controls.target.lerp(targetPos, 0.1);
+            if (this.camera.position.distanceTo(this.controls.target) >
+                this.camera.followDistance) {
+                const followBehind = this.controls.target.clone()
+                    .sub(this.camera.position)
+                    .normalize()
+                    .multiplyScalar(this.camera.followDistance)
+                    .sub(this.controls.target)
+                    .negate();
+                this.camera.position.lerp(followBehind, 0.5);
+                this.setDirty();
+            }
+        }
+
+        // make sure target stays within shadow map region
+        this.dirLight.position.set(
+            targetPos.x + 3, targetPos.y + 10, targetPos.z + 10);
+        this.dirLight.target = this.target;
+
+        if (this.controls.update()) {
+            this.setDirty();
+        }
+
+        // if freezeAngle requested, move the camera on xz plane to match target
+        if (this.camera.freezeAngle) {
+            const off = new THREE.Vector3();
+            off.add(this.controls.target).sub(this.controlTargetPos);
+            off.setComponent(1, 0);
+            if (off.lengthSq() > 0) {
+                this.camera.position.add(off);
+                this.setDirty();
+            }
+        }
+        this.controlTargetPos.copy(this.controls.target);
 
         if (this.needsRender) {
             this.render();

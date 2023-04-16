@@ -230,6 +230,20 @@ function createScene(system) {
         scene.add(smplGroup);
     }
 
+    if (system.biomechanics) {
+        console.log("biomechanics: ", system.biomechanics)
+
+        const bones = createBiomechanicalMesh(system.biomechanics.meshes)
+
+        const biomechanicsGroup = new THREE.Group();
+        biomechanicsGroup.name = 'biomechanics';
+        bones.forEach((bone) => {
+            biomechanicsGroup.add(bone);
+        })
+
+        scene.add(biomechanicsGroup);
+    }
+
     if (system.states.contact) {
         /* add contact point spheres  */
         for (let i = 0; i < system.states.contact.pos[0].length; i++) {
@@ -334,23 +348,6 @@ function createKeypointTrajectory(system) {
     return new THREE.AnimationClip("Action", -1, tracks);
 }
 
-
-function createVisibilityKeyframeTrack(name, showIdx) {
-    const dt = 5 / 30;
-
-    const times = [showIdx - 0.01, showIdx].map(t => t * dt);
-    const values = [false, true, true, false];
-
-    console.log(name, times, values);
-
-    const track = new THREE.BooleanKeyframeTrack(
-        `scene/${name}.visible`,
-        times,
-        values
-    );
-
-    return track;
-}
 
 function createInvisibilityKeyframeTrack(name, showIdx, hideIdx) {
     const dt = 5 / 30;
@@ -496,7 +493,7 @@ function createSmplTrajectory(system, scene) {
 };
 
 function createBiomechanicalMesh(meshData) {
-    const boneMeshes = new Map();
+    const boneMeshes = [];
 
     for (const [name, data] of Object.entries(meshData)) {
         console.log("Creating mesh for " + name);
@@ -522,7 +519,7 @@ function createBiomechanicalMesh(meshData) {
         const material = new THREE.MeshPhongMaterial({ color: 0x775533 });
         const mesh = new THREE.Mesh(geometry, material);
         mesh.name = name;
-        boneMeshes.set(name, mesh);
+        boneMeshes.push(mesh);
     }
 
     return boneMeshes;
