@@ -349,21 +349,6 @@ function createKeypointTrajectory(system) {
 }
 
 
-function createInvisibilityKeyframeTrack(name, showIdx, hideIdx) {
-    const dt = 5 / 30;
-
-    const times = [showIdx - 0.01, showIdx, hideIdx - 1, hideIdx - 1 + 0.01].map(t => t * dt);
-    const values = [false, true, true, false];
-
-    const track = new THREE.BooleanKeyframeTrack(
-        `scene/${name}.visible`,
-        times,
-        values
-    );
-
-    return track;
-}
-
 function createSmplPerson(personId, faces, vertices) {
 
     const name = "person_" + personId;
@@ -415,6 +400,21 @@ function createSmplPerson(personId, faces, vertices) {
 function createSmplTrajectory(system, scene) {
     const allFrames = system.smpl.meshes;
 
+    const dt = system.dt;
+
+    function createVisibilityKeyframeTrack(name, showIdx, hideIdx) {
+        const times = [showIdx - 0.01, showIdx, hideIdx - 1, hideIdx - 1 + 0.01].map(t => t * dt);
+        const values = [false, true, true, false];
+
+        const track = new THREE.BooleanKeyframeTrack(
+            `scene/${name}.visible`,
+            times,
+            values
+        );
+
+        return track;
+    }
+
     // get the smplGroup from the scene, which has a group name of "smpl"
     const smplGroup = scene.getObjectByName("smpl");
 
@@ -422,6 +422,8 @@ function createSmplTrajectory(system, scene) {
     const smplMeshes = smplGroup.children;
 
     const keyframeTracks = [];
+    const averagePositions = {}
+    const averagePositionTimes = {}
 
     smplMeshes.forEach((_, index) => {
         // want to get a list of ids where the mesh is visible, need to first map each frame to include
@@ -433,8 +435,12 @@ function createSmplTrajectory(system, scene) {
         const firstVisible = visibleFrames[0].frameId;
         const lastVisible = visibleFrames[visibleFrames.length - 1].frameId;
 
-        const track = createInvisibilityKeyframeTrack("person_" + index, firstVisible, lastVisible);
+        const track = createVisibilityKeyframeTrack("person_" + index, firstVisible, lastVisible);
         keyframeTracks.push(track);
+
+        // array to track the average positions for animating the morph targets positions
+        averagePositions[index] = []
+        averagePositionTimes[index] = []
     });
 
     allFrames.forEach((frameData, index) => {
@@ -447,10 +453,26 @@ function createSmplTrajectory(system, scene) {
 
             const vertices = person.verts;
 
+            // vertices is a list of lists for the 3D coordinates of each vertex. we want to
+            // compute the average position of the vertices in 3D and remove that to use relative
+            // morph targets
+            const averagePosition = vertices.reduce((sum, vertex) => {
+                return [sum[0] + vertex[0], sum[1] + vertex[1], sum[2] + vertex[2]];
+            }, [0, 0, 0]).map((x) => x / vertices.length);
+
+            // now remove average position from all of them
+            const relativeVertices = vertices.map((vertex) => {
+                return [vertex[0] - averagePosition[0], vertex[1] - averagePosition[1], vertex[2] - averagePosition[2]];
+            });
+
+            // add the average position to the list of average positions
+            averagePositions[personId].push(averagePosition);
+            averagePositionTimes[personId].push(timeIndex);
+
             // now fetch mesh from group
             const mesh = smplMeshes[personId];
             const bufferGeometry = mesh.geometry;
-            const morphVertices = new Float32Array(vertices.flat());
+            const morphVertices = new Float32Array(relativeVertices.flat());
 
             const keyframeNumber = bufferGeometry.morphAttributes.position.length;
 
@@ -464,7 +486,6 @@ function createSmplTrajectory(system, scene) {
             bufferGeometry.attributes.position.needsUpdate = true;
 
             function createVectorKeyframeTrack(timeIndex) {
-                const dt = 5 / 30;
                 const times = [timeIndex - 1, timeIndex, timeIndex + 1].map(t => t * dt);
                 const values = [0, 1, 0];
 
@@ -488,6 +509,30 @@ function createSmplTrajectory(system, scene) {
         });
 
     });
+
+    // now add the average positions to the keyframe tracks
+    for (const [personId, averagePosition] of Object.entries(averagePositions)) {
+        const name = "person_" + personId;
+
+        const averagePositionTime = averagePositionTimes[personId]
+
+        const times = averagePositionTime.map(t => t * dt);
+
+        // divide them all by 1000.0
+        const values = averagePosition.flat().map(x => x / 1000.0);
+
+        console.log("times: " + times, "values: " + values, "name: " + name, averagePosition);
+
+        const track = new THREE.VectorKeyframeTrack(
+            `scene/${name}.position`,
+            times,
+            values,
+            THREE.InterpolateLinear
+        );
+
+        keyframeTracks.push(track);
+    }
+
 
     return new THREE.AnimationClip('Action', -1, keyframeTracks);
 };
