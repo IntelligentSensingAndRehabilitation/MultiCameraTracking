@@ -233,6 +233,18 @@ class Viewer {
             console.log('setting up follower')
             const biomechanicsGroup = this.scene.getObjectByName('biomechanics')
             this.target = biomechanicsGroup.children[0];
+        } else if (system.smpl) {
+            // TODO: this code doesn't actually work because the morphTragets use
+            // absolute positions but the "position" of the mesh element doesn't
+            // get updated. To get this working, we will need to extract an average
+            // position from the morphTargets and use that as the position of the
+            // mesh element.
+            if (system.smpl.ids.length == 1) {
+                console.log('setting up SMPL follower')
+                const smplGroup = this.scene.getObjectByName('smpl')
+                this.target = smplGroup.children[0];
+                console.log('target', this.target)
+            }
         } else {
             this.defaultTarget = this.selector.selectable[0];
             this.target = this.defaultTarget;

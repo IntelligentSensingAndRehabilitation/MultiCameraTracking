@@ -9,7 +9,7 @@ const system = {
     'smpl': {},
     'keypoints': null,
     'states': {},
-    'dt': 0.165
+    'dt': 0.033
 }
 
 const SmplBrowser = () => {
