@@ -516,7 +516,17 @@ function createSmplTrajectory(system, scene) {
 
         const averagePositionTime = averagePositionTimes[personId]
 
+        // duplicate the first and last times and append to the edges of the list
+        averagePositionTime.unshift(averagePositionTime[0] - 0.001);
+        averagePositionTime.push(averagePositionTime[averagePositionTime.length - 1] + 0.001);
+
+        // scale times by sampling rate
         const times = averagePositionTime.map(t => t * dt);
+
+        // append position with XYZ = [100000, 100000, 100000] at the beginning and end of averagePosition
+        // to force it to be culled when invisible
+        averagePosition.unshift([1000000, 1000000, 1000000]);
+        averagePosition.push([1000000, 1000000, 1000000]);
 
         // divide them all by 1000.0
         const values = averagePosition.flat().map(x => x / 1000.0);

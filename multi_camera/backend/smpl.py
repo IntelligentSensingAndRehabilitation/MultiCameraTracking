@@ -6,7 +6,7 @@ import json
 
 from pose_pipeline import TopDownMethodLookup
 from multi_camera.datajoint.sessions import Recording
-from multi_camera.datajoint.multi_camera_dj import SMPLReconstruction, MultiCameraRecording
+from multi_camera.datajoint.multi_camera_dj import SMPLReconstruction, SMPLXReconstruction, MultiCameraRecording
 
 
 def get_method():
@@ -29,7 +29,7 @@ def get_smpl_trials() -> List[Dict]:
     method = get_method()
 
     # sticking with this dirty but effective method that only ends up matching based on camera_config_hash and recording_timestamps
-    reconstructed_trials = SMPLReconstruction & method
+    reconstructed_trials = SMPLXReconstruction & method
 
     reconstructed_recordings = MultiCameraRecording * Recording & reconstructed_trials
     matches = reconstructed_recordings.fetch("participant_id", "session_date", "video_base_filename", as_dict=True)
@@ -47,11 +47,14 @@ def get_smpl_trajectory(filename: str) -> Dict:
 
     method = get_method()
 
-    key = (SMPLReconstruction & (MultiCameraRecording * Recording & {"video_base_filename": filename}) & method).fetch1(
-        "KEY"
-    )
+    key = (
+        SMPLXReconstruction & (MultiCameraRecording * Recording & {"video_base_filename": filename}) & method
+    ).fetch1("KEY")
 
-    faces, vertices = (SMPLReconstruction & key).fetch1("faces", "vertices")
+    faces, vertices = (SMPLXReconstruction & key).fetch1("faces", "vertices")
+
+    # only send every 5th frame and limited number
+    vertices = vertices[::5]
 
     # scale up and convert to int to reduce bandwidth
     vertices = (vertices * 1000).astype(int).tolist()
