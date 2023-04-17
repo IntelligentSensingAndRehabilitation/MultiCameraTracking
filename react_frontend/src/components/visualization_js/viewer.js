@@ -331,46 +331,48 @@ class Viewer {
         requestAnimationFrame(() => this.animate());
         this.animator.update();
 
-        // make sure the orbiter is pointed at the right target
-        const targetPos = new THREE.Vector3();
-        this.target.getWorldPosition(targetPos);
+        if (this.target) {
+            // make sure the orbiter is pointed at the right target
+            const targetPos = new THREE.Vector3();
+            this.target.getWorldPosition(targetPos);
 
-        // if the target gets too far from the camera, nudge the camera
-        if (this.camera.follow) {
-            this.controls.target.lerp(targetPos, 0.1);
-            if (this.camera.position.distanceTo(this.controls.target) >
-                this.camera.followDistance) {
-                const followBehind = this.controls.target.clone()
-                    .sub(this.camera.position)
-                    .normalize()
-                    .multiplyScalar(this.camera.followDistance)
-                    .sub(this.controls.target)
-                    .negate();
-                this.camera.position.lerp(followBehind, 0.5);
+            // if the target gets too far from the camera, nudge the camera
+            if (this.camera.follow) {
+                this.controls.target.lerp(targetPos, 0.1);
+                if (this.camera.position.distanceTo(this.controls.target) >
+                    this.camera.followDistance) {
+                    const followBehind = this.controls.target.clone()
+                        .sub(this.camera.position)
+                        .normalize()
+                        .multiplyScalar(this.camera.followDistance)
+                        .sub(this.controls.target)
+                        .negate();
+                    this.camera.position.lerp(followBehind, 0.5);
+                    this.setDirty();
+                }
+            }
+
+            // make sure target stays within shadow map region
+            this.dirLight.position.set(
+                targetPos.x + 3, targetPos.y + 10, targetPos.z + 10);
+            this.dirLight.target = this.target;
+
+            if (this.controls.update()) {
                 this.setDirty();
             }
-        }
 
-        // make sure target stays within shadow map region
-        this.dirLight.position.set(
-            targetPos.x + 3, targetPos.y + 10, targetPos.z + 10);
-        this.dirLight.target = this.target;
-
-        if (this.controls.update()) {
-            this.setDirty();
-        }
-
-        // if freezeAngle requested, move the camera on xz plane to match target
-        if (this.camera.freezeAngle) {
-            const off = new THREE.Vector3();
-            off.add(this.controls.target).sub(this.controlTargetPos);
-            off.setComponent(1, 0);
-            if (off.lengthSq() > 0) {
-                this.camera.position.add(off);
-                this.setDirty();
+            // if freezeAngle requested, move the camera on xz plane to match target
+            if (this.camera.freezeAngle) {
+                const off = new THREE.Vector3();
+                off.add(this.controls.target).sub(this.controlTargetPos);
+                off.setComponent(1, 0);
+                if (off.lengthSq() > 0) {
+                    this.camera.position.add(off);
+                    this.setDirty();
+                }
             }
+            this.controlTargetPos.copy(this.controls.target);
         }
-        this.controlTargetPos.copy(this.controls.target);
 
         if (this.needsRender) {
             this.render();
