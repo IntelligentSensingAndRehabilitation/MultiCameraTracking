@@ -130,6 +130,11 @@ const BiomechanicsBrowser = () => {
         zIndex: '1000'
     }
 
+    const dropDownStyle = {
+        maxHeight: '28px',
+        overflowY: 'scroll'
+    }
+
 
     return (
         <Container>
@@ -137,17 +142,17 @@ const BiomechanicsBrowser = () => {
                 <Col>
                     <h3>Select a participant</h3>
                     <Dropdown
-                        style={{ maxHeight: "28px" }}
                         onSelect={(selectedKey) => {
                             setSelectedParticipant(selectedKey);
                             console.log("available sessions: ", sessionDates);
                             setSelectedSession(null);
                             setSelectedVideo(null);
                         }}>
-                        <Dropdown.Toggle variant="outline-secondary" id="participant-dropdown">
+                        <Dropdown.Toggle variant="outline-secondary" id="participant-dropdown"
+                            style={{ paddingBottom: 5 }}>
                             {selectedParticipant || 'Select Participant'}
                         </Dropdown.Toggle>
-                        <Dropdown.Menu>
+                        <Dropdown.Menu style={{ overflowY: 'scroll', maxHeight: "250px", zIndex: 1000 }}>
                             {participantIds.map((id) => (
                                 <Dropdown.Item key={id} eventKey={id}>
                                     {id}
@@ -202,7 +207,7 @@ const BiomechanicsBrowser = () => {
                 <div ref={containerRef} id="brax-viewer" style={viewerStyle}></div>
             </Row>
 
-        </Container>
+        </Container >
     );
 };
 
