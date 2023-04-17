@@ -9,7 +9,7 @@ const system = {
     'smpl': {},
     'keypoints': null,
     'states': {},
-    'dt': 0.033
+    'dt': 0.033 * 5 // only showing every 5 frame at 30 fps
 }
 
 const SmplBrowser = () => {
