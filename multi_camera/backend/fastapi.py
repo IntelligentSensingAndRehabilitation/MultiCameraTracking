@@ -682,21 +682,42 @@ async def post_annotation(annotation: Annotation):
     return {"success": success}
 
 
-# code for working with biomechanical data
+# code for single person SMPL reconstructions
 
 
-class BiomechanicalTrials(BaseModel):
+class ReconstructionTrials(BaseModel):
     participant_id: str
     session_date: date
     video_base_filename: str
 
 
-@api_router.get("/biomechanics_trials", response_model=List[BiomechanicalTrials])
-async def get_biomechanics_trials() -> List[BiomechanicalTrials]:
+@api_router.get("/smpl_trials", response_model=List[ReconstructionTrials])
+async def get_smpl_trials() -> List[ReconstructionTrials]:
+    from .smpl import get_smpl_trials
+
+    trials = get_smpl_trials()
+    trials = [ReconstructionTrials(**trial) for trial in trials]
+    return trials
+
+
+@api_router.get("/smpl")
+async def get_smpl(filename: str = Query(None, description="Name of the file to be used.")):
+    from .smpl import get_smpl_trajectory
+
+    res = get_smpl_trajectory(filename)
+
+    return SMPLData(ids=[0], frames=-1, type="smpl", faces=res["faces"], meshes=res["vertices"])
+
+
+# code for working with biomechanical data
+
+
+@api_router.get("/biomechanics_trials", response_model=List[ReconstructionTrials])
+async def get_biomechanics_trials() -> List[ReconstructionTrials]:
     from .biomechanics import get_biomechanics_trials
 
     trials = get_biomechanics_trials()
-    trials = [BiomechanicalTrials(**trial) for trial in trials]
+    trials = [ReconstructionTrials(**trial) for trial in trials]
     return trials
 
 
