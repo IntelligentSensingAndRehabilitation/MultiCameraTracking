@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useContext } from 'react';
 import { Container, Row, Col, Form, Button, ToggleButton } from "react-bootstrap";
 import { Viewer } from './visualization_js/viewer.js';
-import { AcquisitionState, useEffectOnce } from "../AcquisitionApi";
+import { AcquisitionState } from "../AcquisitionApi.js";
 
 const system = {
     'meshes': {},
@@ -12,7 +12,7 @@ const system = {
     'dt': 0.033
 }
 
-const BiomechanicalReconstruction = ({ data }) => {
+const Annotator = ({ data }) => {
 
     const viewerRef = useRef();
     const containerRef = useRef();
@@ -20,7 +20,7 @@ const BiomechanicalReconstruction = ({ data }) => {
 
     const [filter, setFilter] = useState(false);
 
-    const { meshUrl, fetchKeypoints, fetchMesh, fetchUnannotatedRecordings, annotateRecording, fetchBiomechanics } = useContext(AcquisitionState);
+    const { fetchMesh, fetchUnannotatedRecordings, annotateRecording } = useContext(AcquisitionState);
 
     const [currentRecording, setCurrentRecording] = useState(null);
     const [recordingValidated, setRecordingValidated] = useState(false);
@@ -38,12 +38,6 @@ const BiomechanicalReconstruction = ({ data }) => {
         console.log("Fetching unannotated recordings...")
         refreshRecordings();
     }, []);
-
-    // variable to store the websocket connection
-    const ws = useRef(null);
-
-    // set showMesh true if data is not none
-    const showMesh = { data }.data == "true";
 
     // Button callbacks
     const onFilterToggle = (val) => {
@@ -174,4 +168,4 @@ const BiomechanicalReconstruction = ({ data }) => {
 
 };
 
-export default BiomechanicalReconstruction;
+export default Annotator;
