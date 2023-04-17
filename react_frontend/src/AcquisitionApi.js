@@ -293,6 +293,33 @@ export const AquisitionApi = (props) => {
         return response.data;
     }
 
+    // SMPL functions
+
+    async function fetchSmplTrials() {
+        // Get a list of all SMPL trials
+        console.log("Fetching SMPL trials");
+        const recordings = await axios.get(`${API_BASE_URL}/smpl_trials`);
+        console.log(recordings.data);
+        return recordings.data;
+    }
+
+    async function fetchSmpl(filename) {
+        // Fetch the biomechanics data for the given recording
+        console.log("Fetching SMPL for: " + filename)
+        const response = await axios.get(`${API_BASE_URL}/smpl`, {
+            params: {
+                filename: filename,
+            }
+        });
+
+        const data = response.data;
+        // unpack the base64 encoded mesh data
+        data.meshes = JSON.parse(Buffer.from(data.meshes, 'base64'))
+
+        console.log("Received SMPL: ", data)
+        return data;
+    }
+
     // Camera configuration settings
 
     const fetchConfigs = async () => {
@@ -439,7 +466,9 @@ export const AquisitionApi = (props) => {
         annotateRecording,
         fetchMesh,
         fetchBiomechanicsTrials,
-        fetchBiomechanics
+        fetchBiomechanics,
+        fetchSmplTrials,
+        fetchSmpl,
     }}> {props.children} </AcquisitionState.Provider >)
     //return (<div> {children} </div>)
 };
