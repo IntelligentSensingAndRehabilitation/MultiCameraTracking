@@ -1,13 +1,10 @@
-futures<3.0.0
 simple_pyspin
 Pillow==7.0.0
 numpy
 opencv-python
 matplotlib
 tqdm
-windows-curses
-pynput
-aniposelib
+#aniposelib
 pyyaml
 nimblephysics==0.8.73
 sqlalchemy
