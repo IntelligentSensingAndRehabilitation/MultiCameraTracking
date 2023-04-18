@@ -692,19 +692,25 @@ class ReconstructionTrials(BaseModel):
 
 
 @api_router.get("/smpl_trials", response_model=List[ReconstructionTrials])
-async def get_smpl_trials() -> List[ReconstructionTrials]:
+async def get_smpl_trials(
+    model: str = Query(default="smpl", description="Type of SMPL model to use.")
+) -> List[ReconstructionTrials]:
+    print(model)
     from .smpl import get_smpl_trials
 
-    trials = get_smpl_trials()
+    trials = get_smpl_trials(model)
     trials = [ReconstructionTrials(**trial) for trial in trials]
     return trials
 
 
 @api_router.get("/smpl")
-async def get_smpl(filename: str = Query(None, description="Name of the file to be used.")):
+async def get_smpl(
+    filename: str = Query(None, description="Name of the file to be used."),
+    model: str = Query(default="smpl", description="Type of SMPL model to use."),
+) -> SMPLData:
     from .smpl import get_smpl_trajectory
 
-    res = get_smpl_trajectory(filename)
+    res = get_smpl_trajectory(filename, model)
 
     return SMPLData(ids=[0], frames=-1, type="smpl", faces=res["faces"], meshes=res["vertices"])
 

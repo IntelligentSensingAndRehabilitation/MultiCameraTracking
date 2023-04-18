@@ -19,7 +19,7 @@ def get_method():
     return method
 
 
-def get_smpl_trials() -> List[Dict]:
+def get_smpl_trials(mode: str = "smpl") -> List[Dict]:
     """
     Returns a list of all the trials that have been reconstructed using the SMPLReconstruction pipeline.
 
@@ -29,7 +29,10 @@ def get_smpl_trials() -> List[Dict]:
     method = get_method()
 
     # sticking with this dirty but effective method that only ends up matching based on camera_config_hash and recording_timestamps
-    reconstructed_trials = SMPLXReconstruction & method
+    if mode.upper() == "SMPL":
+        reconstructed_trials = SMPLReconstruction & method
+    else:
+        reconstructed_trials = SMPLXReconstruction & method
 
     reconstructed_recordings = MultiCameraRecording * Recording & reconstructed_trials
     matches = reconstructed_recordings.fetch("participant_id", "session_date", "video_base_filename", as_dict=True)
@@ -38,7 +41,7 @@ def get_smpl_trials() -> List[Dict]:
     return matches
 
 
-def get_smpl_trajectory(filename: str) -> Dict:
+def get_smpl_trajectory(filename: str, mode: str = "smpl") -> Dict:
     """
     Returns a list of all the trials that have been reconstructed using the SMPLReconstruction pipeline.
 
@@ -47,11 +50,14 @@ def get_smpl_trajectory(filename: str) -> Dict:
 
     method = get_method()
 
-    key = (
-        SMPLXReconstruction & (MultiCameraRecording * Recording & {"video_base_filename": filename}) & method
-    ).fetch1("KEY")
+    filt = MultiCameraRecording * Recording & {"video_base_filename": filename}
 
-    faces, vertices = (SMPLXReconstruction & key).fetch1("faces", "vertices")
+    if mode.upper() == "SMPL":
+        key = (SMPLReconstruction & filt & method).fetch1("KEY")
+        faces, vertices = (SMPLReconstruction & key).fetch1("faces", "vertices")
+    else:
+        key = (SMPLXReconstruction & filt & method).fetch1("KEY")
+        faces, vertices = (SMPLXReconstruction & key).fetch1("faces", "vertices")
 
     # only send every 5th frame and limited number
     vertices = vertices[::5]

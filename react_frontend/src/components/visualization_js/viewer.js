@@ -331,7 +331,8 @@ class Viewer {
         requestAnimationFrame(() => this.animate());
         this.animator.update();
 
-        if (this.target) {
+        const annotationMode = (this.system.smpl != undefined) && (this.system.smpl.ids.length > 1);
+        if (this.target && !annotationMode) {
             // make sure the orbiter is pointed at the right target
             const targetPos = new THREE.Vector3();
             this.target.getWorldPosition(targetPos);
