@@ -295,20 +295,25 @@ export const AquisitionApi = (props) => {
 
     // SMPL functions
 
-    async function fetchSmplTrials() {
+    async function fetchSmplTrials(selectedModel) {
         // Get a list of all SMPL trials
         console.log("Fetching SMPL trials");
-        const recordings = await axios.get(`${API_BASE_URL}/smpl_trials`);
+        const recordings = await axios.get(`${API_BASE_URL}/smpl_trials`, {
+            params: {
+                model: selectedModel
+            }
+        });
         console.log(recordings.data);
         return recordings.data;
     }
 
-    async function fetchSmpl(filename) {
+    async function fetchSmpl(filename, selectedModel) {
         // Fetch the biomechanics data for the given recording
         console.log("Fetching SMPL for: " + filename)
         const response = await axios.get(`${API_BASE_URL}/smpl`, {
             params: {
                 filename: filename,
+                model: selectedModel
             }
         });
 

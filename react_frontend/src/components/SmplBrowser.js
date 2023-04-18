@@ -26,9 +26,16 @@ const SmplBrowser = () => {
     const [selectedSession, setSelectedSession] = useState(null);
     const [selectedVideo, setSelectedVideo] = useState(null);
     const [recordingValidated, setRecordingValidated] = useState(false);
+    const [selectedModel, setSelectedModel] = useState("SMPL");
 
     useEffect(() => {
-        fetchSmplTrials().then((data) => {
+
+        closeViewer();
+        setSelectedParticipant(null);
+        setSelectedSession(null);
+        setSelectedVideo(null);
+
+        fetchSmplTrials(selectedModel).then((data) => {
 
             console.log("SMPL recordings: ", data);
             setBiomechanicalRecordings(data);
@@ -41,7 +48,7 @@ const SmplBrowser = () => {
 
         return () => {
         }
-    }, []);
+    }, [selectedModel]);
 
 
     // Filter session dates based on selected participant
@@ -84,7 +91,7 @@ const SmplBrowser = () => {
         closeViewer();
 
         if (selectedVideo != null && selectedVideo.length > 0) {
-            fetchSmpl(selectedVideo).then((data) => {
+            fetchSmpl(selectedVideo, selectedModel).then((data) => {
                 console.log("Biomechanics: ", data);
                 setRecordingValidated(true);
                 openViewer(data);
@@ -139,6 +146,27 @@ const SmplBrowser = () => {
     return (
         <Container>
             <Row>
+                <Col>
+                    <h3>Select a model</h3>
+                    <Dropdown
+                        onSelect={(selectedKey) => {
+                            setSelectedModel(selectedKey);
+                            console.log('Selected model:', selectedKey);
+                        }}
+                    >
+                        <Dropdown.Toggle variant="outline-secondary" id="model-dropdown">
+                            {selectedModel || 'Select Model'}
+                        </Dropdown.Toggle>
+                        <Dropdown.Menu>
+                            <Dropdown.Item key="SMPL" eventKey="SMPL">
+                                SMPL
+                            </Dropdown.Item>
+                            <Dropdown.Item key="SMPLX" eventKey="SMPLX">
+                                SMPLX
+                            </Dropdown.Item>
+                        </Dropdown.Menu>
+                    </Dropdown>
+                </Col>
                 <Col>
                     <h3>Select a participant</h3>
                     <Dropdown
