@@ -626,7 +626,7 @@ def run_calibration(vid_base, vid_path=".", return_parsers=False, frame_skip=2, 
     print(f'Cam names: {cam_names} camera hash: {camera_hash}')
 
     print(f"Found {len(vids)} videos. Now detecting checkerboards.")
-    parsers = get_checkerboards(vids, max_frames=5000, skip=frame_skip, save_images=True,
+    parsers = get_checkerboards(vids, max_frames=5000, skip=frame_skip, save_images=False,
                                 downsample=2, multithread=True, checkerboard_size=110.0)
     objp = parsers[0].objp
 
