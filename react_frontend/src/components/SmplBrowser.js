@@ -147,7 +147,7 @@ const SmplBrowser = () => {
         <Container>
             <Row>
                 <Col>
-                    <h3>Select a model</h3>
+                    <h4>Select a model</h4>
                     <Dropdown
                         onSelect={(selectedKey) => {
                             setSelectedModel(selectedKey);
@@ -168,7 +168,7 @@ const SmplBrowser = () => {
                     </Dropdown>
                 </Col>
                 <Col>
-                    <h3>Select a participant</h3>
+                    <h4>Select a participant</h4>
                     <Dropdown
                         onSelect={(selectedKey) => {
                             setSelectedParticipant(selectedKey);
@@ -190,7 +190,7 @@ const SmplBrowser = () => {
                     </Dropdown>
                 </Col>
                 <Col>
-                    <h3>Select a session date</h3>
+                    <h4>Select a session date</h4>
                     <Dropdown onSelect={(selectedKey) => {
                         setSelectedSession(selectedKey);
                         setSelectedVideo(null);
@@ -208,7 +208,7 @@ const SmplBrowser = () => {
                     </Dropdown>
                 </Col>
                 <Col>
-                    <h3>Select a video</h3>
+                    <h4>Select a video</h4>
                     <Dropdown
                         onSelect={(selectedKey) => {
                             setSelectedVideo(selectedKey);

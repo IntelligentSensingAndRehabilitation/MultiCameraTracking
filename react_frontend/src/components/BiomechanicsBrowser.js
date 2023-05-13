@@ -69,13 +69,6 @@ const BiomechanicsBrowser = () => {
             : [];
 
     useEffect(() => {
-        console.log("Available session dates: ", sessionDates);
-        if (sessionDates.length) {
-            setSelectedSession(sessionDates[0]);
-        }
-    }, [sessionDates]);
-
-    useEffect(() => {
         console.log("Selected participant: ", selectedParticipant);
         console.log("Selected session: ", selectedSession);
         console.log("Selected video: ", selectedVideo);
