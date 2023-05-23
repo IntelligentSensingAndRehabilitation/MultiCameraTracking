@@ -67,13 +67,13 @@ class GaitRiteCalibration(dj.Computed):
 
     def make(self, key):
         recording_keys = (
-            GaitRiteRecording * PersonKeypointReconstruction & key & "reconstruction_method=0 and top_down_method=2"
+            GaitRiteRecording * PersonKeypointReconstruction & key & "reconstruction_method=2 and top_down_method=2"
         ).fetch("KEY")
         data = [fetch_data(k) for k in recording_keys]
 
         def drop_steps(d):
             dt, kp3d, df = d
-            df = df.iloc[3:-3]
+            df = df.iloc[2:-2]
             return dt, kp3d, df
 
         data = [drop_steps(d) for d in data]
@@ -88,7 +88,7 @@ class GaitRiteCalibration(dj.Computed):
         return (
             GaitRiteSession
             - (
-                GaitRiteRecording - (PersonKeypointReconstruction & "reconstruction_method=0 and top_down_method=2")
+                GaitRiteRecording - (PersonKeypointReconstruction & "reconstruction_method=2 and top_down_method=2")
             ).proj()
         )
 
@@ -530,9 +530,11 @@ def fetch_data(key, only_present=False):
     joint_idx = np.array([joint_names.index(j) for j in target_names])
     kp3d = kp3d[:, joint_idx]
 
-    gaitrite_offset = (t0 - timestamps[0]).total_seconds()
-    df["First Contact Time"] += gaitrite_offset
-    df["Last Contact Time"] += gaitrite_offset
+    if False:
+        # disable this because the gaitrite timestamps in the database are not in the local timezone
+        gaitrite_offset = (t0 - timestamps[0]).total_seconds()
+        df["First Contact Time"] += gaitrite_offset
+        df["Last Contact Time"] += gaitrite_offset
 
     return dt, kp3d, df
 
