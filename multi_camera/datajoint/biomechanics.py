@@ -32,6 +32,15 @@ class BilevelLookup(dj.Lookup):
     """
     contents = [
         (0, 0.05, 0.0, 10.0, 0.05, 0.1, 0.01, 0.01, 0.001, 1.0),
+        (1, 0.05, 0.0, 50.0, 1.0, 0.1, 0.01, 0.01, 0.001, 1.0),
+        (2, 0.05, 0.0, 50.0, 1.0, 0.1, 0.01, 0.01, 0.001, 1.0),
+        (3, 0.05, 0.0, 50.0, 1.0, 0.02, 0.01, 0.01, 0.001, 1.0),
+        (4, 0.05, 0.0, 50.0, 1.0, 0.1, 0.01, 0.01, 0.001, 1.0),
+        (5, 0.05, 0.0, 50.0, 1.0, 0.1, 0.1, 0.01, 0.001, 1.0),  # increase limit regularization
+        (6, 0.05, 0.0, 50.0, 1.0, 0.1, 0., 0.01, 0.001, 1.0),   # have hard joint limit
+        (7, 0.05, 1.0, 50.0, 1.0, 1.0, 0.01, 0.01, 0.001, 1.0),
+        (8, 0.05, 1.0, 50.0, 1.0, 1.0, 0.2, 0.01, 0.001, 1.0),
+        (9, 0.05, 1.0, 50.0, 1.0, 1.0, 0.02, 0.01, 0.001, 1.0),
     ]
 
 
@@ -50,6 +59,37 @@ class BiomechanicalReconstructionLookup(dj.Lookup):
         (0, 12, 2, "Rajagopal_mbl_movi_87"),
         (0, 12, 3, "Rajagopal_mbl_movi_87"),
         (0, 12, 11, "Rajagopal_mbl_movi_87"),
+        (0, 12, 2, "Rajagopal_mbl_movi_87_rev2"),
+        (0, 12, 3, "Rajagopal_mbl_movi_87_rev2"),
+        (1, 12, 2, "Rajagopal_mbl_movi_87_rev2"),
+        (2, 12, 2, "Rajagopal_mbl_movi_87_rev2"),  # this adds height to the model
+        (1, 12, 2, "Rajagopal_Pose2Sim_mbl_movi_87_rev3"),
+        (1, 12, 2, "Rajagopal_Pose2Sim_mbl_movi_87_rev4"),
+        (2, 12, 2, "Rajagopal_Pose2Sim_mbl_movi_87_rev4"),
+        (3, 12, 2, "Rajagopal_Pose2Sim_mbl_movi_87_rev4"),
+        (4, 12, 2, "Rajagopal_Pose2Sim_mbl_movi_87_rev4"),
+        (1, 12, 2, "Rajagopal_Neck_mbl_movi_87_rev3"),
+        (2, 12, 2, "Rajagopal_Neck_mbl_movi_87_rev4"),
+        (1, 12, 2, "Rajagopal_Neck_mbl_movi_87_rev5"),        
+        (2, 12, 2, "Rajagopal_Neck_mbl_movi_87_rev5"),
+        (3, 12, 2, "Rajagopal_Neck_mbl_movi_87_rev5"),
+        (4, 12, 2, "Rajagopal_Neck_mbl_movi_87_rev5"),        
+        (1, 12, 2, "Rajagopal_Neck_mbl_movi_87_rev6"),
+        (2, 12, 2, "Rajagopal_Neck_mbl_movi_87_rev6"),
+        (2, 12, 0, "Rajagopal_Neck_mbl_movi_87_rev6"), # compare against robust triangulation
+        (3, 12, 2, "Rajagopal_Neck_mbl_movi_87_rev6"),
+        (4, 12, 2, "Rajagopal_Neck_mbl_movi_87_rev6"),
+        (1, 12, 3, "Rajagopal_Neck_mbl_movi_87_rev6"),
+        (2, 12, 3, "Rajagopal_Neck_mbl_movi_87_rev6"),
+        (3, 12, 3, "Rajagopal_Neck_mbl_movi_87_rev6"),
+        (4, 12, 3, "Rajagopal_Neck_mbl_movi_87_rev6"),
+        (5, 12, 2, "Rajagopal_Neck_mbl_movi_87_rev6"),  # test with joint limit reg
+        (6, 12, 2, "Rajagopal_Neck_mbl_movi_87_rev6"),  # hard joint limit
+        (5, 12, 2, "Rajagopal_Neck_mbl_movi_87_rev7"),
+        (2, 12, 2, "Rajagopal_Neck_mbl_movi_87_rev7"),
+        (7, 12, 2, "Rajagopal_Neck_mbl_movi_87_rev7"),
+        (8, 12, 2, "Rajagopal_Neck_mbl_movi_87_rev7"),
+        (9, 12, 2, "Rajagopal_Neck_mbl_movi_87_rev7"),
     ]
     # (2, 0, "Rajagopal2015_Halpe", 0),),
     # (2, 1, "Rajagopal2015_Halpe", 0),),
@@ -104,6 +144,10 @@ class BiomechanicalReconstruction(dj.Computed):
         trials = (PersonKeypointReconstruction * GaitRiteRecording & key).fetch("KEY")
         assert len(GaitRiteRecording & trials) == len(trials), "Not all trials have been reconstructed"
         assert len(trials) < 20, "WTF"
+        if len(trials) == 0:
+            print('No trials to process. Skipping' + str(key))
+            return
+        assert len(trials) > 0, "No trials to process"
 
         if key['bilevel_settings'] > 1:
             from sensor_fusion.emgimu_session import Height
