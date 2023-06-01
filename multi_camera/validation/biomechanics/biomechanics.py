@@ -10,7 +10,7 @@ multitrial reconstruction.
 import numpy as np
 import datajoint as dj
 from multi_camera.datajoint.gaitrite_comparison import GaitRiteSession, GaitRiteRecording
-from multi_camera.datajoint.multi_camera_dj import PersonKeypointReconstruction,  SingleCameraVideo
+from multi_camera.datajoint.multi_camera_dj import PersonKeypointReconstruction, SingleCameraVideo
 
 schema = dj.schema("multicamera_tracking_biomechanics")
 
@@ -37,7 +37,7 @@ class BilevelLookup(dj.Lookup):
         (3, 0.05, 0.0, 50.0, 1.0, 0.02, 0.01, 0.01, 0.001, 1.0),
         (4, 0.05, 0.0, 50.0, 1.0, 0.1, 0.01, 0.01, 0.001, 1.0),
         (5, 0.05, 0.0, 50.0, 1.0, 0.1, 0.1, 0.01, 0.001, 1.0),  # increase limit regularization
-        (6, 0.05, 0.0, 50.0, 1.0, 0.1, 0., 0.01, 0.001, 1.0),   # have hard joint limit
+        (6, 0.05, 0.0, 50.0, 1.0, 0.1, 0.0, 0.01, 0.001, 1.0),  # have hard joint limit
         (7, 0.05, 1.0, 50.0, 1.0, 1.0, 0.01, 0.01, 0.001, 1.0),
         (8, 0.05, 1.0, 50.0, 1.0, 1.0, 0.2, 0.01, 0.001, 1.0),
         (9, 0.05, 1.0, 50.0, 1.0, 1.0, 0.02, 0.01, 0.001, 1.0),
@@ -70,13 +70,13 @@ class BiomechanicalReconstructionLookup(dj.Lookup):
         (4, 12, 2, "Rajagopal_Pose2Sim_mbl_movi_87_rev4"),
         (1, 12, 2, "Rajagopal_Neck_mbl_movi_87_rev3"),
         (2, 12, 2, "Rajagopal_Neck_mbl_movi_87_rev4"),
-        (1, 12, 2, "Rajagopal_Neck_mbl_movi_87_rev5"),        
+        (1, 12, 2, "Rajagopal_Neck_mbl_movi_87_rev5"),
         (2, 12, 2, "Rajagopal_Neck_mbl_movi_87_rev5"),
         (3, 12, 2, "Rajagopal_Neck_mbl_movi_87_rev5"),
-        (4, 12, 2, "Rajagopal_Neck_mbl_movi_87_rev5"),        
+        (4, 12, 2, "Rajagopal_Neck_mbl_movi_87_rev5"),
         (1, 12, 2, "Rajagopal_Neck_mbl_movi_87_rev6"),
         (2, 12, 2, "Rajagopal_Neck_mbl_movi_87_rev6"),
-        (2, 12, 0, "Rajagopal_Neck_mbl_movi_87_rev6"), # compare against robust triangulation
+        (2, 12, 0, "Rajagopal_Neck_mbl_movi_87_rev6"),  # compare against robust triangulation
         (3, 12, 2, "Rajagopal_Neck_mbl_movi_87_rev6"),
         (4, 12, 2, "Rajagopal_Neck_mbl_movi_87_rev6"),
         (1, 12, 3, "Rajagopal_Neck_mbl_movi_87_rev6"),
@@ -295,7 +295,10 @@ class BiomechanicalReconstruction(dj.Computed):
         This shouldn't have occurred but was older code
         """
 
-        incomplete = BiomechanicalReconstruction & (GaitRiteRecording * self - (BiomechanicalReconstruction.Trial * GaitRiteRecording * self).proj()).proj()
+        incomplete = (
+            BiomechanicalReconstruction
+            & (GaitRiteRecording * self - (BiomechanicalReconstruction.Trial * GaitRiteRecording * self).proj()).proj()
+        )
         return incomplete
 
     @property
@@ -319,18 +322,22 @@ class BiomechanicsGaitCycles(dj.Computed):
         from jax import vmap, numpy as jnp
 
         # fetch data
-        timestamps, poses = (BiomechanicalReconstruction.Trial & key).fetch1('timestamps', 'poses')
+        timestamps, poses = (BiomechanicalReconstruction.Trial & key).fetch1("timestamps", "poses")
         _, _, df = fetch_data(key)
 
         t_offset = (GaitRiteRecordingAlignment & key).fetch1("t_offset")
 
         # get gait event times
-        left = df.loc[df['Left Foot']]
-        left_times = jnp.stack([left.iloc[:-1]['First Contact Time'].values, left.iloc[1:]['First Contact Time'].values], axis=1)
+        left = df.loc[df["Left Foot"]]
+        left_times = jnp.stack(
+            [left.iloc[:-1]["First Contact Time"].values, left.iloc[1:]["First Contact Time"].values], axis=1
+        )
         left_times = left_times + t_offset
 
-        right = df.loc[~df['Left Foot']]
-        right_times = jnp.stack([right.iloc[:-1]['First Contact Time'].values, right.iloc[1:]['First Contact Time'].values], axis=1)
+        right = df.loc[~df["Left Foot"]]
+        right_times = jnp.stack(
+            [right.iloc[:-1]["First Contact Time"].values, right.iloc[1:]["First Contact Time"].values], axis=1
+        )
         right_times = right_times + t_offset
 
         # interpolate poses to gait cycles
@@ -340,8 +347,8 @@ class BiomechanicsGaitCycles(dj.Computed):
         left_cycles = interp_windows(left_times)
         right_cycles = interp_windows(right_times)
 
-        key['left_gait_cycles'] = np.array(left_cycles)
-        key['right_gait_cycles'] = np.array(right_cycles)
+        key["left_gait_cycles"] = np.array(left_cycles)
+        key["right_gait_cycles"] = np.array(right_cycles)
         self.insert1(key)
 
 
@@ -362,10 +369,10 @@ class BiomechanicalTrialMeshOverlay(dj.Computed):
         camera_names = (Calibration & key).fetch1("camera_names")
         N = camera_names.index(camera_name)
         print(f"Creating overlay for {camera_name} ({N})")
-        
-        vid = create_overlay_video((BiomechanicalReconstruction.Trial & key).fetch1('KEY'), N)
 
-        key['output_video'] = vid
+        vid = create_overlay_video((BiomechanicalReconstruction.Trial & key).fetch1("KEY"), N)
+
+        key["output_video"] = vid
         self.insert1(key)
 
 
@@ -382,7 +389,7 @@ class BiomechanicalReconstructionVideo(dj.Computed):
 
         vid = create_centered_video(key)
 
-        key['output_video'] = vid
+        key["output_video"] = vid
         self.insert1(key)
 
 
@@ -395,11 +402,10 @@ class BiomechanicalReconstructionTrialNoise(dj.Computed):
     """
 
     def make(self, key):
-        
-        poses = (BiomechanicalReconstruction.Trial & key).fetch1('poses')
+        poses = (BiomechanicalReconstruction.Trial & key).fetch1("poses")
         poses = np.unwrap(poses, axis=0)
 
-        key['pose_noise'] = np.sqrt(np.mean(np.diff(poses, axis=0) ** 2))
+        key["pose_noise"] = np.sqrt(np.mean(np.diff(poses, axis=0) ** 2))
         self.insert1(key)
 
 
@@ -417,11 +423,14 @@ class BiomechanicalReconstructionReprojectionQuality(dj.Computed):
     """
 
     def make(self, key):
-
         from pose_pipeline.pipeline import VideoInfo, TopDownPerson, TopDownMethodLookup
-        from multi_camera.datajoint.multi_camera_dj import MultiCameraRecording, SingleCameraVideo, PersonKeypointReconstruction
+        from multi_camera.datajoint.multi_camera_dj import (
+            MultiCameraRecording,
+            SingleCameraVideo,
+            PersonKeypointReconstruction,
+        )
         from multi_camera.datajoint.calibrate_cameras import Calibration
-        from multi_camera.datajoint.biomechanics import BiomechanicalReconstruction
+        from multi_camera.validation.biomechanics.biomechanics import BiomechanicalReconstruction
         from multi_camera.analysis.biomechanics.opensim import normalize_marker_names
         from multi_camera.analysis.biomechanics.bilevel_optimization import get_markers, reload_skeleton
         from multi_camera.analysis import fit_quality
@@ -431,13 +440,13 @@ class BiomechanicalReconstructionReprojectionQuality(dj.Computed):
 
         # find the videos (to get the height and width)
         videos = (TopDownPerson * MultiCameraRecording * PersonKeypointReconstruction * SingleCameraVideo & key).proj()
-        video_keys, video_camera_name = (TopDownPerson * SingleCameraVideo * videos).fetch( "KEY", "camera_name")
+        video_keys, video_camera_name = (TopDownPerson * SingleCameraVideo * videos).fetch("KEY", "camera_name")
         assert camera_names == video_camera_name.tolist(), "Videos don't match cameras in calibration"
 
         # load the skeleton
-        model_name, skeleton_def = (BiomechanicalReconstruction & key).fetch1('model_name', 'skeleton_definition')
-        skeleton = reload_skeleton(model_name, skeleton_def['group_scales'])
-        timestamps, poses = (BiomechanicalReconstruction.Trial & key).fetch1('timestamps', 'poses')
+        model_name, skeleton_def = (BiomechanicalReconstruction & key).fetch1("model_name", "skeleton_definition")
+        skeleton = reload_skeleton(model_name, skeleton_def["group_scales"])
+        timestamps, poses = (BiomechanicalReconstruction.Trial & key).fetch1("timestamps", "poses")
 
         # get the markers
         markers = get_markers(skeleton, skeleton_def, poses, original_format=True)
@@ -450,13 +459,14 @@ class BiomechanicalReconstructionReprojectionQuality(dj.Computed):
         def intersection(lst1, lst2):
             lst3 = [value for value in lst1 if value in lst2]
             return lst3
+
         common_names = intersection(joint_names, marker_names)
 
         # 3D markers ##########
         # fetch the 3D markers and make them match the set and order of markers from the model
         markers_ordered = np.array([markers[n] for n in common_names])
         markers_ordered = markers_ordered.transpose([1, 0, 2])
-        markers_ordered = markers_ordered * 1000.0 # convert to mm
+        markers_ordered = markers_ordered * 1000.0  # convert to mm
 
         # 2D keypoints ##########
         # fetch the 2D keypoints and make them match the set and order of markers from the model
@@ -479,7 +489,7 @@ class BiomechanicalReconstructionReprojectionQuality(dj.Computed):
         vid_ts = (VideoInfo & video_keys[0]).fetch_timestamps()
         N = markers_ordered.shape[0]
         frame_0 = np.argmin(np.abs(vid_ts - timestamps[0]))
-        kp2d = kp2d_ordered[:, frame_0:frame_0+N]
+        kp2d = kp2d_ordered[:, frame_0 : frame_0 + N]
 
         # compute the metrics
         metrics, thresh, confidence = fit_quality.reprojection_quality(markers_ordered, camera_params, kp2d)
@@ -511,17 +521,16 @@ class BiomechanicalReconstructionSkeletonOffsets(dj.Computed):
     """
 
     def make(self, key):
-
-        offsets = (BiomechanicalReconstruction & key).fetch1('skeleton_definition')['marker_offsets']
+        offsets = (BiomechanicalReconstruction & key).fetch1("skeleton_definition")["marker_offsets"]
         offsets = {k: np.linalg.norm(v) for k, v in offsets.items()}
-        key['ankle'] = (offsets['LAnkle'] + offsets['RAnkle']) / 2
-        key['knee'] = (offsets['LKnee'] + offsets['RKnee']) / 2
-        key['hip'] = (offsets['LHip'] + offsets['RHip']) / 2
-        key['shoulder'] = (offsets['LShoulder'] + offsets['RShoulder']) / 2
-        key['elbow'] = (offsets['LElbow'] + offsets['RElbow']) / 2
-        key['average_offset'] = offsets = np.mean(list(offsets.values()))
-        
-        skeleton_definition = BiomechanicalReconstruction.fetch('skeleton_definition')
+        key["ankle"] = (offsets["LAnkle"] + offsets["RAnkle"]) / 2
+        key["knee"] = (offsets["LKnee"] + offsets["RKnee"]) / 2
+        key["hip"] = (offsets["LHip"] + offsets["RHip"]) / 2
+        key["shoulder"] = (offsets["LShoulder"] + offsets["RShoulder"]) / 2
+        key["elbow"] = (offsets["LElbow"] + offsets["RElbow"]) / 2
+        key["average_offset"] = offsets = np.mean(list(offsets.values()))
+
+        skeleton_definition = BiomechanicalReconstruction.fetch("skeleton_definition")
         # convert list of dicts to dict of lists
         skeleton_definition = {k: [d[k] for d in skeleton_definition] for k in skeleton_definition[0]}
 
@@ -537,11 +546,10 @@ class BiomechanicalReconstructionTrialNoise(dj.Computed):
     """
 
     def make(self, key):
-        
-        poses = (BiomechanicalReconstruction.Trial & key).fetch1('poses')
+        poses = (BiomechanicalReconstruction.Trial & key).fetch1("poses")
         poses = np.unwrap(poses, axis=0)
 
-        key['pose_noise'] = np.sqrt(np.mean(np.diff(poses, axis=0) ** 2))
+        key["pose_noise"] = np.sqrt(np.mean(np.diff(poses, axis=0) ** 2))
         self.insert1(key)
 
 
@@ -562,9 +570,9 @@ class BiomechanicalReconstructionJointLimits(dj.Computed):
         from multi_camera.analysis.biomechanics.bilevel_optimization import reload_skeleton
 
         # load the skeleton
-        model_name, skeleton_def = (BiomechanicalReconstruction & key).fetch1('model_name', 'skeleton_definition')
-        skeleton = reload_skeleton(model_name, skeleton_def['group_scales'])
-        poses = (BiomechanicalReconstruction.Trial & key).fetch1('poses')
+        model_name, skeleton_def = (BiomechanicalReconstruction & key).fetch1("model_name", "skeleton_definition")
+        skeleton = reload_skeleton(model_name, skeleton_def["group_scales"])
+        poses = (BiomechanicalReconstruction.Trial & key).fetch1("poses")
 
         # get the joint limits
         limits = np.stack([skeleton.getPositionLowerLimits(), skeleton.getPositionUpperLimits()], axis=1)
@@ -583,12 +591,12 @@ class BiomechanicalReconstructionJointLimits(dj.Computed):
         under100 = (poses < limits100[None, :, 0]) * allowed.T
         over100 = (poses > limits100[None, :, 1]) * allowed.T
 
-        key['violation_fraction'] = np.mean(under | over)
-        key['violation_50_fraction'] = np.mean(under50 | over50)
-        key['violation_100_fraction'] = np.mean(under100 | over100)
-        key['under_fraction'] = np.mean(under)
-        key['over_fraction'] = np.mean(over)
-        key['per_joint'] = np.mean(under | over, axis=0)
+        key["violation_fraction"] = np.mean(under | over)
+        key["violation_50_fraction"] = np.mean(under50 | over50)
+        key["violation_100_fraction"] = np.mean(under100 | over100)
+        key["under_fraction"] = np.mean(under)
+        key["over_fraction"] = np.mean(over)
+        key["per_joint"] = np.mean(under | over, axis=0)
 
         self.insert1(key)
 
