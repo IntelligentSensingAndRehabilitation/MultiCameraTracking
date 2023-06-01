@@ -5,7 +5,7 @@ import numpy as np
 from pose_pipeline import TopDownMethodLookup
 from multi_camera.datajoint.sessions import Recording
 from multi_camera.datajoint.multi_camera_dj import PersonKeypointReconstructionMethodLookup, MultiCameraRecording
-from multi_camera.datajoint.biomechanics import BiomechanicalReconstruction
+from multi_camera.validation.biomechanics.biomechanics import BiomechanicalReconstruction
 from multi_camera.analysis.biomechanics import bilevel_optimization
 from multi_camera.analysis.biomechanics.render import load_skeleton_meshes
 

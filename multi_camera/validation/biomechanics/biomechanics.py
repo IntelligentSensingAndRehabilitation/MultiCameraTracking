@@ -138,20 +138,20 @@ class BiomechanicalReconstruction(dj.Computed):
         """
 
     def make(self, key):
-
-        from ..analysis.biomechanics import bilevel_optimization
+        from multi_camera.analysis.biomechanics import bilevel_optimization
 
         trials = (PersonKeypointReconstruction * GaitRiteRecording & key).fetch("KEY")
         assert len(GaitRiteRecording & trials) == len(trials), "Not all trials have been reconstructed"
         assert len(trials) < 20, "WTF"
         if len(trials) == 0:
-            print('No trials to process. Skipping' + str(key))
+            print("No trials to process. Skipping" + str(key))
             return
         assert len(trials) > 0, "No trials to process"
 
-        if key['bilevel_settings'] > 1:
+        if key["bilevel_settings"] > 1:
             from sensor_fusion.emgimu_session import Height
-            height = (Height & key).fetch1('height_mm') / 1000.0
+
+            height = (Height & key).fetch1("height_mm") / 1000.0
         else:
             height = 1.7
 
@@ -161,8 +161,8 @@ class BiomechanicalReconstruction(dj.Computed):
         trial_timestamps = []
         for k in trials:
             import numpy as np
-            from .multi_camera_dj import MultiCameraRecording
-            from .gaitrite_comparison import get_walking_time_range
+            from multi_camera.datajoint.multi_camera_dj import MultiCameraRecording
+            from multi_camera.datajoint.gaitrite_comparison import get_walking_time_range
 
             k2 = k.copy()
             k2["reconstruction_method"] = 0
@@ -194,7 +194,7 @@ class BiomechanicalReconstruction(dj.Computed):
             set_min_sphere_fit_score=settings["set_min_sphere_fit_score"],
             set_min_axis_fit_score=settings["set_min_axis_fit_score"],
             set_max_joint_weight=settings["set_max_joint_weight"],
-            heightM=height
+            heightM=height,
         )
 
         print(f"Received {len(results)} results from {len(kps)} trials")
@@ -214,6 +214,7 @@ class BiomechanicalReconstruction(dj.Computed):
         for k in fitMarkers:
             v = fitMarkers[k]
             marker_offsets_map[k] = (v[0].getName(), v[1])
+        del fitMarkers
 
         skeleton_defintion = {
             "marker_offsets_map": marker_offsets_map,
@@ -244,8 +245,8 @@ class BiomechanicalReconstruction(dj.Computed):
 
     def export(self, output_dir):
         import numpy as np
-        from ..analysis.biomechanics import bilevel_optimization
-        from .multi_camera_dj import SingleCameraVideo, MultiCameraRecording
+        from multi_camera.analysis.biomechanics import bilevel_optimization
+        from multi_camera.datajoint.multi_camera_dj import SingleCameraVideo, MultiCameraRecording
         from pose_pipeline import VideoInfo
 
         assert (len(self)) == 1, "Filter for single object"
@@ -255,7 +256,7 @@ class BiomechanicalReconstruction(dj.Computed):
         bilevel_optimization.save_model(model_name, skeleton_def, output_dir)
 
         for key in (self.Trial & self).fetch("KEY"):
-            from .gaitrite_comparison import get_walking_time_range
+            from multi_camera.datajoint.gaitrite_comparison import get_walking_time_range
 
             trial = (MultiCameraRecording & key).fetch1("video_base_filename")
             poses = (self.Trial & key).fetch1("poses")
