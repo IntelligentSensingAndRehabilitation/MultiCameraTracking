@@ -35,6 +35,16 @@ from .multi_camera_dj import import_recording, MultiCameraRecording
 schema = dj.schema("mocap_sessions")
 
 
+def get_subject_id_from_participant_id(participant_id: str) -> int:
+    participant_mapping = {"TF47": 190, "TF02": 191, "TF01": 192}
+
+    if participant_id in participant_mapping:
+        return participant_mapping[participant_id]
+
+    # now check it can be cast into an integer and return it or raise an error
+    return int(participant_id)
+
+
 @schema
 class Subject(dj.Manual):
     definition = """
