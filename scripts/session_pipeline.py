@@ -17,6 +17,10 @@ from multi_camera.utils.standard_pipelines import reconstruction_pipeline
 
 pose_pipeline.set_environmental_variables()
 
+pose_pipeline.env.pytorch_memory_limit()
+pose_pipeline.env.tensorflow_memory_limit()
+pose_pipeline.env.jax_memory_limit()
+
 
 def assign_calibration():
     # find the calibration that is closest in time to each recording that also has a minimum
@@ -61,7 +65,8 @@ def preannotation_session_pipeline(keys: List[Dict] = None, bridging: bool = Tru
     """
 
     if keys is None:
-        keys = (CalibratedRecording & Recording - EasymocapSmpl).fetch("KEY")
+        keys = (SingleCameraVideo & Recording - EasymocapSmpl).fetch("KEY")
+        print("Computing initial reconstruction for {} videos".format(len(keys)))
 
     if bridging:
         bottom_up_pipeline(keys, bottom_up_method_name="Bridging_OpenPose")
@@ -105,7 +110,10 @@ def postannotation_session_pipeline(
         keys = (CalibratedRecording & Recording & annotated - (PersonKeypointReconstruction & filt)).fetch("KEY")
 
     reconstruction_pipeline(
-        keys, top_down_method_name=top_down_method_name, reconstruction_method_name=reconstruction_method_name
+        keys,
+        top_down_method_name=top_down_method_name,
+        reconstruction_method_name=reconstruction_method_name,
+        reserve_jobs=True,
     )
 
 
