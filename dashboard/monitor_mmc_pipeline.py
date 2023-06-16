@@ -2,7 +2,7 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 
-from pose_pipeline.pipeline import TopDownPerson, TopDownMethodLookup, BottomUpPeople, BottomUpMethodLookup
+from pose_pipeline.pipeline import TopDownPerson, TopDownMethodLookup, BottomUpPeople, BottomUpMethodLookup, PersonBbox
 from multi_camera.datajoint.sessions import Session, Recording
 from multi_camera.datajoint.multi_camera_dj import (
     MultiCameraRecording,
@@ -27,13 +27,16 @@ stats = [
         "Project": project,
         "Number of recordings": len(Recording & project_filt(project)),
         "Number of videos missing bottom up": len((Recording * SingleCameraVideo - bottom_up) & project_filt(project)),
-        "Number of videos missing top down": len(Recording * SingleCameraVideo - top_down & project_filt(project)),
         "Number missing calibration": len(missing & project_filt(project)),
         "Calibrated awaiting initial reconstruction": len(
             (Recording & CalibratedRecording - EasymocapSmpl) & project_filt(project) - PersonKeypointReconstruction
         ),
-        "Number without reconstruction": len(
-            (Recording & CalibratedRecording - PersonKeypointReconstruction)
+        "Reconstructed awaiting annotation": len(
+            (Recording & CalibratedRecording * EasymocapSmpl) & project_filt(project) - (SingleCameraVideo * PersonBbox)
+        ),
+        "Number of videos missing top down": len(Recording * SingleCameraVideo - top_down & project_filt(project)),
+        "Annotated without reconstruction": len(
+            (Recording & CalibratedRecording & (SingleCameraVideo * PersonBbox) - PersonKeypointReconstruction)
             & (MultiCameraRecording & {"video_project": project})
         ),
     }
@@ -49,4 +52,4 @@ st.set_page_config(  # Alternate names: setup_page, page, layout
     page_icon=None,  # String, anything supported by st.image, or None.
 )
 
-st.dataframe(stats, use_container_width=True, height=500)
+st.dataframe(stats.T, use_container_width=True, height=500)
