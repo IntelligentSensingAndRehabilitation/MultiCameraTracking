@@ -1,20 +1,43 @@
 FROM peabody124/posepipe
 
-RUN pip3 install git+https://github.com/zju3dv/EasyMocap
-RUN pip3 install tabulate
+### Install Spinnaker
 
-# ####### Now set up PosePipe itself
+COPY docker/flir/spinnaker-3.1.0.79-amd64 /spinnaker
+COPY docker/flir/*.whl /spinnaker
+
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get install -y libusb-1.0-0 qtbase5-dev qtchooser qt5-qmake qtbase5-dev-tools
+
+RUN echo 'debconf debconf/frontend select Noninteractive' | debconf-set-selections && \
+    echo libgentl libspinnaker/accepted-flir-eula boolean true | debconf-set-selections && \
+    dpkg -i /spinnaker/*.deb
+
+# RUN /spinnaker/configure_gentl_paths.sh 64
+
+RUN pip3 install /spinnaker/*.whl
+
+# Now install other requirements for MMC system
+
+# RUN pip3 install git+https://github.com/zju3dv/EasyMocap
+# RUN pip3 install tabulate
+
+# Now install MMC itself
+
 WORKDIR /Mocap
 COPY requirements.txt .
 RUN pip3 install -r requirements.txt
 COPY setup.py README.md /Mocap/
 COPY multi_camera /Mocap/multi_camera
-RUN pip3 install -e /Mocap
+RUN pip3 install -e /Mocap/
 
-COPY docs/gaitrite_comparison_writeup/populate_gaitrite_analysis.py /Mocap
-COPY scripts/session_pipeline.py /Mocap
-COPY scripts/mocap_openpose.py /Mocap
+# COPY docs/gaitrite_comparison_writeup/populate_gaitrite_analysis.py /Mocap
+# COPY scripts/session_pipeline.py /Mocap
+# COPY scripts/mocap_openpose.py /Mocap
+
+
+#ENTRYPOINT ["/usr/bin/python3"]
+#CMD ["-m multi_camera.acquisition.flir_recording_api.py"]
 
 ENTRYPOINT ["/usr/bin/python3"]
-CMD ["mocap_openpose.py"]
-

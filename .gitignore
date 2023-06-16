@@ -31,3 +31,6 @@ MANIFEST
 
 # Any data
 data/
+
+# Docker build files
+docker/flir
