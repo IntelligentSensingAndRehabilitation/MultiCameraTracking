@@ -37,7 +37,6 @@ RUN pip3 install -e /Mocap/
 # COPY scripts/mocap_openpose.py /Mocap
 
 
-#ENTRYPOINT ["/usr/bin/python3"]
-#CMD ["-m multi_camera.acquisition.flir_recording_api.py"]
-
 ENTRYPOINT ["/usr/bin/python3"]
+#CMD ["-m","multi_camera.acquisition.flir_recording_api","test"]
+CMD ["-m","multi_camera.acquisition.cameras_reset","-a"]
