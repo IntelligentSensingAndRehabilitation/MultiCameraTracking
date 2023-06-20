@@ -49,7 +49,18 @@ RUN npm install
 COPY react_frontend /Mocap/react_frontend
 
 
-EXPOSE 8080
+EXPOSE 3000
+
+WORKDIR /Mocap
+
+COPY docker/start_acquisition_gui.sh /Mocap/start_acquisition_gui.sh
+RUN chmod +x /Mocap/start_acquisition_gui.sh
+
+WORKDIR /
+RUN mkdir -p /data
+
+ENTRYPOINT ["/bin/bash"]
+CMD ["/Mocap/start_acquisition_gui.sh"]
 
 
 # CMD ["npm","start"]
@@ -62,4 +73,4 @@ EXPOSE 8080
 # ENTRYPOINT ["/usr/bin/python3"]
 #CMD ["-m","multi_camera.acquisition.flir_recording_api","test"]
 # CMD ["-m","multi_camera.acquisition.cameras_reset","-a"]
-ENTRYPOINT ["/bin/bash"]
+# ENTRYPOINT ["/bin/bash"]
