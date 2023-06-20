@@ -8,7 +8,7 @@ COPY docker/flir/*.whl /spinnaker
 
 ARG DEBIAN_FRONTEND=noninteractive
 
-RUN apt-get install -y libusb-1.0-0 qtbase5-dev qtchooser qt5-qmake qtbase5-dev-tools
+RUN apt-get install -y libusb-1.0-0 qtbase5-dev qtchooser qt5-qmake qtbase5-dev-tools curl
 
 RUN echo 'debconf debconf/frontend select Noninteractive' | debconf-set-selections && \
     echo libgentl libspinnaker/accepted-flir-eula boolean true | debconf-set-selections && \
@@ -32,11 +32,34 @@ COPY setup.py README.md /Mocap/
 COPY multi_camera /Mocap/multi_camera
 RUN pip3 install -e /Mocap/
 
+# Install items needed for frontend
+
+RUN curl -sL https://deb.nodesource.com/setup_14.x | bash -
+RUN apt-get install -y nodejs
+
+RUN node -v
+RUN npm -v
+
+WORKDIR /Mocap/react_frontend
+
+COPY react_frontend/package*.json /Mocap/react_frontend/
+
+RUN npm install
+
+COPY react_frontend /Mocap/react_frontend
+
+
+EXPOSE 8080
+
+
+# CMD ["npm","start"]
+
 # COPY docs/gaitrite_comparison_writeup/populate_gaitrite_analysis.py /Mocap
 # COPY scripts/session_pipeline.py /Mocap
 # COPY scripts/mocap_openpose.py /Mocap
 
 
-ENTRYPOINT ["/usr/bin/python3"]
+# ENTRYPOINT ["/usr/bin/python3"]
 #CMD ["-m","multi_camera.acquisition.flir_recording_api","test"]
-CMD ["-m","multi_camera.acquisition.cameras_reset","-a"]
+# CMD ["-m","multi_camera.acquisition.cameras_reset","-a"]
+ENTRYPOINT ["/bin/bash"]
