@@ -8,7 +8,8 @@ from pose_pipeline import Video, VideoInfo, BottomUpPeople
 from .multi_camera_dj import schema, MultiCameraRecording, SingleCameraVideo, Calibration, CalibratedRecording
 
 # Hardcoding a selected method
-bottom_up = (BottomUpPeople & {'bottom_up_method_name': 'OpenPose_HR'})
+bottom_up = (BottomUpPeople & {'bottom_up_method_name': 'Bridging_OpenPose'})
+#bottom_up = (BottomUpPeople & {'bottom_up_method_name': 'OpenPose_HR'})
 
 def _build_camera(params, index=0):
     from multi_camera.analysis.camera import get_intrinsic, get_extrinsic, get_projection
