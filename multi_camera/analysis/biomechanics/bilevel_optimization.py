@@ -7,7 +7,6 @@ https://github.com/keenon/AddBiomechanics/blob/main/server/engine/engine.py
 """
 
 import os
-import shutil
 import subprocess
 import numpy as np
 from typing import List, Tuple, Dict
@@ -30,7 +29,6 @@ def fit_markers(
     set_min_axis_fit_score=0.001,
     set_max_joint_weight=1.0,  # Default max joint weight is 0.5, so this is 2x the default value
 ):  # -> Tuple(List[nimble.biomechanics.MarkerInitialization], nimble.dynamics.Skeleton):
-
     # get path to this file
     model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "NimbleModels")
     model_file = os.path.join(model_path, model_name + ".osim")
@@ -177,7 +175,6 @@ def save_model(
     mass_kg: float = 60,
     height_m: float = 1.7,
 ):
-
     if not os.path.exists(os.path.join(output_path, "Models")):
         os.mkdir(os.path.join(output_path, "Models"))
 
@@ -302,19 +299,19 @@ def reload_skeleton(model_name: str, body_scales_map: np.array = None, return_ma
 
     if return_map:
         return skeleton, marker_map
-    
+
     return skeleton
 
 
 def get_markers(skeleton, skeleton_def, poses, original_format=False):
-    '''Get the markers for a set of poses'''
+    """Get the markers for a set of poses"""
 
     def get_body(body_name):
         matches = [b for b in skeleton.getBodyNodes() if b.getName() == body_name]
         assert len(matches) == 1
         return matches[0]
 
-    marker_map = {k: (get_body(v[0]), v[1]) for k, v in skeleton_def['marker_offsets_map'].items()}
+    marker_map = {k: (get_body(v[0]), v[1]) for k, v in skeleton_def["marker_offsets_map"].items()}
 
     markers = []
     for p in poses:

@@ -8,22 +8,21 @@ import numpy as np
 
 def pyvista_read_vtp(fn):
     import pyvista
-    
-    if '.ply' in fn:
-        fn = fn.split('.ply')[0]
-        
+
+    if ".ply" in fn:
+        fn = fn.split(".ply")[0]
+
     reader = pyvista.get_reader(fn)
     mesh = reader.read()
     mesh = mesh.triangulate()
-    
-    faces_as_array = mesh.faces.reshape((mesh.n_faces, 4))[:, 1:] 
-    tmesh = trimesh.Trimesh(mesh.points, faces_as_array) 
+
+    faces_as_array = mesh.faces.reshape((mesh.n_faces, 4))[:, 1:]
+    tmesh = trimesh.Trimesh(mesh.points, faces_as_array)
     tmesh = tmesh.smoothed()
     return tmesh
 
 
 def load_skeleton_meshes(skeleton):
-
     objects = {}
 
     for b in skeleton.getBodyNodes():
@@ -34,7 +33,7 @@ def load_skeleton_meshes(skeleton):
             mesh = pyvista_read_vtp(shape.getMeshPath())
 
             # deferring transforms for now
-            #mesh = mesh.apply_transform(s.getWorldTransform().matrix())
+            # mesh = mesh.apply_transform(s.getWorldTransform().matrix())
             mesh.vertices = mesh.vertices * scale
             objects[name] = mesh
 
@@ -42,7 +41,6 @@ def load_skeleton_meshes(skeleton):
 
 
 def pose_skeleton(skeleton, pose, meshes=None):
-
     skeleton.setPositions(pose)
 
     if meshes is None:
@@ -60,15 +58,15 @@ def pose_skeleton(skeleton, pose, meshes=None):
     return posed_meshes
 
 
-def render_scene(meshes, focal_length=None, height=None, width=None, cameras=None, color=(0, 1, 0), device='cpu'):
-    ''' Render the mesh under camera coordinates
+def render_scene(meshes, focal_length=None, height=None, width=None, cameras=None, color=(0, 1, 0), device="cpu"):
+    """Render the mesh under camera coordinates
     meshes: list of trimesh.Trimesh
     focal_length: float, focal length of camera
     height: int, height of image
     width: int, width of image
     device: "cpu"/"cuda:0", device of torch
     :return: the rgba rendered image
-    '''
+    """
 
     pytorch_meshes = []
     for mesh in meshes:
@@ -77,7 +75,7 @@ def render_scene(meshes, focal_length=None, height=None, width=None, cameras=Non
         face = torch.from_numpy(mesh.faces).long().to(device)
         verts_rgb = torch.ones_like(vert)
         texture = pytorch3d.renderer.TexturesVertex(verts_features=verts_rgb[None, ...])
-        
+
         mesh = pytorch3d.structures.Meshes(verts=vert[None, ...], faces=face[None, ...], textures=texture)
         pytorch_meshes.append(mesh)
 
@@ -86,26 +84,20 @@ def render_scene(meshes, focal_length=None, height=None, width=None, cameras=Non
     # Initialize a camera.
     if cameras is None:
         cameras = pytorch3d.renderer.PerspectiveCameras(
-            focal_length=((focal_length, focal_length),), # ((2 * focal_length / min(height, width), 2 * focal_length / min(height, width)),),
+            focal_length=(
+                (focal_length, focal_length),
+            ),  # ((2 * focal_length / min(height, width), 2 * focal_length / min(height, width)),),
             device=device,
         )
 
     # Define the settings for rasterization and shading.
     raster_settings = pytorch3d.renderer.RasterizationSettings(
-        image_size=(height, width),
-        blur_radius=0.0,
-        faces_per_pixel=10,
-        max_faces_per_bin=50000,
-        bin_size=100
+        image_size=(height, width), blur_radius=0.0, faces_per_pixel=10, max_faces_per_bin=50000, bin_size=100
     )
 
     # Define the material
     materials = pytorch3d.renderer.Materials(
-        ambient_color=(color,),
-        diffuse_color=(color,),
-        specular_color=(color,),
-        shininess=64,
-        device=device
+        ambient_color=(color,), diffuse_color=(color,), specular_color=(color,), shininess=64, device=device
     )
 
     # Place a directional light in front of the object.
@@ -113,16 +105,8 @@ def render_scene(meshes, focal_length=None, height=None, width=None, cameras=Non
 
     # Create a phong renderer by composing a rasterizer and a shader.
     renderer = pytorch3d.renderer.MeshRenderer(
-        rasterizer=pytorch3d.renderer.MeshRasterizer(
-            cameras=cameras,
-            raster_settings=raster_settings
-        ),
-        shader=pytorch3d.renderer.SoftPhongShader(
-            device=device,
-            cameras=cameras,
-            lights=lights,
-            materials=materials
-        )
+        rasterizer=pytorch3d.renderer.MeshRasterizer(cameras=cameras, raster_settings=raster_settings),
+        shader=pytorch3d.renderer.SoftPhongShader(device=device, cameras=cameras, lights=lights, materials=materials),
     )
 
     # Do rendering
@@ -133,29 +117,28 @@ def render_scene(meshes, focal_length=None, height=None, width=None, cameras=Non
     return imgs
 
 
-def render_poses(skeleton, poses, device='cuda:0'):
-    ''' Render centered skeleton
+def render_poses(skeleton, poses, device="cuda:0"):
+    """Render centered skeleton
 
-        Args:
-            skeleton: nimble.Skeleton already scaled
-            poses: np.array, shape (T, n_dofs)
+    Args:
+        skeleton: nimble.Skeleton already scaled
+        poses: np.array, shape (T, n_dofs)
 
-        Returns:
-            images: list of np.array, shape (T, H, W, 4) RGBA format
-    '''
+    Returns:
+        images: list of np.array, shape (T, H, W, 4) RGBA format
+    """
 
     from tqdm import tqdm
 
     images = []
     for pose in tqdm(poses):
-
         posed = pose_skeleton(skeleton, pose)
 
         scene = trimesh.Scene()
         for k, v in posed.items():
             scene.add_geometry(v, node_name=k)
 
-        origin = np.mean(posed['pelvis_ShapeNode_0'].vertices, axis=0)
+        origin = np.mean(posed["pelvis_ShapeNode_0"].vertices, axis=0)
         offset = np.array([0, 0, 8]) - origin * 1.0
 
         scene.apply_translation(offset)
@@ -207,19 +190,23 @@ def get_skeleton_mesh_overlay(key, cam_idx=0):
 
     from pose_pipeline.pipeline import VideoInfo, TopDownPerson
     from multi_camera.datajoint.calibrate_cameras import Calibration
-    from multi_camera.datajoint.multi_camera_dj import MultiCameraRecording, SingleCameraVideo, PersonKeypointReconstruction
-    from multi_camera.datajoint.biomechanics import BiomechanicalReconstruction
+    from multi_camera.datajoint.multi_camera_dj import (
+        MultiCameraRecording,
+        SingleCameraVideo,
+        PersonKeypointReconstruction,
+    )
+    from multi_camera.validation.biomechanics.biomechanics import BiomechanicalReconstruction
 
     # set up the cameras
     camera_params, camera_names = (Calibration & key).fetch1("camera_calibration", "camera_names")
 
     videos = (TopDownPerson * MultiCameraRecording * PersonKeypointReconstruction * SingleCameraVideo & key).proj()
-    video_keys, video_camera_name = (TopDownPerson * SingleCameraVideo * videos).fetch( "KEY", "camera_name")
+    video_keys, video_camera_name = (TopDownPerson * SingleCameraVideo * videos).fetch("KEY", "camera_name")
     assert camera_names == video_camera_name.tolist(), "Videos don't match cameras in calibration"
 
     width = int(np.unique((VideoInfo & video_keys).fetch("width"))[0])
     height = int(np.unique((VideoInfo & video_keys).fetch("height"))[0])
-    N = camera_params['tvec'].shape[0]
+    N = camera_params["tvec"].shape[0]
 
     def conv(x):
         return torch.from_numpy(np.array(x))
@@ -227,23 +214,23 @@ def get_skeleton_mesh_overlay(key, cam_idx=0):
     camera_matrix = conv(vmap(get_intrinsic, (None, 0), 0)(camera_params, np.arange(N)))
 
     def rotation_matrix(camera_params, i):
-        rvec = jnp.take(camera_params['rvec'], i, axis=0)
+        rvec = jnp.take(camera_params["rvec"], i, axis=0)
         rot = SO3.exp(rvec)
         return rot.as_matrix()
 
     R = conv(vmap(rotation_matrix, (None, 0), 0)(camera_params, np.arange(N)))
 
-    image_size = conv((np.ones((N,2)) * np.array([height, width])).astype(int))
+    image_size = conv((np.ones((N, 2)) * np.array([height, width])).astype(int))
 
-    cameras = pytorch3d.utils.cameras_from_opencv_projection(R, conv(camera_params['tvec']), camera_matrix, image_size)
+    cameras = pytorch3d.utils.cameras_from_opencv_projection(R, conv(camera_params["tvec"]), camera_matrix, image_size)
 
     # select the desired one since we are only supporting a single camera for now
     cameras = cameras[cam_idx]
 
     # get the skeleton
-    model_name, skeleton_def = (BiomechanicalReconstruction & key).fetch1('model_name', 'skeleton_definition')
-    skeleton = bilevel_optimization.reload_skeleton(model_name, skeleton_def['group_scales'])
-    timestamps, poses = (BiomechanicalReconstruction.Trial & key).fetch1('timestamps', 'poses')
+    model_name, skeleton_def = (BiomechanicalReconstruction & key).fetch1("model_name", "skeleton_definition")
+    skeleton = bilevel_optimization.reload_skeleton(model_name, skeleton_def["group_scales"])
+    timestamps, poses = (BiomechanicalReconstruction.Trial & key).fetch1("timestamps", "poses")
 
     meshes = load_skeleton_meshes(skeleton)
 
@@ -254,12 +241,11 @@ def get_skeleton_mesh_overlay(key, cam_idx=0):
     frame_idx = frame_idx.tolist()
 
     def overlay(frame, idx):
-
         try:
             pose_idx = frame_idx.index(idx)
         except ValueError:
             return frame
-        
+
         p = poses[pose_idx]
         posed = pose_skeleton(skeleton, p, meshes)
 
@@ -273,7 +259,9 @@ def get_skeleton_mesh_overlay(key, cam_idx=0):
             vertices_distorted = np.array(distort_3d(camera_params, cam_idx, vertices * 1000.0))
             # now transform back to world coordinates
             extri = get_extrinsic(camera_params, cam_idx)
-            vertices_distorted = np.concatenate([vertices_distorted, np.ones((*vertices_distorted.shape[:-1], 1))], axis=-1)
+            vertices_distorted = np.concatenate(
+                [vertices_distorted, np.ones((*vertices_distorted.shape[:-1], 1))], axis=-1
+            )
             # transform the points into the camera perspective
             # last dimension ensures broadcasting works
             transformed = (np.linalg.inv(extri) @ vertices_distorted[..., None])[..., 0]
@@ -281,17 +269,22 @@ def get_skeleton_mesh_overlay(key, cam_idx=0):
             vertices_distorted = transformed[..., :-1]
             # then back to meters
             vertices_distorted = vertices_distorted / 1000.0
-            
+
             v.vertices = vertices_distorted
             scene.add_geometry(v)
 
         objs = scene.dump()
 
         with torch.no_grad():
-            img = render_scene(objs, height=height, width=width, cameras=cameras.to('cuda:0'), device='cuda:0').cpu().detach().numpy()
+            img = (
+                render_scene(objs, height=height, width=width, cameras=cameras.to("cuda:0"), device="cuda:0")
+                .cpu()
+                .detach()
+                .numpy()
+            )
 
         alpha = img[..., -1:]
-        frame2 = frame / 255.0 * (1-alpha)  + img[..., :-1] * alpha
+        frame2 = frame / 255.0 * (1 - alpha) + img[..., :-1] * alpha
         frame2[frame2 > 1.0] = 1.0
         frame2 = (frame2 * 255).astype(np.uint8)
 
@@ -301,9 +294,9 @@ def get_skeleton_mesh_overlay(key, cam_idx=0):
 
 
 def get_markers_overlay(key, cam_idx=0, radius=5, color=(0, 0, 255)):
-    '''
+    """
     Get the overlay function for the markers
-    
+
     Args:
         key: dict, the key for the biomechanical reconstruction
         cam_idx: int, the index of the camera to use
@@ -312,12 +305,16 @@ def get_markers_overlay(key, cam_idx=0, radius=5, color=(0, 0, 255)):
 
     Returns:
         overlay: function, the overlay function
-    '''
+    """
 
     from pose_pipeline.pipeline import VideoInfo, TopDownPerson
-    from multi_camera.datajoint.multi_camera_dj import MultiCameraRecording, SingleCameraVideo, PersonKeypointReconstruction
+    from multi_camera.datajoint.multi_camera_dj import (
+        MultiCameraRecording,
+        SingleCameraVideo,
+        PersonKeypointReconstruction,
+    )
     from multi_camera.datajoint.calibrate_cameras import Calibration
-    from multi_camera.datajoint.biomechanics import BiomechanicalReconstruction
+    from multi_camera.validation.biomechanics.biomechanics import BiomechanicalReconstruction
 
     from pose_pipeline.utils.visualization import draw_keypoints
     from multi_camera.analysis.camera import project_distortion
@@ -328,7 +325,7 @@ def get_markers_overlay(key, cam_idx=0, radius=5, color=(0, 0, 255)):
 
     # find the videos (to get the height and width)
     videos = (TopDownPerson * MultiCameraRecording * PersonKeypointReconstruction * SingleCameraVideo & key).proj()
-    video_keys, video_camera_name = (TopDownPerson * SingleCameraVideo * videos).fetch( "KEY", "camera_name")
+    video_keys, video_camera_name = (TopDownPerson * SingleCameraVideo * videos).fetch("KEY", "camera_name")
     assert camera_names == video_camera_name.tolist(), "Videos don't match cameras in calibration"
 
     # get video parameters
@@ -336,14 +333,14 @@ def get_markers_overlay(key, cam_idx=0, radius=5, color=(0, 0, 255)):
     height = np.unique((VideoInfo & video_keys).fetch("height"))[0]
 
     # load the skeleton
-    model_name, skeleton_def = (BiomechanicalReconstruction & key).fetch1('model_name', 'skeleton_definition')
-    skeleton = reload_skeleton(model_name, skeleton_def['group_scales'])
-    timestamps, poses = (BiomechanicalReconstruction.Trial & key).fetch1('timestamps', 'poses')
+    model_name, skeleton_def = (BiomechanicalReconstruction & key).fetch1("model_name", "skeleton_definition")
+    skeleton = reload_skeleton(model_name, skeleton_def["group_scales"])
+    timestamps, poses = (BiomechanicalReconstruction.Trial & key).fetch1("timestamps", "poses")
 
     # get the markers
     markers = get_markers(skeleton, skeleton_def, poses, original_format=True)
     markers = np.stack(list(markers.values()), axis=1)  # drop the names
-    markers = markers * 1000.0 # convert to mm expected by the camera library
+    markers = markers * 1000.0  # convert to mm expected by the camera library
 
     # project the markers into the image plane
     markers_proj = project_distortion(camera_params, cam_idx, markers)
@@ -362,7 +359,7 @@ def get_markers_overlay(key, cam_idx=0, radius=5, color=(0, 0, 255)):
     markers_proj[clipped, 0] = 0
     markers_proj[clipped, 1] = 0
     markers_proj[clipped, 2] = 0
-    
+
     # match timestamps
     vid_timestamps = (VideoInfo & video_keys[0]).fetch_timestamps()
     frame_idx = np.intersect1d(vid_timestamps, timestamps, return_indices=True)[1]
@@ -370,14 +367,13 @@ def get_markers_overlay(key, cam_idx=0, radius=5, color=(0, 0, 255)):
     frame_idx = frame_idx.tolist()
 
     def overlay(image, idx):
-
         try:
             pose_idx = frame_idx.index(idx)
         except ValueError:
             return image
-        
+
         return draw_keypoints(image, markers_proj[pose_idx], radius=radius, color=color)
-    
+
     return overlay
 
 
@@ -389,9 +385,9 @@ def create_centered_video(key, out_file_name=None):
     from multi_camera.datajoint.biomechanics import BiomechanicalReconstruction
     from pose_pipeline.utils.video_format import compress
 
-    model_name, skeleton_def = (BiomechanicalReconstruction & key).fetch1('model_name', 'skeleton_definition')
-    skeleton = reload_skeleton(model_name, skeleton_def['group_scales'], return_map=False)
-    poses = (BiomechanicalReconstruction.Trial & key).fetch1('poses')
+    model_name, skeleton_def = (BiomechanicalReconstruction & key).fetch1("model_name", "skeleton_definition")
+    skeleton = reload_skeleton(model_name, skeleton_def["group_scales"], return_map=False)
+    poses = (BiomechanicalReconstruction.Trial & key).fetch1("poses")
 
     images = render_poses(skeleton, poses)
 
@@ -417,7 +413,11 @@ def create_overlay_video(key, cam_idx, out_file_name=None):
     from pose_pipeline.utils.visualization import video_overlay
     from pose_pipeline.pipeline import BlurredVideo, TopDownPerson
     from multi_camera.utils.visualization import get_projected_keypoint_overlay
-    from multi_camera.datajoint.multi_camera_dj import MultiCameraRecording, SingleCameraVideo, PersonKeypointReconstruction
+    from multi_camera.datajoint.multi_camera_dj import (
+        MultiCameraRecording,
+        SingleCameraVideo,
+        PersonKeypointReconstruction,
+    )
 
     mesh_overlay = get_skeleton_mesh_overlay(key, cam_idx)
     markers_overlay = get_markers_overlay(key, cam_idx, radius=7)
@@ -425,17 +425,20 @@ def create_overlay_video(key, cam_idx, out_file_name=None):
 
     def overlay(image, idx):
         image = mesh_overlay(image, idx)
-        image = keypoints_overlay(image, idx,)
+        image = keypoints_overlay(
+            image,
+            idx,
+        )
         image = markers_overlay(image, idx)
         return image
-    
+
     if out_file_name is None:
         fd, out_file_name = tempfile.mkstemp(suffix=".mp4")
         os.close(fd)
 
     # find the videos (to get the height and width)
     videos = (TopDownPerson * MultiCameraRecording * PersonKeypointReconstruction * SingleCameraVideo & key).proj()
-    video_keys, video_camera_name = (TopDownPerson * SingleCameraVideo * videos).fetch( "KEY", "camera_name")
+    video_keys, video_camera_name = (TopDownPerson * SingleCameraVideo * videos).fetch("KEY", "camera_name")
 
     video_key = video_keys[cam_idx]
 
@@ -443,5 +446,5 @@ def create_overlay_video(key, cam_idx, out_file_name=None):
     video_overlay(video, out_file_name, overlay, max_frames=None, downsample=1, compress=True)
 
     os.remove(video)
-    
+
     return out_file_name
