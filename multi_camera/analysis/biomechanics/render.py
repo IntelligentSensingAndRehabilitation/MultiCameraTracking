@@ -382,7 +382,7 @@ def create_centered_video(key, out_file_name=None):
     import os
     import tempfile
     from .bilevel_optimization import get_markers, reload_skeleton
-    from multi_camera.datajoint.biomechanics import BiomechanicalReconstruction
+    from multi_camera.validation.biomechanics.biomechanics import BiomechanicalReconstruction
     from pose_pipeline.utils.video_format import compress
 
     model_name, skeleton_def = (BiomechanicalReconstruction & key).fetch1("model_name", "skeleton_definition")
