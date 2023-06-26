@@ -111,7 +111,7 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 RECORDING_BASE = "data"
-CONFIG_PATH = "/Mocap/"
+CONFIG_PATH = "/configs/"
 DEFAULT_CONFIG = os.path.join(CONFIG_PATH, "cotton_lab_config_20230620.yaml")
 
 print(CONFIG_PATH)

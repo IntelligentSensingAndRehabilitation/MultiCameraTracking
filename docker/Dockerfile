@@ -18,11 +18,9 @@ RUN echo 'debconf debconf/frontend select Noninteractive' | debconf-set-selectio
     echo libgentl libspinnaker/accepted-flir-eula boolean true | debconf-set-selections && \
     dpkg -i /spinnaker/*.deb
 
-# RUN /spinnaker/configure_gentl_paths.sh 64
-
 RUN pip3 install /spinnaker/*.whl
 
-# Install items needed for frontend
+### Install items needed for frontend (Node.js, npm)
 
 RUN curl -sL https://deb.nodesource.com/setup_14.x | bash -
 RUN apt-get install -y nodejs
@@ -38,19 +36,10 @@ RUN npm install
 
 COPY react_frontend /Mocap/react_frontend
 
-
-EXPOSE 3000
-EXPOSE 8000
-
-# Installing extra things (curl, screen, netstat)
+### Installing extra things (curl, screen, netstat) (can be removed after image is in stable state)
 RUN apt-get install -y net-tools
 
-# Now install other requirements for MMC system
-
-# RUN pip3 install git+https://github.com/zju3dv/EasyMocap
-# RUN pip3 install tabulate
-
-# Now install MMC itself
+### Install MultiCameraTracking package and dependencies
 
 WORKDIR /Mocap
 COPY requirements.txt .
@@ -59,8 +48,6 @@ COPY setup.py README.md /Mocap/
 COPY multi_camera /Mocap/multi_camera
 RUN pip3 install -e /Mocap/
 
-
-
 WORKDIR /Mocap
 
 COPY docker/start_acquisition_gui.sh /Mocap/start_acquisition_gui.sh
@@ -68,22 +55,8 @@ RUN chmod +x /Mocap/start_acquisition_gui.sh
 
 WORKDIR /
 RUN mkdir -p /data
+COPY configs /configs
 
-COPY cotton_lab_config_20230620.yaml /Mocap
-
-
+# Run bash script to start front end and back endd
 ENTRYPOINT ["/bin/bash"]
 CMD ["/Mocap/start_acquisition_gui.sh"]
-
-
-# CMD ["npm","start"]
-
-# COPY docs/gaitrite_comparison_writeup/populate_gaitrite_analysis.py /Mocap
-# COPY scripts/session_pipeline.py /Mocap
-# COPY scripts/mocap_openpose.py /Mocap
-
-
-# ENTRYPOINT ["/usr/bin/python3"]
-#CMD ["-m","multi_camera.acquisition.flir_recording_api","test"]
-# CMD ["-m","multi_camera.acquisition.cameras_reset","-a"]
-# ENTRYPOINT ["/bin/bash"]
