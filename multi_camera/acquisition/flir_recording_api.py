@@ -347,6 +347,8 @@ class FlirRecorder:
         exposure_time = self.camera_config["acquisition-settings"]["exposure_time"]
         frame_rate = self.camera_config["acquisition-settings"]["frame_rate"]
 
+        # Updating the binning needed to run at 60 Hz. 
+        # TODO: make this check more robust in the future
         if frame_rate == 60:
             binning = 2
 
@@ -504,7 +506,14 @@ class FlirRecorder:
         if self.preview_callback:
             self.preview_callback(None)
 
+        exposure_times = []
+        frame_rates = []
         for c in self.cams:
+            # Recording the final exposure times and requested frame rates for each camera
+            # Actual frame rate can be calculated from the timestamps in the output json
+            exposure_times.append(c.ExposureTime)
+            frame_rates.append(c.BinningHorizontal * 30)
+            # Stopping each camera
             c.stop()
 
         # Creating a dictionary to hold the contents of each camera's json queue
@@ -525,6 +534,8 @@ class FlirRecorder:
         if self.camera_config != "":
             output_json["meta_info"] = self.camera_config["meta-info"]
             output_json["camera_info"] = self.camera_config["camera-info"]
+            output_json["exposure_times"] = exposure_times
+            output_json["frame_rate_requested"] = frame_rates
 
         if self.video_base_file is not None:
             # stop video writing threads and output json file
