@@ -99,6 +99,7 @@ def init_camera(
     throughput_limit: int = 125000000,
     resend_enable: bool = False,
     binning: int = 1,
+    exposure_time: int = 15000,
 ):
     """
     Initialize camera with settings for recording
@@ -125,7 +126,7 @@ def init_camera(
     # use a fixed exposure time to ensure good synchronization. also want to keep this relatively
     # low to reduce blur while obtaining sufficient light
     c.ExposureAuto = "Off"
-    c.ExposureTime = 15000
+    c.ExposureTime = exposure_time
 
     # let the auto gain match the brightness across images as much as possible
     c.GainAuto = "Continuous"
@@ -339,12 +340,23 @@ class FlirRecorder:
             # of cameras to select
             self.cams = [Camera(i, lock=True) for i in self.iface_cameras]
 
+        binning = 1
+        exposure_time = 15000
+
+        # Parse additional parameters from the config file
+        exposure_time = self.camera_config["acquisition-settings"]["exposure_time"]
+        frame_rate = self.camera_config["acquisition-settings"]["frame_rate"]
+
+        if frame_rate == 60:
+            binning = 2
+
         config_params = {
             "jumbo_packet": True,
             "triggering": self.trigger,
             "throughput_limit": 125000000,
             "resend_enable": False,
-            "binning": 1,
+            "binning": binning,
+            "exposure_time": exposure_time,
         }
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(self.cams)) as executor:
