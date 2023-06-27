@@ -15,6 +15,7 @@ import time
 import cv2
 import os
 import yaml
+import pandas as pd
 
 
 # Data structures we will expose outside this library
@@ -551,13 +552,22 @@ class FlirRecorder:
             # writing the json file for the current recording session
             json.dump(output_json, open(json_file, "w"))
 
-        ts = np.array(output_json["timestamps"])
-        dt = (ts - ts[0, 0]) / 1e9
-        spread = np.max(dt, axis=1) - np.min(dt, axis=1)
+        # Calculating metrics to determine drift
+        ts = pd.DataFrame(output_json["timestamps"])
+
+        # interpolating any timestamps that are 0s
+        ts.replace(0, np.nan, inplace=True)
+        ts.interpolate(method='linear', axis=0, limit=1, limit_direction='both', inplace=True)
+        initial_ts = ts.iloc[0,0]
+        dt = (ts - initial_ts) / 1e9
+        spread = dt.max(axis=1) - dt.min(axis=1)
+
+        ts['std'] = ts.std(axis=1) / 1e6
         if np.all(spread < 1e-6):
             print("Timestamps well aligned and clean")
         else:
             print(f"Timestamps showed a maximum spread of {np.max(spread) * 1000} ms")
+            print(f"Timestamp standard deviation {ts['std'].max() -  ts['std'].min()} ms")
 
         self.set_status("Idle")
 
