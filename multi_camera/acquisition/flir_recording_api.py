@@ -120,28 +120,19 @@ def init_camera(
     # Initialize each available camera
     c.init()
 
+    # Resetting binning to 1 to allow for maximum frame size
     c.BinningHorizontal = 1
     c.BinningVertical = 1
 
-    print("MAX",c.WidthMax,c.HeightMax,c.Width,c.Height,c.Width_Max,c.Height_Max,c.OffsetX,c.OffsetY,c.BinningHorizontal,c.BinningVertical,c.AasRoiHeight_Val,c.AutoExposureRoiHeight_Max)
-    print(c.Width * c.BinningHorizontal,c.Height * c.BinningVertical)
-    
-    # c.Width = c.WidthMax
-    # c.Height = c.HeightMax
-
-    print(int(c.WidthMax * c.BinningHorizontal),int(c.HeightMax * c.BinningVertical))
-
-    c.Width = int(c.WidthMax * c.BinningHorizontal)
-    c.Height = int(c.HeightMax * c.BinningVertical)
-
+    # Ensuring height and width are set to maximum
+    c.Width = c.WidthMax
+    c.Height = c.HeightMax
 
     c.PixelFormat = "BayerRG8"  # BGR8 Mono8
+    
+    # Now applying desired binning to maximum frame size
     c.BinningHorizontal = binning
     c.BinningVertical = binning
-    
-    # if binning == 1:
-    #     c.Width = int(c.WidthMax / binning)
-    #     c.Height = int(c.HeightMax / binning)
 
     # use a fixed exposure time to ensure good synchronization. also want to keep this relatively
     # low to reduce blur while obtaining sufficient light
@@ -461,9 +452,10 @@ class FlirRecorder:
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(self.cams)) as executor:
             l = list(executor.map(start_cam, range(len(self.cams))))
 
+        print("Acquisition, Resulting, Exposure, DeviceLinkThroughputLimit:")
         for c in self.cams:
-            print(f"Acquisition, Resulting, Exposure, DeviceLinkThroughputLimit: {c.AcquisitionFrameRate}, {c.AcquisitionResultingFrameRate}, {c.ExposureTime}, {c.DeviceLinkThroughputLimit} ")
-            print(c.BinningHorizontal,c.BinningVertical,c.Width,c.Height,c.DeviceSerialNumber)
+            print(f"{c.DeviceSerialNumber}: {c.AcquisitionFrameRate}, {c.AcquisitionResultingFrameRate}, {c.ExposureTime}, {c.DeviceLinkThroughputLimit} ")
+            print(f"Frame Size: {c.Width} {c.Height}")
 
         # schedule a command to start in 250 ms in the future
         self.cams[0].TimestampLatch()
