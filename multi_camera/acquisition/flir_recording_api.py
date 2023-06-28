@@ -16,6 +16,7 @@ import cv2
 import os
 import yaml
 import pandas as pd
+import hashlib
 
 
 # Data structures we will expose outside this library
@@ -257,6 +258,15 @@ class FlirRecorder:
         self.iface = None
         self.status_callback = status_callback
         self.set_status("Uninitialized")
+
+    def get_config_hash(self,yaml_content,hash_len=10):
+
+        # Sorting keys to ensure consistent hashing
+        file_str = json.dumps(yaml_content,sort_keys=True)
+        encoded_config = file_str.encode('utf-8')
+
+        # Create hash of encoded config file and return
+        return hashlib.sha256(encoded_config).hexdigest()[:hash_len]
 
     def _get_pyspin_system(self):
         # use this to ensure both calls with simple pyspin and locally use the same references
@@ -551,6 +561,9 @@ class FlirRecorder:
             output_json["camera_info"] = self.camera_config["camera-info"]
             output_json["exposure_times"] = exposure_times
             output_json["frame_rate_requested"] = frame_rates
+            camera_config_hash = self.get_config_hash(self.camera_config)
+            print("CONFIG HASH",camera_config_hash)
+            output_json["camera_config_hash"] = camera_config_hash
 
         if self.video_base_file is not None:
             # stop video writing threads and output json file
