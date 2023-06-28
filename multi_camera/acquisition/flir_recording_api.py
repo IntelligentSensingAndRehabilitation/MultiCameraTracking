@@ -120,9 +120,28 @@ def init_camera(
     # Initialize each available camera
     c.init()
 
+    c.BinningHorizontal = 1
+    c.BinningVertical = 1
+
+    print("MAX",c.WidthMax,c.HeightMax,c.Width,c.Height,c.Width_Max,c.Height_Max,c.OffsetX,c.OffsetY,c.BinningHorizontal,c.BinningVertical,c.AasRoiHeight_Val,c.AutoExposureRoiHeight_Max)
+    print(c.Width * c.BinningHorizontal,c.Height * c.BinningVertical)
+    
+    # c.Width = c.WidthMax
+    # c.Height = c.HeightMax
+
+    print(int(c.WidthMax * c.BinningHorizontal),int(c.HeightMax * c.BinningVertical))
+
+    c.Width = int(c.WidthMax * c.BinningHorizontal)
+    c.Height = int(c.HeightMax * c.BinningVertical)
+
+
     c.PixelFormat = "BayerRG8"  # BGR8 Mono8
     c.BinningHorizontal = binning
     c.BinningVertical = binning
+    
+    # if binning == 1:
+    #     c.Width = int(c.WidthMax / binning)
+    #     c.Height = int(c.HeightMax / binning)
 
     # use a fixed exposure time to ensure good synchronization. also want to keep this relatively
     # low to reduce blur while obtaining sufficient light
@@ -352,6 +371,8 @@ class FlirRecorder:
         # TODO: make this check more robust in the future
         if frame_rate == 60:
             binning = 2
+        else:
+            binning = 1
 
         config_params = {
             "jumbo_packet": True,
@@ -442,6 +463,7 @@ class FlirRecorder:
 
         for c in self.cams:
             print(f"Acquisition, Resulting, Exposure, DeviceLinkThroughputLimit: {c.AcquisitionFrameRate}, {c.AcquisitionResultingFrameRate}, {c.ExposureTime}, {c.DeviceLinkThroughputLimit} ")
+            print(c.BinningHorizontal,c.BinningVertical,c.Width,c.Height,c.DeviceSerialNumber)
 
         # schedule a command to start in 250 ms in the future
         self.cams[0].TimestampLatch()
