@@ -10,14 +10,6 @@ from functools import partial
 from multi_camera.analysis.camera import triangulate_point, reprojection_error, reconstruction_error, get_checkboard_3d
 
 
-def hash_names(x):
-    ''' Hash a list of camera names '''
-    import hashlib
-    x = list(np.sort(x))
-    x = ', '.join(x)
-    return hashlib.sha256(x.encode('utf-8')).hexdigest()[:10]
-
-
 class CheckerboardAccumulator:
     """
     Helper class to detect and store the checkerboards in a
@@ -612,6 +604,7 @@ def run_calibration(vid_base, vid_path=".", return_parsers=False, frame_skip=2, 
     import os
     import numpy as np
     from datetime import datetime
+    import json
 
     # search for files. expects them to be in the format vid_base.serial_number.mp4
     vids = []
@@ -622,8 +615,14 @@ def run_calibration(vid_base, vid_path=".", return_parsers=False, frame_skip=2, 
     vids.sort()
 
     cam_names = [os.path.split(v)[1].split(".")[1] for v in vids]
-    camera_hash = hash_names(cam_names)
-    print(f'Cam names: {cam_names} camera hash: {camera_hash}')
+
+    # Loading the JSON file corresponding to the calibration to get the hash
+    with open(os.path.join(vid_path,f"{vid_base}.json"),'r') as f:
+        output_json = json.load(f)
+
+    config_hash = output_json["camera_config_hash"]
+    
+    print(f'Cam names: {cam_names} camera config hash: {config_hash}')
 
     print(f"Found {len(vids)} videos. Now detecting checkerboards.")
     parsers = get_checkerboards(vids, max_frames=5000, skip=frame_skip, save_images=False,
@@ -660,7 +659,7 @@ def run_calibration(vid_base, vid_path=".", return_parsers=False, frame_skip=2, 
 
     entry = {
         "cal_timestamp": timestamp,
-        "camera_config_hash": camera_hash,
+        "camera_config_hash": config_hash,
         "num_cameras": len(cam_names),
         "camera_names": cam_names,
         "camera_calibration": params_dict,
