@@ -111,8 +111,13 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 RECORDING_BASE = "data"
-CONFIG_PATH = "/home/cbm/MultiCameraTracking/multi_camera_configs/"
-DEFAULT_CONFIG = os.path.join(CONFIG_PATH, "cotton_lab_config_20221109.yaml")
+CONFIG_PATH = "/configs/"
+DEFAULT_CONFIG = os.path.join(CONFIG_PATH, "cotton_lab_config_20230620.yaml")
+
+print(CONFIG_PATH)
+config_files = os.listdir(CONFIG_PATH)
+print(config_files)
+print([""] + [f for f in config_files if f.endswith(".yaml")])
 
 
 loop = asyncio.get_event_loop()
@@ -182,7 +187,8 @@ Server.handle_exit = AppStatus.handle_exit
 # Add a middleware to handle CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://10.30.77.141:3000", "http://jc-compute02.ric.org:3000"],
+    allow_origins=["http://localhost:3000","http://localhost:8000"],
+    # allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -425,7 +431,9 @@ async def get_recording_db(db=Depends(db_dependency)) -> List[ParticipantOut]:
 
 @api_router.get("/configs")
 async def get_configs():
+    print(CONFIG_PATH)
     config_files = os.listdir(CONFIG_PATH)
+    print(config_files)
     config_files = [""] + [f for f in config_files if f.endswith(".yaml")]
     return JSONResponse(content=config_files)
 

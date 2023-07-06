@@ -2,7 +2,7 @@ import React from 'react';
 import { useState, useEffect, useRef, createContext } from 'react';
 import axios from 'axios';
 
-const BASE_URL = 'jc-compute02.ric.org:8000/api/v1';
+const BASE_URL = 'localhost:8000/api/v1';
 const API_BASE_URL = `http://${BASE_URL}`;
 const WS_BASE_URL = `ws://${BASE_URL}/ws`;
 

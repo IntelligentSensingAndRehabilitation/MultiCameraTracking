@@ -15,6 +15,8 @@ import time
 import cv2
 import os
 import yaml
+import pandas as pd
+import hashlib
 
 
 # Data structures we will expose outside this library
@@ -99,6 +101,7 @@ def init_camera(
     throughput_limit: int = 125000000,
     resend_enable: bool = False,
     binning: int = 1,
+    exposure_time: int = 15000,
 ):
     """
     Initialize camera with settings for recording
@@ -118,14 +121,24 @@ def init_camera(
     # Initialize each available camera
     c.init()
 
+    # Resetting binning to 1 to allow for maximum frame size
+    c.BinningHorizontal = 1
+    c.BinningVertical = 1
+
+    # Ensuring height and width are set to maximum
+    c.Width = c.WidthMax
+    c.Height = c.HeightMax
+
     c.PixelFormat = "BayerRG8"  # BGR8 Mono8
+    
+    # Now applying desired binning to maximum frame size
     c.BinningHorizontal = binning
     c.BinningVertical = binning
 
     # use a fixed exposure time to ensure good synchronization. also want to keep this relatively
     # low to reduce blur while obtaining sufficient light
     c.ExposureAuto = "Off"
-    c.ExposureTime = 15000
+    c.ExposureTime = exposure_time
 
     # let the auto gain match the brightness across images as much as possible
     c.GainAuto = "Continuous"
@@ -246,6 +259,15 @@ class FlirRecorder:
         self.status_callback = status_callback
         self.set_status("Uninitialized")
 
+    def get_config_hash(self,yaml_content,hash_len=10):
+
+        # Sorting keys to ensure consistent hashing
+        file_str = json.dumps(yaml_content,sort_keys=True)
+        encoded_config = file_str.encode('utf-8')
+
+        # Create hash of encoded config file and return
+        return hashlib.sha256(encoded_config).hexdigest()[:hash_len]
+
     def _get_pyspin_system(self):
         # use this to ensure both calls with simple pyspin and locally use the same references
         simple_pyspin.list_cameras()
@@ -339,12 +361,27 @@ class FlirRecorder:
             # of cameras to select
             self.cams = [Camera(i, lock=True) for i in self.iface_cameras]
 
+        binning = 1
+        exposure_time = 15000
+
+        # Parse additional parameters from the config file
+        exposure_time = self.camera_config["acquisition-settings"]["exposure_time"]
+        frame_rate = self.camera_config["acquisition-settings"]["frame_rate"]
+
+        # Updating the binning needed to run at 60 Hz. 
+        # TODO: make this check more robust in the future
+        if frame_rate == 60:
+            binning = 2
+        else:
+            binning = 1
+
         config_params = {
             "jumbo_packet": True,
             "triggering": self.trigger,
             "throughput_limit": 125000000,
             "resend_enable": False,
-            "binning": 1,
+            "binning": binning,
+            "exposure_time": exposure_time,
         }
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(self.cams)) as executor:
@@ -425,8 +462,10 @@ class FlirRecorder:
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(self.cams)) as executor:
             l = list(executor.map(start_cam, range(len(self.cams))))
 
+        print("Acquisition, Resulting, Exposure, DeviceLinkThroughputLimit:")
         for c in self.cams:
-            print(f"Acquisition, Resulting, Exposure, DeviceLinkThroughputLimit: {c.AcquisitionFrameRate}, {c.AcquisitionResultingFrameRate}, {c.ExposureTime}, {c.DeviceLinkThroughputLimit} ")
+            print(f"{c.DeviceSerialNumber}: {c.AcquisitionFrameRate}, {c.AcquisitionResultingFrameRate}, {c.ExposureTime}, {c.DeviceLinkThroughputLimit} ")
+            print(f"Frame Size: {c.Width} {c.Height}")
 
         # schedule a command to start in 250 ms in the future
         self.cams[0].TimestampLatch()
@@ -492,7 +531,14 @@ class FlirRecorder:
         if self.preview_callback:
             self.preview_callback(None)
 
+        exposure_times = []
+        frame_rates = []
         for c in self.cams:
+            # Recording the final exposure times and requested frame rates for each camera
+            # Actual frame rate can be calculated from the timestamps in the output json
+            exposure_times.append(c.ExposureTime)
+            frame_rates.append(c.BinningHorizontal * 30)
+            # Stopping each camera
             c.stop()
 
         # Creating a dictionary to hold the contents of each camera's json queue
@@ -513,6 +559,11 @@ class FlirRecorder:
         if self.camera_config != "":
             output_json["meta_info"] = self.camera_config["meta-info"]
             output_json["camera_info"] = self.camera_config["camera-info"]
+            output_json["exposure_times"] = exposure_times
+            output_json["frame_rate_requested"] = frame_rates
+            camera_config_hash = self.get_config_hash(self.camera_config)
+            print("CONFIG HASH",camera_config_hash)
+            output_json["camera_config_hash"] = camera_config_hash
 
         if self.video_base_file is not None:
             # stop video writing threads and output json file
@@ -528,13 +579,22 @@ class FlirRecorder:
             # writing the json file for the current recording session
             json.dump(output_json, open(json_file, "w"))
 
-        ts = np.array(output_json["timestamps"])
-        dt = (ts - ts[0, 0]) / 1e9
-        spread = np.max(dt, axis=1) - np.min(dt, axis=1)
+        # Calculating metrics to determine drift
+        ts = pd.DataFrame(output_json["timestamps"])
+
+        # interpolating any timestamps that are 0s
+        ts.replace(0, np.nan, inplace=True)
+        ts.interpolate(method='linear', axis=0, limit=1, limit_direction='both', inplace=True)
+        initial_ts = ts.iloc[0,0]
+        dt = (ts - initial_ts) / 1e9
+        spread = dt.max(axis=1) - dt.min(axis=1)
+
+        ts['std'] = ts.std(axis=1) / 1e6
         if np.all(spread < 1e-6):
             print("Timestamps well aligned and clean")
         else:
             print(f"Timestamps showed a maximum spread of {np.max(spread) * 1000} ms")
+            print(f"Timestamp standard deviation {ts['std'].max() -  ts['std'].min()} ms")
 
         self.set_status("Idle")
 
