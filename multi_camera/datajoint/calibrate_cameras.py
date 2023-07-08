@@ -22,40 +22,42 @@ class Calibration(dj.Manual):
     reprojection_error   : float
     calibration_points   : longblob
     calibration_shape    : longblob
+    calibration_type=""  : varchar(50)
     """
 
 
 def run_calibration(vid_base, vid_path=None):
-
     from ..analysis.calibration import run_calibration
 
     if vid_path is None:
         import os
+
         vid_path, vid_base = os.path.split(vid_base)
 
     print(vid_path, vid_base)
 
     entry = run_calibration(vid_base, vid_path)
 
-    if np.isnan(entry['reprojection_error']):
-        raise Exception(f'Calibration failed: {entry}')
+    if np.isnan(entry["reprojection_error"]):
+        raise Exception(f"Calibration failed: {entry}")
 
     if entry["reprojection_error"] > 0.3:
         print(entry)
-        print(f'The error was {entry["reprojection_error"]}. Are you sure you would like to store this in the database? [Yes/No]')
+        print(
+            f'The error was {entry["reprojection_error"]}. Are you sure you would like to store this in the database? [Yes/No]'
+        )
 
         response = input()
         if response[0].upper() != "Y":
             print("Cancelling")
             return
 
-    entry['recording_base'] = vid_base
+    entry["recording_base"] = vid_base
 
     Calibration.insert1(entry)
 
 
 if __name__ == "__main__":
-
     import argparse
 
     parser = argparse.ArgumentParser(description="Compute calibration from specified videos and insert into database")
@@ -65,4 +67,4 @@ if __name__ == "__main__":
 
     run_calibration(vid_base=args.vid_base, vid_path=args.vid_path)
 
-    print('Complete')
+    print("Complete")
