@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+from typing import Callable, List, Tuple, Dict, Optional, Union
 import jax
 import jaxopt
 from jax import vmap, jit
@@ -115,12 +116,13 @@ class CheckerboardAccumulator:
                 | cv2.CALIB_FIX_K4
                 | cv2.CALIB_FIX_K5
                 | cv2.CALIB_ZERO_TANGENT_DIST
+                | cv2.CALIB_FIX_PRINCIPAL_POINT
             )
 
-        print(h, w, len(imgpoints))
+        initial_matrix = np.array([[1000, 0, h / 2], [0, 1000, w / 2], [0, 0, 1]])
 
         _, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(
-            objpoints, imgpoints, (h, w), None, np.zeros((5,)), flags=flags
+            objpoints, imgpoints, (h, w), initial_matrix, np.zeros((5,)), flags=flags
         )
         newcameramtx, roi = cv2.getOptimalNewCameraMatrix(mtx, dist, (w, h), 1, (w, h))
 
@@ -195,6 +197,51 @@ def get_checkerboards(filenames, max_frames=None, skip=1, multithread=False, **k
     return parsers
 
 
+def get_checkerboard_points(parsers: List[CheckerboardAccumulator]):
+    """
+    Extract the checkerboard points from a list of parsers
+    """
+
+    frames = np.sort(np.unique(np.concatenate([p.frames for p in parsers])))
+    N = parsers[0].objp.shape[0]  # number of coordinates in pattern
+
+    checkerboard_points = np.zeros((len(parsers), len(frames), N, 2)) * np.nan
+
+    # convert format from the parser to a matrix of observations with nan for missing
+    for i, p in enumerate(parsers):
+        for j, f in enumerate(frames):
+            idx = np.where(p.frames == f)[0]
+            if len(idx) == 1:
+                checkerboard_points[i, j, :, :] = p.corners[idx[0]][:, 0, :]
+
+    N, frames, _, _ = checkerboard_points.shape
+    return checkerboard_points
+
+
+def filter_keypoints(keypoints_2d, min_visible=3):
+    """
+    Only keep the times where keypoints are visible from multiple perspectives
+    """
+
+    visible = np.sum(~np.isnan(keypoints_2d[:, :, 0, 0]), axis=0)
+    return keypoints_2d[:, visible >= min_visible]
+
+
+def extract_origin(camera_params, checkerboard_points):
+    cal3d = triangulate_point(camera_params, checkerboard_points[:, 0])
+
+    x0 = cal3d[0]
+    x = cal3d[5] - x0
+    z = cal3d[18] - x0
+
+    x = x / np.linalg.norm(x)
+    z = -z / np.linalg.norm(z)
+    y = -np.cross(x, z)
+
+    board_rotation = np.stack([x, y, z])
+    return x0, board_rotation
+
+
 def shift_calibration(camera_params, offset, rotation=np.eye(3), zoffset=None):
     from jaxlie import SO3
 
@@ -214,7 +261,7 @@ def shift_calibration(camera_params, offset, rotation=np.eye(3), zoffset=None):
     return camera_params
 
 
-def initialize_group_calibration(parsers):
+def initialize_group_calibration(parsers, max_cv2_frames=20):
     """
     Use detected checkerboards to initialize calibration parameters
 
@@ -227,73 +274,128 @@ def initialize_group_calibration(parsers):
         checkerboard_points - matrix of 2D corners (cameras X points X 2)
     """
 
+    import itertools
     from jax import jit, vmap
     from jax import numpy as jnp
     from jaxlie import SO3, SE3
 
-    frames = np.sort(np.unique(np.concatenate([p.calibrated_frames for p in parsers])))
-    N = parsers[0].objp.shape[0]  # number of coordinates in pattern
+    cals = [p.calibrate_camera(max_frames=max_cv2_frames) for p in parsers]
 
-    checkerboard_points = np.zeros((len(parsers), len(frames), N, 2)) * np.nan
-    rvecs = np.zeros((len(parsers), len(frames), 3)) * np.nan
-    tvecs = np.zeros((len(parsers), len(frames), 3)) * np.nan
-    cals = [p.calibrate_camera(flags=0) for p in parsers]
+    # get the checkerboard points
+    checkerboard_points = get_checkerboard_points(parsers)
 
-    # convert format from the parser to a matrix of observations with nan for missing
-    for i, p in enumerate(parsers):
-        for j, f in enumerate(frames):
-            idx = np.where(p.calibrated_frames == f)[0]
-            if len(idx) == 1:
-                checkerboard_points[i, j, :, :] = p.corners[idx[0]][:, 0, :]
-                rvecs[i, j] = cals[i]["rvecs"][idx[0]][:, 0]
-                tvecs[i, j] = cals[i]["tvecs"][idx[0]][:, 0]
+    # make a map of the first pairs of frames where a checkerboard was found on both
+    found = ~np.isnan(checkerboard_points[:, :, 0, 0])
 
-    N, frames, _, _ = checkerboard_points.shape
+    N = found.shape[0]
+    matches = np.zeros((N, N), dtype=object)
+    nonzero_matches = np.zeros((N, N), dtype=bool)
 
-    camera_rvecs = np.ones((N, 3)) * np.nan
-    camera_tvecs = np.ones((N, 3)) * np.nan
+    for i in range(N):
+        matches[i, i] = 0
+        for j in range(i + 1, N):
+            both = np.logical_and(found[i], found[j])
+            idx = np.where(both)[0]
+            if len(idx) > 0:
+                # if idx is greater than 10, then take an even spaced 10
+                if len(idx) > max_cv2_frames:
+                    idx = idx[np.linspace(0, len(idx) - 1, max_cv2_frames).astype(int)]
 
-    checkerboard_rvecs = np.empty((frames, 3))
-    checkerboard_tvecs = np.empty((frames, 3))
+                matches[i, j] = idx
+                matches[j, i] = idx
 
-    def make_M(rvec, tvec):
-        return SE3.from_rotation_and_translation(SO3.exp(jnp.array(rvec)), jnp.array(tvec))
+                nonzero_matches[i, j] = True
+                nonzero_matches[j, i] = True
 
-    for i in range(frames):
-        if i == 0:
-            checkerboard_rvecs[i, :] = 0
-            checkerboard_tvecs[i, :] = 0
-        else:
-            for j in range(N):
-                if ~np.isnan(camera_rvecs[j, 0]) and ~np.isnan(rvecs[j, i, 0]):
-                    T = (
-                        make_M(rvecs[j, i], tvecs[j, i]).inverse() @ make_M(camera_rvecs[j], camera_tvecs[j])
-                    ).inverse()
+    # find the row with the most calibrated cameras to call the origin
+    origin = np.argmax(np.sum(nonzero_matches, axis=0))
+    print(f"Using camera {origin} as the origin")
+    initialized = np.zeros((N,), dtype=bool)
+    initialized[origin] = True
 
-                    checkerboard_rvecs[i] = T.rotation().log()
-                    checkerboard_tvecs[i] = T.translation()
-                    break
-            pass
+    Rs = np.zeros((N, 3, 3))
+    Ts = np.zeros((N, 3))
 
-        checkerboardT = make_M(checkerboard_rvecs[i, :], checkerboard_tvecs[i, :])
+    Rs[origin] = np.eye(3)  # establish the first camera as the reference
 
-        for j in range(N):
-            if np.isnan(camera_rvecs[j, 0]) and ~np.isnan(rvecs[j, i, 0]):
-                camT = make_M(rvecs[j, i], tvecs[j, i])
-                T = camT @ checkerboardT.inverse()
+    # we iterate through this multiple times to try and find any paths between
+    # cameras to the origin camera
 
-                camera_rvecs[j, :] = T.rotation().log()
-                camera_tvecs[j, :] = T.translation()
+    for i in itertools.chain.from_iterable(itertools.repeat(np.arange(0, N), N)):
+        # iterate through cameras as a reference
 
-    # Initialize params from my code
+        if ~initialized[i]:
+            continue
+
+        for j in range(0, N):
+            if initialized[j]:
+                # no need to double compute
+                continue
+
+            if type(matches[i, j]) == np.ndarray:
+                print(f"Linking {i} -> {j}")
+                p1 = parsers[i]
+                p2 = parsers[j]
+
+                frames = matches[i, j]
+
+                objpoints = [p1.objp] * len(frames)
+
+                idx1 = [p1.frames.index(f) for f in frames]
+                im1points = [p1.corners[i] for i in idx1]
+
+                idx2 = [p2.frames.index(f) for f in frames]
+                im2points = [p2.corners[i] for i in idx2]
+
+                h, w, _ = p1.shape
+
+                cal1 = cals[i]
+                cal2 = cals[j]
+
+                stereocalib_criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 1000, 1e-6)
+                stereocalib_flags = cv2.CALIB_USE_INTRINSIC_GUESS
+
+                res = cv2.stereoCalibrate(
+                    objpoints,
+                    im1points,
+                    im2points,
+                    cal1["mtx"].copy(),
+                    cal1["dist"].copy(),
+                    cal2["mtx"].copy(),
+                    cal2["dist"].copy(),
+                    (h, w),
+                    criteria=stereocalib_criteria,
+                    flags=stereocalib_flags,
+                )
+
+                retval, cameraMatrix1, distCoeffs1, cameraMatrix2, distCoeffs2, R, T, E, F = res
+
+                # adjust rotation and translation based on the reference camera
+                T = T[:, 0] + R @ Ts[i]
+                R = R @ Rs[i]
+
+                Rs[j] = R
+                Ts[j] = T
+
+                initialized[j] = True
+
+    if np.any(~initialized):
+        print("Not all cameras initialized. Calibration graph not fully connected")
+
+    # now put it the standard structure
     camera_params = {
         "mtx": np.array([[c["mtx"][0, 0], c["mtx"][1, 1], c["mtx"][0, 2], c["mtx"][1, 2]] for c in cals]) / 1000.0,
         "dist": np.array([c["dist"].reshape((-1)) for c in cals]),
-        "rvec": camera_rvecs,
-        "tvec": camera_tvecs / 1000.0,
+        "rvec": vmap(lambda x: SO3.from_matrix(x).log())(Rs),
+        "tvec": Ts / 1000.0,
     }
 
-    checkerboard_params = {"rvecs": checkerboard_rvecs, "tvecs": checkerboard_tvecs / 1000.0}
+    # TODO: get better initial estimates of checkerboard rvecs
+    N = checkerboard_points.shape[1]
+    checkerboard_rvecs = np.zeros((N, 3))
+    checkerboard_tvecs = np.zeros((N, 3))
+
+    checkerboard_params = {"rvecs": checkerboard_rvecs, "tvecs": checkerboard_tvecs}
 
     return camera_params, checkerboard_params, checkerboard_points
 
@@ -373,7 +475,7 @@ def update_camera_cycle(camera_params, checkerboard_points, stepsize=0.0, iterat
 
 
 # @partial(jit, static_argnums=(5,))
-def update_combined(params, checkerboard_points, objp, stepsize=0.0, iterations=10, cycle=False):
+def update_combined(params, checkerboard_points, objp, stepsize=0.0, iterations=10, cycle=False, verbose=False):
     @jit
     def regularization(params):
         matrix_loss = jnp.sum(jax.nn.relu(-params["camera_params"]["mtx"])) * 1e5  # non-negative
@@ -388,13 +490,14 @@ def update_combined(params, checkerboard_points, objp, stepsize=0.0, iterations=
         l = camera_loss(camera_params, checkerboard_params, checkerboard_points, objp)
         l = l + checkerboard_loss(checkerboard_params, camera_params, checkerboard_points, objp)
         if cycle:
+            # this tends to be too unstable during optimization
             l = l + cycle_loss(camera_params, checkerboard_points)
 
-        l = l + regularization(params)
+        # l = l + regularization(params)
         return l
 
     # solver = jaxopt.ScipyMinimize(fun=loss, maxiter=iterations, verbose=True) #, stepsize=stepsize)
-    solver = jaxopt.GradientDescent(fun=loss, maxiter=iterations, verbose=True, stepsize=stepsize, acceleration=False)
+    solver = jaxopt.GradientDescent(fun=loss, maxiter=iterations, verbose=verbose, stepsize=stepsize, acceleration=True)
     # solver = jaxopt.ProximalGradient(fun=loss, prox=regularization, maxiter=iterations, verbose=True, stepsize=stepsize)
     return solver.run(params)[0]
 
@@ -669,3 +772,155 @@ def run_calibration(vid_base, vid_path=".", return_parsers=False, frame_skip=2, 
         return entry, parsers
 
     return entry
+
+
+def cycle_residual_fun(camera_params, keypoints_2d, nonlinear_threshold=1000, sigma=250):
+    """
+    Compute the residual distance between reconstructed and reprojected keypoints
+
+    Note: this is often unstable unless very clean keypoints and close to the right
+    initial conditions. Likely because the triangulation process is going to be sensitive
+    to these types of errors
+
+    Parameters:
+        camera_params: parameters of the camera (pose, intrinsic parameters etc.)
+        keypoints_2d: observed 2D keypoints (cameras x time x joints x 2 or 3)
+
+    If keypoints has a confidence, will use robust triangulation. Also does not score the
+    residual for any unobserved keypoints, which should be NaN.
+
+    Returns: the distance between the predicted and observed 2D keypoints
+    """
+
+    if keypoints_2d.shape[-1] == 3:
+        est_keypoints_3d, keypoint_weights = robust_triangulate_points(
+            camera_params, keypoints_2d, return_weights=True, sigma=sigma
+        )
+        keypoints_2d = keypoints_2d[..., :2]
+        # normalize keypoint_weights along the last axis
+        keypoint_weights = keypoint_weights / jnp.sum(keypoint_weights, axis=-1, keepdims=True)
+        keypoint_weights = (keypoint_weights > 0.5) * 1.0
+        keypoint_weights = jax.lax.stop_gradient(keypoint_weights)
+
+    else:
+        est_keypoints_3d = triangulate_point(camera_params, keypoints_2d)
+        keypoint_weights = 1.0
+
+    # backpropgating through SVD takes a huge amount of time
+    est_keypoints_3d = jax.lax.stop_gradient(est_keypoints_3d)
+    residuals = reprojection_error(camera_params, keypoints_2d, est_keypoints_3d)
+
+    # now any points that are nan in keypoints_2d where not seen and should be zeroed in the
+    # residuals
+    mask = jnp.isnan(keypoints_2d)
+    residuals = residuals * ~mask
+
+    if False:
+        residuals = jnp.linalg.norm(residuals, axis=-1)
+
+        residuals = residuals * keypoint_weights
+
+        # add some non linearities for outliers and such
+        residuals = residuals**0.5
+        residuals = residuals * (residuals < nonlinear_threshold) * residuals + (residuals >= nonlinear_threshold) * (
+            nonlinear_threshold + (residuals - nonlinear_threshold) * 1e-5
+        )
+
+    # mask any nan values that still sneak through :(
+    residuals = jnp.nan_to_num(residuals)
+
+    return residuals
+
+
+def make_residual_fun_wrapper(fun: Callable, initial_params: Dict, exclude_parameters: List[str] = [], reduce=False):
+    """
+    Wraps the residual function to serialize/deserialize the parameters
+
+    Parameters:
+        fun: the residual function to wrap
+        initial_params: the initial parameters to use
+        exclude_parameters: parameters to exclude from the serialization
+
+    Returns:
+        - Wrapped residual function
+        - Initial vectorized parameters
+    """
+
+    import copy
+    import jax.flatten_util
+
+    # create a dictionary stripping out all elements in exclude_parameters
+    params_dict = {k: v for k, v in initial_params.items() if k not in exclude_parameters}
+    excluded_dict = {k: v for k, v in initial_params.items() if k in exclude_parameters}
+
+    x, params_unpack = jax.flatten_util.ravel_pytree(params_dict)
+
+    def restore_params(x):
+        params = params_unpack(x)
+        params = {**params, **excluded_dict}
+        return params
+
+    def residual_fun(x, *arg, **kwargs):
+        params = restore_params(x)
+        residuals = fun(params, *arg, **kwargs)
+        residuals = residuals.reshape(-1)
+
+        if reduce:
+            residuals = jnp.mean(residuals**2)
+
+        return residuals
+
+    return residual_fun, x, restore_params
+
+
+def new_calibrate(
+    parsers: List[CheckerboardAccumulator], max_frames_init: int = 30, solver="LM", iterations=10, initial_params=None
+):
+    import jaxopt
+
+    if initial_params is None:
+        if True:
+            cals = [p.calibrate_camera(max_frames=max_frames_init) for p in parsers]
+            N = len(cals)
+
+            camera_rvecs = np.zeros((N, 3))
+            camera_tvecs = np.random.normal(size=(N, 3))
+
+            initial_params = {
+                "mtx": np.array([[c["mtx"][0, 0], c["mtx"][1, 1], c["mtx"][0, 2], c["mtx"][1, 2]] for c in cals])
+                / 1000.0,
+                "dist": np.array([c["dist"].reshape((-1)) for c in cals]),
+                "rvec": camera_rvecs,
+                "tvec": camera_tvecs / 1000.0,
+            }
+
+        else:
+            initial_params = initialize_group_calibration(parsers, max_frames=max_frames_init)[0]
+
+    # print("initial_params", initial_params)
+
+    checkerboard_points = get_checkerboard_points(parsers)
+    checkerboard_points_filtered = filter_keypoints(checkerboard_points, 3)
+
+    if checkerboard_points_filtered.shape[1] > 20:
+        checkerboard_points_filtered = checkerboard_points_filtered[:, ::10]
+
+    print(checkerboard_points_filtered.shape)
+
+    if solver == "LM":
+        residual_fun, x, restore_params = make_residual_fun_wrapper(
+            cycle_residual_fun, initial_params, exclude_parameters=["mtx", "dist"], reduce=False
+        )
+        cycle_solver = jaxopt.LevenbergMarquardt(residual_fun=residual_fun, verbose=True, maxiter=iterations)
+
+    else:
+        residual_fun, x, restore_params = make_residual_fun_wrapper(
+            cycle_residual_fun, initial_params, exclude_parameters=["mtx", "dist"], reduce=True
+        )
+
+        cycle_solver = jaxopt.LBFGS(fun=residual_fun, maxiter=iterations, verbose=True)
+
+    res = cycle_solver.run(x, keypoints_2d=checkerboard_points_filtered)
+    print(res)
+
+    return restore_params(res.params)
