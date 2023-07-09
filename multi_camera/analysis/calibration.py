@@ -283,6 +283,7 @@ def initialize_group_calibration(parsers, max_cv2_frames=50):
 
     # get the checkerboard points
     checkerboard_points = get_checkerboard_points(parsers)
+    checkerboard_frames = np.sort(np.unique(np.concatenate([p.frames for p in parsers])))
 
     # make a map of the first pairs of frames where a checkerboard was found on both
     found = ~np.isnan(checkerboard_points[:, :, 0, 0])
@@ -300,7 +301,7 @@ def initialize_group_calibration(parsers, max_cv2_frames=50):
                 # if idx is greater than 10, then take an even spaced 10
                 if len(idx) > max_cv2_frames:
                     idx = idx[np.linspace(0, len(idx) - 1, max_cv2_frames).astype(int)]
-
+                idx = checkerboard_frames[idx]
                 matches[i, j] = idx
                 matches[j, i] = idx
 
@@ -333,11 +334,12 @@ def initialize_group_calibration(parsers, max_cv2_frames=50):
                 continue
 
             if type(matches[i, j]) == np.ndarray:
-                print(f"Linking {i} -> {j}")
                 p1 = parsers[i]
                 p2 = parsers[j]
 
                 frames = matches[i, j]
+
+                print(f"Linking {i} -> {j} using {len(frames)} frames")
 
                 objpoints = [p1.objp] * len(frames)
 
@@ -728,14 +730,8 @@ def run_calibration(vid_base, vid_path=".", return_parsers=False, frame_skip=2, 
     if jax_cal:
         init_camera_params, init_checkerboard_params, checkerboard_points = initialize_group_calibration(parsers)
 
-        # only process frames where checkerboard is seen by multiple cameras
-        checkerboard_points, init_checkerboard_params = filter_calibration(
-            checkerboard_points, init_checkerboard_params
-        )
+        camera_params = checkerboard_bundle_calibrate(parsers, initial_params=init_camera_params, iterations=100)
 
-        camera_params, checkerboard_params = refine_calibration(
-            init_camera_params, init_checkerboard_params, checkerboard_points, objp, **kwargs
-        )
         error = float(checkerboard_loss(checkerboard_params, camera_params, checkerboard_points, objp))
 
     else:
@@ -834,6 +830,31 @@ def cycle_residual_fun(camera_params, keypoints_2d, nonlinear_threshold=1000, si
     return residuals
 
 
+def keypoint3d_reprojection_residuals(params, keypoints2d):
+    """
+    Compute the residual distance between estimated keypoints reprojected
+
+    Parameters:
+        params: parameters of the camera and also the checkerboard orientation
+        checkerboard_points: observed 2D keypoints (cameras x time x joints x 2 or 3)
+        checkerboard_shape: the shape of the checkerboard
+    """
+
+    keypoints3d = params["keypoints3d"]
+
+    residuals = reprojection_error(params, keypoints2d, keypoints3d)
+
+    mask = jnp.isnan(keypoints2d)
+    residuals = residuals * ~mask
+
+    residuals = jnp.abs(residuals)
+
+    # mask any nan values that still sneak through :(
+    residuals = jnp.nan_to_num(residuals)
+
+    return residuals
+
+
 def checkerboard_reprojection_residuals(params, checkerboard_points, checkerboard_shape):
     """
     Compute the residual distance between reconstructed and reprojected checkboard
@@ -904,10 +925,22 @@ def make_residual_fun_wrapper(fun: Callable, initial_params: Dict, exclude_param
     return residual_fun, x, restore_params
 
 
-def new_calibrate(
-    parsers: List[CheckerboardAccumulator], max_frames_init: int = 30, iterations=25, initial_params=None
+def checkerboard_bundle_calibrate(
+    parsers: List[CheckerboardAccumulator], max_frames_init: int = 30, iterations=25, initial_params=None, threshold=0.2
 ):
-    import jaxopt
+    """
+    Calibrate the camera and checkerboard using bundle adjustment
+
+    This estimates the position and rotation of the checkerboard with the
+    camera parameters. Uses an annealing schedule to add in the camera
+    calibration matrix and distortion parameters.
+
+    Parameters:
+        parsers: the list of CheckerboardAccumulator parsers to use
+        max_frames_init: the maximum number of frames to use for initialization
+        iterations: the number of iterations to run
+        initial_params: the initial parameters to use (optional)
+    """
 
     if initial_params is None:
         initial_params = initialize_group_calibration(parsers, max_frames=max_frames_init)[0]
@@ -923,7 +956,6 @@ def new_calibrate(
     checkerboard_tvecs = np.zeros((N, 3))
 
     checkerboard_params = {"rvecs": checkerboard_rvecs, "tvecs": checkerboard_tvecs}
-
     params = {**initial_params, **{f"checkerboard_{k}": v for k, v in checkerboard_params.items()}}
 
     residual_fun, x, restore_params = make_residual_fun_wrapper(
@@ -934,7 +966,9 @@ def new_calibrate(
     res = residual_fun(x, checkerboard_points=checkerboard_points, checkerboard_shape=parsers[0].objp)
     print("Initial residuals: ", res)
 
-    optimizer = jaxopt.GradientDescent(fun=residual_fun, verbose=False, maxiter=5000)  # works well
+    optimizer = jaxopt.GradientDescent(
+        fun=residual_fun, verbose=False, maxiter=10000, acceleration=True, stepsize=0.0
+    )  # works well
 
     for i in range(iterations):
         res = optimizer.run(x, checkerboard_points=checkerboard_points, checkerboard_shape=parsers[0].objp)
@@ -948,14 +982,17 @@ def new_calibrate(
         # monitor the cycle error, but it's not easy to use directly during optimization
         print(f"Iteration {i} error: {err}, cycle error: {cycle_err}")
 
-        if i == 5:
+        if i == iterations // 4:
+            print("Adding distortion parameters")
             residual_fun, x, restore_params = make_residual_fun_wrapper(
                 checkerboard_reprojection_residuals, camera_params, ["mtx"], reduce=True
             )
             residual_fun = jax.jit(residual_fun)
             optimizer = jaxopt.GradientDescent(fun=residual_fun, verbose=False, maxiter=5000)
 
-        if i == 10:
+        if i == (2 * iterations) // 4:
+            print("Adding camera calibration matrix")
+
             # now allow the camera calibration matrix to change
             residual_fun, x, restore_params = make_residual_fun_wrapper(
                 checkerboard_reprojection_residuals,
@@ -966,7 +1003,9 @@ def new_calibrate(
             residual_fun = jax.jit(residual_fun)
             optimizer = jaxopt.GradientDescent(fun=residual_fun, verbose=False, maxiter=5000, stepsize=-1.0)
 
-        if i == 15:
+        if i == (3 * iterations) // 4:
+            print("Allowing everything to change")
+
             # now allow the everything to change
             residual_fun, x, restore_params = make_residual_fun_wrapper(
                 checkerboard_reprojection_residuals,
@@ -976,13 +1015,90 @@ def new_calibrate(
             residual_fun = jax.jit(residual_fun)
             optimizer = jaxopt.GradientDescent(fun=residual_fun, verbose=False, maxiter=5000, stepsize=-1.0)
 
-        if i == 20:
-            optimizer = jaxopt.NonlinearCG(fun=residual_fun, verbose=False, maxiter=10, stepsize=-1.0)
+        # if i == 20:
+        #    optimizer = jaxopt.NonlinearCG(fun=residual_fun, verbose=False, maxiter=10)
 
-        if err < 0.2:
+        if err < threshold:
             break
 
     camera_params.pop("checkerboard_rvecs")
     camera_params.pop("checkerboard_tvecs")
+
+    return camera_params
+
+
+def bundle_calibrate(initial_params: Dict, keypoints2d: np.ndarray, iterations=25, threshold=0.2):
+    """
+    Calibrate the camera using bundle adjustment for any 2D keypoints
+
+    Compared to checkerboard_bundle_calibrate, this function does not constrain
+    the keypoints to any geometry, so this can be applied to detection such as
+    people in the scene.
+
+    Parameters:
+        initial_params: the initial parameters to use
+        keypoints2d: the 2D keypoints to use
+        iterations: the number of iterations to run
+    """
+
+    keypoints3d = triangulate_point(initial_params, keypoints2d)
+    params = {"keypoints3d": keypoints3d, **initial_params}
+
+    residual_fun, x, restore_params = make_residual_fun_wrapper(
+        keypoint3d_reprojection_residuals, params, ["mtx", "dist"], reduce=True
+    )
+    residual_fun = jax.jit(residual_fun)
+
+    res = residual_fun(x, keypoints2d=keypoints2d)
+    print("Initial residuals: ", res)
+
+    optimizer = jaxopt.GradientDescent(
+        fun=residual_fun, verbose=False, maxiter=5000, stepsize=1e-8, acceleration=True
+    )  # works well
+
+    for i in range(iterations):
+        res = optimizer.run(x, keypoints2d=keypoints2d)
+        x = res.params
+
+        err = residual_fun(res.params, keypoints2d=keypoints2d)
+        camera_params = restore_params(res.params)
+        cycle_err = cycle_residual_fun(camera_params, keypoints2d)
+        cycle_err = (cycle_err**2).mean()
+
+        # monitor the cycle error, but it's not easy to use directly during optimization
+        print(f"Iteration {i} error: {err}, cycle error: {cycle_err}")
+
+        if i == (iterations // 4):
+            residual_fun, x, restore_params = make_residual_fun_wrapper(
+                keypoint3d_reprojection_residuals, camera_params, ["mtx"], reduce=True
+            )
+            residual_fun = jax.jit(residual_fun)
+            optimizer = jaxopt.GradientDescent(fun=residual_fun, verbose=False, maxiter=5000)
+
+        if i == (2 * iterations) // 4:
+            # now allow the camera calibration matrix to change
+            residual_fun, x, restore_params = make_residual_fun_wrapper(
+                keypoint3d_reprojection_residuals,
+                camera_params,
+                ["checkerboard_rvecs", "checkerboard_tvecs"],
+                reduce=True,
+            )
+            residual_fun = jax.jit(residual_fun)
+            optimizer = jaxopt.GradientDescent(fun=residual_fun, verbose=False, maxiter=5000, stepsize=-1.0)
+
+        if i == (3 * iterations) // 4:
+            # now allow the everything to change
+            residual_fun, x, restore_params = make_residual_fun_wrapper(
+                keypoint3d_reprojection_residuals,
+                camera_params,
+                reduce=True,
+            )
+            residual_fun = jax.jit(residual_fun)
+            optimizer = jaxopt.GradientDescent(fun=residual_fun, verbose=False, maxiter=5000, stepsize=-1.0)
+
+        if err < threshold:
+            break
+
+    camera_params.pop("keypoints3d")
 
     return camera_params
