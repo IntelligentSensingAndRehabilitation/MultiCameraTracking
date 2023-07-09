@@ -261,7 +261,7 @@ def shift_calibration(camera_params, offset, rotation=np.eye(3), zoffset=None):
     return camera_params
 
 
-def initialize_group_calibration(parsers, max_cv2_frames=20):
+def initialize_group_calibration(parsers, max_cv2_frames=50):
     """
     Use detected checkerboards to initialize calibration parameters
 
@@ -453,7 +453,7 @@ def cycle_loss(camera_params, checkerboard_points):
 @partial(jit, static_argnums=(4, 5))
 def update_checkerboard(checkerboard_params, camera_params, checkerboard_points, objp, stepsize=0.0, iterations=10):
     checkerboard_solver = jaxopt.GradientDescent(
-        fun=checkerboard_loss, maxiter=iterations, verbose=False, stepsize=stepsize
+        fun=checkerboard_loss, maxiter=iterations, verbose=False, stepsize=stepsize, acceleration=True
     )
     return checkerboard_solver.run(
         checkerboard_params, camera_params=camera_params, checkerboard_points=checkerboard_points, objp=objp
@@ -462,7 +462,9 @@ def update_checkerboard(checkerboard_params, camera_params, checkerboard_points,
 
 @partial(jit, static_argnums=(4, 5))
 def update_camera(checkerboard_params, camera_params, checkerboard_points, objp, stepsize=0.0, iterations=10):
-    camera_solver = jaxopt.GradientDescent(fun=camera_loss, maxiter=iterations, verbose=False, stepsize=stepsize)
+    camera_solver = jaxopt.GradientDescent(
+        fun=camera_loss, maxiter=iterations, verbose=False, stepsize=stepsize, acceleration=True
+    )
     return camera_solver.run(
         camera_params, checkerboard_params=checkerboard_params, checkerboard_points=checkerboard_points, objp=objp
     )[0]
@@ -832,6 +834,35 @@ def cycle_residual_fun(camera_params, keypoints_2d, nonlinear_threshold=1000, si
     return residuals
 
 
+def checkerboard_reprojection_residuals(params, checkerboard_points, checkerboard_shape):
+    """
+    Compute the residual distance between reconstructed and reprojected checkboard
+
+    Parameters:
+        params: parameters of the camera and also the checkerboard orientation
+        checkerboard_points: observed 2D keypoints (cameras x time x joints x 2 or 3)
+        checkerboard_shape: the shape of the checkerboard
+    """
+    checkerboard_rvecs = params["checkerboard_rvecs"]
+    checkerboard_tvecs = params["checkerboard_tvecs"]
+
+    estimated_3d_points = vmap(lambda a, b: get_checkboard_3d(a, b, checkerboard_shape))(
+        checkerboard_rvecs, checkerboard_tvecs
+    )
+
+    residuals = reprojection_error(params, checkerboard_points, estimated_3d_points)
+
+    mask = jnp.isnan(checkerboard_points)
+    residuals = residuals * ~mask
+
+    residuals = jnp.abs(residuals)
+
+    # mask any nan values that still sneak through :(
+    residuals = jnp.nan_to_num(residuals)
+
+    return residuals
+
+
 def make_residual_fun_wrapper(fun: Callable, initial_params: Dict, exclude_parameters: List[str] = [], reduce=False):
     """
     Wraps the residual function to serialize/deserialize the parameters
@@ -866,7 +897,7 @@ def make_residual_fun_wrapper(fun: Callable, initial_params: Dict, exclude_param
         residuals = residuals.reshape(-1)
 
         if reduce:
-            residuals = jnp.mean(residuals**2)
+            residuals = jnp.mean(residuals)
 
         return residuals
 
@@ -874,53 +905,84 @@ def make_residual_fun_wrapper(fun: Callable, initial_params: Dict, exclude_param
 
 
 def new_calibrate(
-    parsers: List[CheckerboardAccumulator], max_frames_init: int = 30, solver="LM", iterations=10, initial_params=None
+    parsers: List[CheckerboardAccumulator], max_frames_init: int = 30, iterations=25, initial_params=None
 ):
     import jaxopt
 
     if initial_params is None:
-        if True:
-            cals = [p.calibrate_camera(max_frames=max_frames_init) for p in parsers]
-            N = len(cals)
-
-            camera_rvecs = np.zeros((N, 3))
-            camera_tvecs = np.random.normal(size=(N, 3))
-
-            initial_params = {
-                "mtx": np.array([[c["mtx"][0, 0], c["mtx"][1, 1], c["mtx"][0, 2], c["mtx"][1, 2]] for c in cals])
-                / 1000.0,
-                "dist": np.array([c["dist"].reshape((-1)) for c in cals]),
-                "rvec": camera_rvecs,
-                "tvec": camera_tvecs / 1000.0,
-            }
-
-        else:
-            initial_params = initialize_group_calibration(parsers, max_frames=max_frames_init)[0]
+        initial_params = initialize_group_calibration(parsers, max_frames=max_frames_init)[0]
 
     # print("initial_params", initial_params)
 
     checkerboard_points = get_checkerboard_points(parsers)
     checkerboard_points_filtered = filter_keypoints(checkerboard_points, 3)
 
-    if checkerboard_points_filtered.shape[1] > 20:
-        checkerboard_points_filtered = checkerboard_points_filtered[:, ::10]
+    # TODO: get better initial estimates of checkerboard rvecs
+    N = checkerboard_points.shape[1]
+    checkerboard_rvecs = np.zeros((N, 3))
+    checkerboard_tvecs = np.zeros((N, 3))
 
-    print(checkerboard_points_filtered.shape)
+    checkerboard_params = {"rvecs": checkerboard_rvecs, "tvecs": checkerboard_tvecs}
 
-    if solver == "LM":
-        residual_fun, x, restore_params = make_residual_fun_wrapper(
-            cycle_residual_fun, initial_params, exclude_parameters=["mtx", "dist"], reduce=False
-        )
-        cycle_solver = jaxopt.LevenbergMarquardt(residual_fun=residual_fun, verbose=True, maxiter=iterations)
+    params = {**initial_params, **{f"checkerboard_{k}": v for k, v in checkerboard_params.items()}}
 
-    else:
-        residual_fun, x, restore_params = make_residual_fun_wrapper(
-            cycle_residual_fun, initial_params, exclude_parameters=["mtx", "dist"], reduce=True
-        )
+    residual_fun, x, restore_params = make_residual_fun_wrapper(
+        checkerboard_reprojection_residuals, params, ["mtx", "dist"], reduce=True
+    )
+    residual_fun = jax.jit(residual_fun)
 
-        cycle_solver = jaxopt.LBFGS(fun=residual_fun, maxiter=iterations, verbose=True)
+    res = residual_fun(x, checkerboard_points=checkerboard_points, checkerboard_shape=parsers[0].objp)
+    print("Initial residuals: ", res)
 
-    res = cycle_solver.run(x, keypoints_2d=checkerboard_points_filtered)
-    print(res)
+    optimizer = jaxopt.GradientDescent(fun=residual_fun, verbose=False, maxiter=5000)  # works well
 
-    return restore_params(res.params)
+    for i in range(iterations):
+        res = optimizer.run(x, checkerboard_points=checkerboard_points, checkerboard_shape=parsers[0].objp)
+        x = res.params
+
+        err = residual_fun(res.params, checkerboard_points=checkerboard_points, checkerboard_shape=parsers[0].objp)
+        camera_params = restore_params(res.params)
+        cycle_err = cycle_residual_fun(camera_params, checkerboard_points)
+        cycle_err = (cycle_err**2).mean()
+
+        # monitor the cycle error, but it's not easy to use directly during optimization
+        print(f"Iteration {i} error: {err}, cycle error: {cycle_err}")
+
+        if i == 5:
+            residual_fun, x, restore_params = make_residual_fun_wrapper(
+                checkerboard_reprojection_residuals, camera_params, ["mtx"], reduce=True
+            )
+            residual_fun = jax.jit(residual_fun)
+            optimizer = jaxopt.GradientDescent(fun=residual_fun, verbose=False, maxiter=5000)
+
+        if i == 10:
+            # now allow the camera calibration matrix to change
+            residual_fun, x, restore_params = make_residual_fun_wrapper(
+                checkerboard_reprojection_residuals,
+                camera_params,
+                ["checkerboard_rvecs", "checkerboard_tvecs"],
+                reduce=True,
+            )
+            residual_fun = jax.jit(residual_fun)
+            optimizer = jaxopt.GradientDescent(fun=residual_fun, verbose=False, maxiter=5000, stepsize=-1.0)
+
+        if i == 15:
+            # now allow the everything to change
+            residual_fun, x, restore_params = make_residual_fun_wrapper(
+                checkerboard_reprojection_residuals,
+                camera_params,
+                reduce=True,
+            )
+            residual_fun = jax.jit(residual_fun)
+            optimizer = jaxopt.GradientDescent(fun=residual_fun, verbose=False, maxiter=5000, stepsize=-1.0)
+
+        if i == 20:
+            optimizer = jaxopt.NonlinearCG(fun=residual_fun, verbose=False, maxiter=10, stepsize=-1.0)
+
+        if err < 0.2:
+            break
+
+    camera_params.pop("checkerboard_rvecs")
+    camera_params.pop("checkerboard_tvecs")
+
+    return camera_params
