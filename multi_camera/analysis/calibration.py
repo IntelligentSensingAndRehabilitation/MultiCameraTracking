@@ -884,6 +884,27 @@ def checkerboard_reprojection_residuals(params, checkerboard_points, checkerboar
     return residuals
 
 
+def checkerboard_and_keypoints_residuals(params, checkerboard_points, checkerboard_shape, keypoints2d):
+    """
+    Compute the residual distance between reconstructed and reprojected checkboard
+
+    This combines the benefit of a strong geometric prior on the checkerboard with the
+    flexibility of the keypoints, which also provide more observations across cameras
+
+    Parameters:
+        params: parameters of the camera and also the checkerboard orientation
+        checkerboard_points: observed 2D keypoints (cameras x time x joints x 2 or 3)
+        checkerboard_shape: the shape of the checkerboard
+        keypoints2d: observed 2D keypoints (cameras x time x joints x 2 or 3)
+    """
+
+    L1 = checkerboard_reprojection_residuals(params, checkerboard_points, checkerboard_shape)
+    L2 = keypoint3d_reprojection_residuals(params, keypoints2d)
+
+    L = jnp.mean(L1) + jnp.mean(L2)
+    return L
+
+
 def make_residual_fun_wrapper(fun: Callable, initial_params: Dict, exclude_parameters: List[str] = [], reduce=False):
     """
     Wraps the residual function to serialize/deserialize the parameters
@@ -926,7 +947,12 @@ def make_residual_fun_wrapper(fun: Callable, initial_params: Dict, exclude_param
 
 
 def checkerboard_bundle_calibrate(
-    parsers: List[CheckerboardAccumulator], max_frames_init: int = 30, iterations=25, initial_params=None, threshold=0.2
+    parsers: List[CheckerboardAccumulator],
+    max_frames_init: int = 30,
+    iterations: int = 25,
+    initial_params: Dict = None,
+    threshold: float = 0.2,
+    anneal: bool = True,
 ):
     """
     Calibrate the camera and checkerboard using bundle adjustment
@@ -940,15 +966,16 @@ def checkerboard_bundle_calibrate(
         max_frames_init: the maximum number of frames to use for initialization
         iterations: the number of iterations to run
         initial_params: the initial parameters to use (optional)
+        anneal: whether to anneal the set of parameters
     """
 
     if initial_params is None:
-        initial_params = initialize_group_calibration(parsers, max_frames=max_frames_init)[0]
+        initial_params = initialize_group_calibration(parsers, max_cv2_frames=max_frames_init)[0]
 
     # print("initial_params", initial_params)
 
     checkerboard_points = get_checkerboard_points(parsers)
-    checkerboard_points_filtered = filter_keypoints(checkerboard_points, 3)
+    checkerboard_points = filter_keypoints(checkerboard_points, 2)
 
     # TODO: get better initial estimates of checkerboard rvecs
     N = checkerboard_points.shape[1]
@@ -966,9 +993,7 @@ def checkerboard_bundle_calibrate(
     res = residual_fun(x, checkerboard_points=checkerboard_points, checkerboard_shape=parsers[0].objp)
     print("Initial residuals: ", res)
 
-    optimizer = jaxopt.GradientDescent(
-        fun=residual_fun, verbose=False, maxiter=10000, acceleration=True, stepsize=0.0
-    )  # works well
+    optimizer = jaxopt.GradientDescent(fun=residual_fun, verbose=False, maxiter=5000, acceleration=True)
 
     for i in range(iterations):
         res = optimizer.run(x, checkerboard_points=checkerboard_points, checkerboard_shape=parsers[0].objp)
@@ -982,15 +1007,15 @@ def checkerboard_bundle_calibrate(
         # monitor the cycle error, but it's not easy to use directly during optimization
         print(f"Iteration {i} error: {err}, cycle error: {cycle_err}")
 
-        if i == iterations // 4:
+        if anneal and i == iterations // 4:
             print("Adding distortion parameters")
             residual_fun, x, restore_params = make_residual_fun_wrapper(
                 checkerboard_reprojection_residuals, camera_params, ["mtx"], reduce=True
             )
             residual_fun = jax.jit(residual_fun)
-            optimizer = jaxopt.GradientDescent(fun=residual_fun, verbose=False, maxiter=5000)
+            optimizer = jaxopt.GradientDescent(fun=residual_fun, verbose=False, maxiter=5000, acceleration=True)
 
-        if i == (2 * iterations) // 4:
+        if anneal and i == (2 * iterations) // 4:
             print("Adding camera calibration matrix")
 
             # now allow the camera calibration matrix to change
@@ -1001,9 +1026,9 @@ def checkerboard_bundle_calibrate(
                 reduce=True,
             )
             residual_fun = jax.jit(residual_fun)
-            optimizer = jaxopt.GradientDescent(fun=residual_fun, verbose=False, maxiter=5000, stepsize=-1.0)
+            optimizer = jaxopt.GradientDescent(fun=residual_fun, verbose=False, maxiter=5000, acceleration=True)
 
-        if i == (3 * iterations) // 4:
+        if anneal and i == (3 * iterations) // 4:
             print("Allowing everything to change")
 
             # now allow the everything to change
@@ -1013,10 +1038,7 @@ def checkerboard_bundle_calibrate(
                 reduce=True,
             )
             residual_fun = jax.jit(residual_fun)
-            optimizer = jaxopt.GradientDescent(fun=residual_fun, verbose=False, maxiter=5000, stepsize=-1.0)
-
-        # if i == 20:
-        #    optimizer = jaxopt.NonlinearCG(fun=residual_fun, verbose=False, maxiter=10)
+            optimizer = jaxopt.GradientDescent(fun=residual_fun, verbose=False, maxiter=5000, acceleration=True)
 
         if err < threshold:
             break
@@ -1027,7 +1049,7 @@ def checkerboard_bundle_calibrate(
     return camera_params
 
 
-def bundle_calibrate(initial_params: Dict, keypoints2d: np.ndarray, iterations=25, threshold=0.2):
+def bundle_calibrate(initial_params: Dict, keypoints2d: np.ndarray, iterations: int = 25, threshold: float = 0.2):
     """
     Calibrate the camera using bundle adjustment for any 2D keypoints
 
@@ -1052,9 +1074,7 @@ def bundle_calibrate(initial_params: Dict, keypoints2d: np.ndarray, iterations=2
     res = residual_fun(x, keypoints2d=keypoints2d)
     print("Initial residuals: ", res)
 
-    optimizer = jaxopt.GradientDescent(
-        fun=residual_fun, verbose=False, maxiter=5000, stepsize=1e-8, acceleration=True
-    )  # works well
+    optimizer = jaxopt.GradientDescent(fun=residual_fun, verbose=False, maxiter=5000, acceleration=True)
 
     for i in range(iterations):
         res = optimizer.run(x, keypoints2d=keypoints2d)
@@ -1095,6 +1115,118 @@ def bundle_calibrate(initial_params: Dict, keypoints2d: np.ndarray, iterations=2
             )
             residual_fun = jax.jit(residual_fun)
             optimizer = jaxopt.GradientDescent(fun=residual_fun, verbose=False, maxiter=5000, stepsize=-1.0)
+
+        if err < threshold:
+            break
+
+    camera_params.pop("keypoints3d")
+
+    return camera_params
+
+
+def bundle_checkerboard_and_keypoints_calibrate(
+    parsers: List[CheckerboardAccumulator],
+    keypoints2d: np.ndarray,
+    initial_params: Dict = None,
+    max_frames_init: int = 50,
+    iterations: int = 25,
+    threshold: float = 0.2,
+    anneal: bool = False,
+):
+    """
+    Calibrate the camera using bundle adjustment for any 2D keypoints
+
+    Compared to checkerboard_bundle_calibrate, this function does not constrain
+    the keypoints to any geometry, so this can be applied to detection such as
+    people in the scene.
+
+    Parameters:
+        parsers: the list of CheckerboardAccumulator parsers to use
+        initial_params: the initial parameters to use
+        keypoints2d: the 2D keypoints to use
+        iterations: the number of iterations to run
+    """
+
+    if initial_params is None:
+        initial_params = initialize_group_calibration(parsers, max_cv2_frames=max_frames_init)[0]
+
+    keypoints3d = triangulate_point(initial_params, keypoints2d)
+
+    checkerboard_shape = parsers[0].objp
+
+    checkerboard_points = get_checkerboard_points(parsers)
+    checkerboard_points = filter_keypoints(checkerboard_points, 2)
+
+    # TODO: get better initial estimates of checkerboard rvecs from cv2
+    N = checkerboard_points.shape[1]
+    checkerboard_rvecs = np.zeros((N, 3))
+    checkerboard_tvecs = np.zeros((N, 3))
+
+    checkerboard_params = {"rvecs": checkerboard_rvecs, "tvecs": checkerboard_tvecs}
+    params = {
+        **initial_params,
+        "keypoints3d": keypoints3d,
+        **{f"checkerboard_{k}": v for k, v in checkerboard_params.items()},
+    }
+
+    # for some reason, currently getting crashes from this function in particular
+    # for enabling distortion optimization
+    residual_fun, x, restore_params = make_residual_fun_wrapper(
+        checkerboard_and_keypoints_residuals, params, ["mtx", "dist"] if anneal else ["dist"], reduce=True
+    )
+    # residual_fun = jax.jit(residual_fun)
+
+    res = residual_fun(
+        x, keypoints2d=keypoints2d, checkerboard_points=checkerboard_points, checkerboard_shape=checkerboard_shape
+    )
+    print("Initial residuals: ", res)
+
+    optimizer = jaxopt.GradientDescent(fun=residual_fun, verbose=False, maxiter=5000, acceleration=True)
+
+    for i in range(iterations):
+        res = optimizer.run(
+            x, keypoints2d=keypoints2d, checkerboard_points=checkerboard_points, checkerboard_shape=checkerboard_shape
+        )
+        x = res.params
+
+        err = residual_fun(
+            res.params,
+            keypoints2d=keypoints2d,
+            checkerboard_points=checkerboard_points,
+            checkerboard_shape=checkerboard_shape,
+        )
+        camera_params = restore_params(res.params)
+        kp_cycle_err = cycle_residual_fun(camera_params, keypoints2d)
+        kp_cycle_err = (kp_cycle_err**2).mean()
+
+        checkboard_cycle_err = cycle_residual_fun(camera_params, checkerboard_points)
+        checkboard_cycle_err = (checkboard_cycle_err**2).mean()
+
+        # monitor the cycle error, but it's not easy to use directly during optimization
+        print(f"Iteration {i} error: {err}, kp_cycle_err {kp_cycle_err}, checkboard_cycle_err {checkboard_cycle_err}")
+
+        if anneal and i == (iterations) // 4:
+            print("Adding camera matrix and distortions, freezing checkerboard")
+            # now allow the camera calibration matrix to change
+            residual_fun, x, restore_params = make_residual_fun_wrapper(
+                checkerboard_and_keypoints_residuals,
+                camera_params,
+                ["checkerboard_rvecs", "checkerboard_tvecs"],
+                reduce=True,
+            )
+            residual_fun = jax.jit(residual_fun)
+            optimizer = jaxopt.GradientDescent(fun=residual_fun, verbose=False, maxiter=5000, stepsize=-1.0)
+
+        if anneal and i == (1 * iterations) // 4:
+            print("Allowing everything to change")
+            # now allow the everything to change
+            residual_fun, x, restore_params = make_residual_fun_wrapper(
+                checkerboard_and_keypoints_residuals,
+                camera_params,
+                reduce=True,
+            )
+            residual_fun = jax.jit(residual_fun)
+            optimizer = jaxopt.GradientDescent(fun=residual_fun, verbose=False, maxiter=5000)
 
         if err < threshold:
             break
