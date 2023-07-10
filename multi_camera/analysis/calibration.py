@@ -617,7 +617,8 @@ def calibrate_bundle(
         c.extra_dist = extra_dist
         c.both_focal = both_focal
 
-    print(f"Extra: {cgroup.cameras[0].extra_dist}. Both: {cgroup.cameras[0].both_focal}")
+    if verbose:
+        print(f"Extra: {cgroup.cameras[0].extra_dist}. Both: {cgroup.cameras[0].both_focal}")
 
     for cam, p in zip(cgroup.cameras, parsers):
         h, w, _ = p.shape
@@ -665,6 +666,8 @@ def calibrate_bundle(
 
     if bundle_adjust:
         error = cgroup.bundle_adjust_iter(imgp, extra, verbose=verbose, **kwargs)
+    else:
+        error = 100.0
 
     if zero_origin:
         x0, board_rotation = extract_origin(cgroup, imgp)
@@ -728,11 +731,25 @@ def run_calibration(vid_base, vid_path=".", return_parsers=False, frame_skip=2, 
     print("Now running calibration")
 
     if jax_cal:
-        init_camera_params, init_checkerboard_params, checkerboard_points = initialize_group_calibration(parsers)
+        if False:
+            # this still doesn't work well enough
+            init_camera_params, init_checkerboard_params, checkerboard_points = initialize_group_calibration(parsers)
+        else:
+            error, cgroup = calibrate_bundle(parsers, bundle_adjust=False, return_error=True)
 
-        camera_params = checkerboard_bundle_calibrate(parsers, initial_params=init_camera_params, iterations=100)
+            init_camera_params = {
+                "mtx": np.array(
+                    [[c["matrix"][0][0], c["matrix"][1][1], c["matrix"][0][2], c["matrix"][1][2]] for c in cgroup]
+                )
+                / 1000.0,
+                "dist": np.array([c["distortions"] for c in cgroup]),
+                "rvec": np.array([c["rotation"] for c in cgroup]),
+                "tvec": np.array([c["translation"] for c in cgroup]) / 1000.0,
+            }
 
-        error = float(checkerboard_loss(checkerboard_params, camera_params, checkerboard_points, objp))
+        camera_params, error = checkerboard_bundle_calibrate(
+            parsers, initial_params=init_camera_params, iterations=100, return_error=True
+        )
 
     else:
         error, cgroup = calibrate_bundle(parsers, n_samp_iter=500, n_samp_full=5000)
@@ -946,6 +963,34 @@ def make_residual_fun_wrapper(fun: Callable, initial_params: Dict, exclude_param
     return residual_fun, x, restore_params
 
 
+def checkerboard_initialize(
+    camera_params: Dict,
+    checkerboard_points: jnp.ndarray,
+):
+    """
+    Initialize the checkerboard parameters
+
+    Parameters:
+        camera_params: the camera parameters
+        checkerboard_points: the checkerboard points
+    """
+
+    N = checkerboard_points.shape[1]
+
+    checkerboard_rvecs = np.zeros((N, 3))
+    checkerboard_tvecs = np.zeros((N, 3))
+
+    checkerboard_3d = triangulate_point(camera_params, checkerboard_points)
+
+    checkerboard_tvecs = jnp.mean(checkerboard_3d, axis=1)  # average over the spatial dimensions of checkerboard
+    checkerboard_tvecs = checkerboard_tvecs / 1000
+
+    # TODO: initialize rvecs at some point
+
+    checkerboard_params = {"checkerboard_rvecs": checkerboard_rvecs, "checkerboard_tvecs": checkerboard_tvecs}
+    return checkerboard_params
+
+
 def checkerboard_bundle_calibrate(
     parsers: List[CheckerboardAccumulator],
     max_frames_init: int = 30,
@@ -953,6 +998,7 @@ def checkerboard_bundle_calibrate(
     initial_params: Dict = None,
     threshold: float = 0.2,
     anneal: bool = True,
+    return_error: bool = False,
 ):
     """
     Calibrate the camera and checkerboard using bundle adjustment
@@ -972,27 +1018,35 @@ def checkerboard_bundle_calibrate(
     if initial_params is None:
         initial_params = initialize_group_calibration(parsers, max_cv2_frames=max_frames_init)[0]
 
-    # print("initial_params", initial_params)
+        # print("initial_params", initial_params)
 
     checkerboard_points = get_checkerboard_points(parsers)
     checkerboard_points = filter_keypoints(checkerboard_points, 2)
 
-    # TODO: get better initial estimates of checkerboard rvecs
-    N = checkerboard_points.shape[1]
-    checkerboard_rvecs = np.zeros((N, 3))
-    checkerboard_tvecs = np.zeros((N, 3))
-
-    checkerboard_params = {"rvecs": checkerboard_rvecs, "tvecs": checkerboard_tvecs}
-    params = {**initial_params, **{f"checkerboard_{k}": v for k, v in checkerboard_params.items()}}
+    checkerboard_params = checkerboard_initialize(initial_params, checkerboard_points)
+    params = {**initial_params, **checkerboard_params}
 
     residual_fun, x, restore_params = make_residual_fun_wrapper(
-        checkerboard_reprojection_residuals, params, ["mtx", "dist"], reduce=True
+        checkerboard_reprojection_residuals, params, ["mtx", "dist", "rvec", "tvec"], reduce=True
     )
-    residual_fun = jax.jit(residual_fun)
-
     res = residual_fun(x, checkerboard_points=checkerboard_points, checkerboard_shape=parsers[0].objp)
     print("Initial residuals: ", res)
+    optimizer = jaxopt.GradientDescent(
+        fun=residual_fun,
+        verbose=False,
+        maxiter=2000,
+        acceleration=True,
+    )
 
+    res = optimizer.run(x, checkerboard_points=checkerboard_points, checkerboard_shape=parsers[0].objp)
+    x = res.params
+    camera_params = restore_params(x)
+    res = residual_fun(x, checkerboard_points=checkerboard_points, checkerboard_shape=parsers[0].objp)
+    print("After initializing checkerboard position: ", res)
+
+    residual_fun, x, restore_params = make_residual_fun_wrapper(
+        checkerboard_reprojection_residuals, camera_params, ["mtx", "dist"], reduce=True
+    )
     optimizer = jaxopt.GradientDescent(fun=residual_fun, verbose=False, maxiter=5000, acceleration=True)
 
     for i in range(iterations):
@@ -1000,7 +1054,7 @@ def checkerboard_bundle_calibrate(
         x = res.params
 
         err = residual_fun(res.params, checkerboard_points=checkerboard_points, checkerboard_shape=parsers[0].objp)
-        camera_params = restore_params(res.params)
+        camera_params = restore_params(x)
         cycle_err = cycle_residual_fun(camera_params, checkerboard_points)
         cycle_err = (cycle_err**2).mean()
 
@@ -1043,8 +1097,13 @@ def checkerboard_bundle_calibrate(
         if err < threshold:
             break
 
+    camera_params = restore_params(x)
     camera_params.pop("checkerboard_rvecs")
     camera_params.pop("checkerboard_tvecs")
+
+    if return_error:
+        error = float(checkerboard_loss(checkerboard_params, camera_params, checkerboard_points, parsers[0].objp))
+        return camera_params, error
 
     return camera_params
 
@@ -1157,43 +1216,52 @@ def bundle_checkerboard_and_keypoints_calibrate(
     checkerboard_points = get_checkerboard_points(parsers)
     checkerboard_points = filter_keypoints(checkerboard_points, 2)
 
-    # TODO: get better initial estimates of checkerboard rvecs from cv2
-    N = checkerboard_points.shape[1]
-    checkerboard_rvecs = np.zeros((N, 3))
-    checkerboard_tvecs = np.zeros((N, 3))
+    checkerboard_params = checkerboard_initialize(initial_params, checkerboard_points)
+    params = {**initial_params, "keypoints3d": keypoints3d, **checkerboard_params}
 
-    checkerboard_params = {"rvecs": checkerboard_rvecs, "tvecs": checkerboard_tvecs}
-    params = {
-        **initial_params,
-        "keypoints3d": keypoints3d,
-        **{f"checkerboard_{k}": v for k, v in checkerboard_params.items()},
-    }
-
-    # for some reason, currently getting crashes from this function in particular
-    # for enabling distortion optimization
+    # first, just reposition the checkerboard and keypoints
     residual_fun, x, restore_params = make_residual_fun_wrapper(
-        checkerboard_and_keypoints_residuals, params, ["mtx", "dist"] if anneal else ["dist"], reduce=True
+        checkerboard_and_keypoints_residuals, params, ["mtx", "dist", "rvec", "tvec"], reduce=True
     )
-    # residual_fun = jax.jit(residual_fun)
-
+    optimizer = jaxopt.GradientDescent(
+        fun=residual_fun,
+        verbose=False,
+        maxiter=2000,
+        acceleration=True,
+    )
+    res = residual_fun(
+        x,
+        keypoints2d=keypoints2d,
+        checkerboard_points=checkerboard_points,
+        checkerboard_shape=checkerboard_shape,
+    )
+    print("Initial residuals: ", res)
+    x = optimizer.run(
+        x, keypoints2d=keypoints2d, checkerboard_points=checkerboard_points, checkerboard_shape=checkerboard_shape
+    ).params
     res = residual_fun(
         x, keypoints2d=keypoints2d, checkerboard_points=checkerboard_points, checkerboard_shape=checkerboard_shape
     )
-    print("Initial residuals: ", res)
+    params = restore_params(x)
+    print(f"Residuals after first repositioning with fixed calibration: {res}")
 
+    # now repositioning camera, but keep the camera intrinsics fixed
+    residual_fun, x, restore_params = make_residual_fun_wrapper(
+        checkerboard_and_keypoints_residuals, params, ["mtx", "dist"] if anneal else [], reduce=True
+    )
     optimizer = jaxopt.GradientDescent(fun=residual_fun, verbose=False, maxiter=5000, acceleration=True)
 
     for i in range(iterations):
         res = optimizer.run(
-            x, keypoints2d=keypoints2d, checkerboard_points=checkerboard_points, checkerboard_shape=checkerboard_shape
+            x, checkerboard_points=checkerboard_points, checkerboard_shape=checkerboard_shape, keypoints2d=keypoints2d
         )
         x = res.params
 
         err = residual_fun(
             res.params,
-            keypoints2d=keypoints2d,
             checkerboard_points=checkerboard_points,
             checkerboard_shape=checkerboard_shape,
+            keypoints2d=keypoints2d,
         )
         camera_params = restore_params(res.params)
         kp_cycle_err = cycle_residual_fun(camera_params, keypoints2d)
@@ -1231,6 +1299,103 @@ def bundle_checkerboard_and_keypoints_calibrate(
         if err < threshold:
             break
 
+    camera_params = restore_params(x)
     camera_params.pop("keypoints3d")
 
     return camera_params
+
+
+def dual_calibration_procedure(
+    calibration_points: np.ndarray,
+    keypoints2d: List[np.ndarray],
+    calibration_shape: np.ndarray = None,
+    init_camera_params: Dict = None,
+    iterations: int = 25,
+):
+    """
+    This function calibrates the cameras and the checkerboard at the same time.
+
+    This is a convenience wrapper for this sequence that seems to work quite well. Will
+    likely be modified and rolled into a part of the initial calibration.
+
+    Parameters:
+        calibration_points: the 3D points of the checkerboard
+        keypoints2d: the 2D keypoints to use
+        calibration_shape: the shape of the checkerboard
+        init_camera_params: the initial camera parameters to use. If None, will compute
+        iterations: the number of iterations to run each step
+    """
+
+    parsers = [CheckerboardAccumulator().recreate(calibration_points[i]) for i in range(calibration_points.shape[0])]
+
+    assert calibration_shape is None, "Not implemented"
+
+    if init_camera_params is None:
+        if True:
+            # init methods using aniposelib code
+            from multi_camera.analysis.calibration import calibrate_bundle
+
+            error, cgroup = calibrate_bundle(parsers, bundle_adjust=False, verbose=False)
+
+            init_camera_params = {
+                "mtx": np.array(
+                    [[c["matrix"][0][0], c["matrix"][1][1], c["matrix"][0][2], c["matrix"][1][2]] for c in cgroup]
+                )
+                / 1000.0,
+                "dist": np.array([c["distortions"] for c in cgroup]),
+                "rvec": np.array([c["rotation"] for c in cgroup]),
+                "tvec": np.array([c["translation"] for c in cgroup]) / 1000.0,
+            }
+
+        else:
+            init_camera_params, checkerboard_params, checkerboard_points = initialize_group_calibration(parsers)
+
+    # now performan optimzation using just the checkerboard
+    checkerboard_calibrate = checkerboard_bundle_calibrate(
+        parsers, initial_params=init_camera_params, anneal=True, iterations=iterations
+    )
+
+    # now clean the keypoints and perform this step
+    from pose_pipeline.wrappers.bridging import normalized_joint_name_dictionary
+
+    keypoints2d_cleaned = np.stack(keypoints2d, axis=0)
+    assert keypoints2d_cleaned.shape[2] == 87, "expects MOVI 87 keypoints"
+
+    poor_confidence = keypoints2d_cleaned[..., 2] < 0.8
+    keypoints2d_cleaned[poor_confidence, :] = np.nan
+
+    # drop confidence now
+    keypoints2d_cleaned = keypoints2d_cleaned[..., :2]
+
+    # https://github.com/peabody124/PosePipeline/blob/main/pose_pipeline/wrappers/bridging.py
+    joint_names = normalized_joint_name_dictionary["bml_movi_87"]
+    track_joints = [
+        "Pelvis",
+        "Left Ankle",
+        "Left Knee",
+        "Left Hip",
+        "Right Ankle",
+        "Right Knee",
+        "Right Hip",
+        "Right Wrist",
+        "Right Elbow",
+        "Right Shoulder",
+        "Left Wrist",
+        "Left Elbow",
+        "Left Shoulder",
+    ]
+
+    joint_idx = np.array([joint_names.index(j) for j in track_joints])
+    keypoints2d_cleaned = keypoints2d_cleaned[:, joint_idx, :]
+
+    camera_params = bundle_checkerboard_and_keypoints_calibrate(
+        parsers, keypoints2d_cleaned, initial_params=checkerboard_calibrate, iterations=iterations, anneal=True
+    )
+
+    # now zero coordinates
+    checkerboard_points = get_checkerboard_points(parsers)
+    x0, board_rotation = extract_origin(camera_params, checkerboard_points[:, 5:])
+    camera_params_zeroed = shift_calibration(camera_params, x0, board_rotation, zoffset=1245)
+    params_dict = jax.tree_map(np.array, camera_params_zeroed)
+
+    return params_dict
