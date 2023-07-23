@@ -10,7 +10,10 @@ def get_unannotated_recordings():
     from multi_camera.datajoint.sessions import Recording
     from pose_pipeline.pipeline import PersonBbox
 
-    keys = (EasymocapSmpl * MultiCameraRecording * Recording - SingleCameraVideo * PersonBbox).fetch("KEY")
+    keys = (
+        EasymocapSmpl * MultiCameraRecording * Recording
+        & (EasymocapTracking & "num_tracks>0") - SingleCameraVideo * PersonBbox
+    ).fetch("KEY")
     video_base_filenames = (MultiCameraRecording & keys).fetch("video_base_filename")
     return video_base_filenames
 
