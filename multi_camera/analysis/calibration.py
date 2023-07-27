@@ -901,7 +901,9 @@ def checkerboard_reprojection_residuals(params, checkerboard_points, checkerboar
     return residuals
 
 
-def checkerboard_and_keypoints_residuals(params, checkerboard_points, checkerboard_shape, keypoints2d):
+def checkerboard_and_keypoints_residuals(
+    params, checkerboard_points, checkerboard_shape, keypoints2d, checkerboard_ratio=0.9
+):
     """
     Compute the residual distance between reconstructed and reprojected checkboard
 
@@ -918,7 +920,29 @@ def checkerboard_and_keypoints_residuals(params, checkerboard_points, checkerboa
     L1 = checkerboard_reprojection_residuals(params, checkerboard_points, checkerboard_shape)
     L2 = keypoint3d_reprojection_residuals(params, keypoints2d)
 
-    L = jnp.mean(L1) + jnp.mean(L2)
+    if False:
+        # for soem reason this introduces nan values???
+
+        # order L2 by the error and compute the mean of the lowest half to discard outliers
+        L2 = jnp.sort(L2, axis=-1)
+
+        L2_main = L2[..., : L2.shape[-1] // 8]
+        L2_outliers = L2[..., L2.shape[-1] // 8 :]
+
+        # clip L2 outliers to 1000
+        max_value = 1000.0
+        L2_outliers = jnp.clip(L2_outliers, a_max=max_value)
+        # and force all nan values to this max
+        L2_outliers = jnp.nan_to_num(L2_outliers, nan=max_value)
+
+        L2 = jnp.mean(L2_main) + jnp.mean(L2_outliers) * 1e-3
+
+        print(
+            "L1", jnp.mean(L1), "L2", jnp.mean(L2), "L2_main", jnp.mean(L2_main), "L2_outliers", jnp.mean(L2_outliers)
+        )
+
+    L = jnp.mean(L1) * checkerboard_ratio + L2 * (1 - checkerboard_ratio)
+
     return L
 
 
@@ -1133,7 +1157,7 @@ def bundle_calibrate(initial_params: Dict, keypoints2d: np.ndarray, iterations: 
     res = residual_fun(x, keypoints2d=keypoints2d)
     print("Initial residuals: ", res)
 
-    optimizer = jaxopt.GradientDescent(fun=residual_fun, verbose=False, maxiter=5000, acceleration=True)
+    optimizer = jaxopt.GradientDescent(fun=residual_fun, verbose=False, maxiter=5000, acceleration=True, stepsize=10.0)
 
     for i in range(iterations):
         res = optimizer.run(x, keypoints2d=keypoints2d)
@@ -1223,12 +1247,7 @@ def bundle_checkerboard_and_keypoints_calibrate(
     residual_fun, x, restore_params = make_residual_fun_wrapper(
         checkerboard_and_keypoints_residuals, params, ["mtx", "dist", "rvec", "tvec"], reduce=True
     )
-    optimizer = jaxopt.GradientDescent(
-        fun=residual_fun,
-        verbose=False,
-        maxiter=2000,
-        acceleration=True,
-    )
+
     res = residual_fun(
         x,
         keypoints2d=keypoints2d,
@@ -1236,6 +1255,14 @@ def bundle_checkerboard_and_keypoints_calibrate(
         checkerboard_shape=checkerboard_shape,
     )
     print("Initial residuals: ", res)
+
+    optimizer = jaxopt.GradientDescent(
+        fun=residual_fun,
+        verbose=False,
+        maxiter=20000,
+        acceleration=True,
+        decrease_factor=0.1,
+    )
     x = optimizer.run(
         x, keypoints2d=keypoints2d, checkerboard_points=checkerboard_points, checkerboard_shape=checkerboard_shape
     ).params
@@ -1265,7 +1292,15 @@ def bundle_checkerboard_and_keypoints_calibrate(
         )
         camera_params = restore_params(res.params)
         kp_cycle_err = cycle_residual_fun(camera_params, keypoints2d)
-        kp_cycle_err = (kp_cycle_err**2).mean()
+        if True:
+            # sort the squared error by the keypoints
+            mask = ~jnp.isnan(keypoints2d)
+            kp_cycle_err = kp_cycle_err[mask].reshape(-1)
+            kp_cycle_err = jnp.sort(kp_cycle_err**2)
+            # take the lowest 50% of the error
+            kp_cycle_err = jnp.mean(kp_cycle_err[: len(kp_cycle_err) // 8])
+        else:
+            kp_cycle_err = (kp_cycle_err**2).mean()
 
         checkboard_cycle_err = cycle_residual_fun(camera_params, checkerboard_points)
         checkboard_cycle_err = (checkboard_cycle_err**2).mean()
@@ -1291,6 +1326,7 @@ def bundle_checkerboard_and_keypoints_calibrate(
             residual_fun, x, restore_params = make_residual_fun_wrapper(
                 checkerboard_and_keypoints_residuals,
                 camera_params,
+                ["dist"],
                 reduce=True,
             )
             residual_fun = jax.jit(residual_fun)
@@ -1331,7 +1367,7 @@ def dual_calibration_procedure(
     assert calibration_shape is None, "Not implemented"
 
     if init_camera_params is None:
-        if True:
+        try:
             # init methods using aniposelib code
             from multi_camera.analysis.calibration import calibrate_bundle
 
@@ -1347,7 +1383,10 @@ def dual_calibration_procedure(
                 "tvec": np.array([c["translation"] for c in cgroup]) / 1000.0,
             }
 
-        else:
+        except:
+            print(
+                'Using "initialize_group_calibration" to initialize camera parameters. Likely incomplete linkage in video.'
+            )
             init_camera_params, checkerboard_params, checkerboard_points = initialize_group_calibration(parsers)
 
     # now performan optimzation using just the checkerboard
@@ -1359,35 +1398,40 @@ def dual_calibration_procedure(
     from pose_pipeline.wrappers.bridging import normalized_joint_name_dictionary
 
     keypoints2d_cleaned = np.stack(keypoints2d, axis=0)
-    assert keypoints2d_cleaned.shape[2] == 87, "expects MOVI 87 keypoints"
 
-    poor_confidence = keypoints2d_cleaned[..., 2] < 0.8
-    keypoints2d_cleaned[poor_confidence, :] = np.nan
+    if keypoints2d_cleaned.shape[-1] == 3:
+        poor_confidence = keypoints2d_cleaned[..., 2] < 0.8
+        keypoints2d_cleaned[poor_confidence, :] = np.nan
 
-    # drop confidence now
-    keypoints2d_cleaned = keypoints2d_cleaned[..., :2]
+        # drop confidence now
+        keypoints2d_cleaned = keypoints2d_cleaned[..., :2]
 
-    # https://github.com/peabody124/PosePipeline/blob/main/pose_pipeline/wrappers/bridging.py
-    joint_names = normalized_joint_name_dictionary["bml_movi_87"]
-    track_joints = [
-        "Pelvis",
-        "Left Ankle",
-        "Left Knee",
-        "Left Hip",
-        "Right Ankle",
-        "Right Knee",
-        "Right Hip",
-        "Right Wrist",
-        "Right Elbow",
-        "Right Shoulder",
-        "Left Wrist",
-        "Left Elbow",
-        "Left Shoulder",
-    ]
+    if keypoints2d_cleaned.shape[2] == 87:
+        assert keypoints2d_cleaned.shape[2] == 87, "expects MOVI 87 keypoints"
+        # https://github.com/peabody124/PosePipeline/blob/main/pose_pipeline/wrappers/bridging.py
+        joint_names = normalized_joint_name_dictionary["bml_movi_87"]
+        track_joints = [
+            "Pelvis",
+            "Left Ankle",
+            "Left Knee",
+            "Left Hip",
+            "Right Ankle",
+            "Right Knee",
+            "Right Hip",
+            "Right Wrist",
+            "Right Elbow",
+            "Right Shoulder",
+            "Left Wrist",
+            "Left Elbow",
+            "Left Shoulder",
+        ]
 
-    joint_idx = np.array([joint_names.index(j) for j in track_joints])
-    keypoints2d_cleaned = keypoints2d_cleaned[:, joint_idx, :]
+        joint_idx = np.array([joint_names.index(j) for j in track_joints])
+        keypoints2d_cleaned = keypoints2d_cleaned[:, :, joint_idx, :]
 
+        print(keypoints2d_cleaned.shape)
+
+    print("Starting second stage optimization")
     camera_params = bundle_checkerboard_and_keypoints_calibrate(
         parsers, keypoints2d_cleaned, initial_params=checkerboard_calibrate, iterations=iterations, anneal=True
     )
@@ -1399,3 +1443,32 @@ def dual_calibration_procedure(
     params_dict = jax.tree_map(np.array, camera_params_zeroed)
 
     return params_dict
+
+
+def test():
+    from multi_camera.datajoint.multi_camera_dj import (
+        MultiCameraRecording,
+        SingleCameraVideo,
+        CalibratedRecording,
+        Calibration,
+    )
+    from pose_pipeline.pipeline import TopDownPerson, TopDownMethodLookup
+
+    test_key = (
+        MultiCameraRecording * CalibratedRecording
+        & 'video_base_filename="p617_fast_20230601_091424" and cal_timestamp < "2024-01-01"'
+    ).fetch1("KEY")
+
+    keypoints2d, camera_name = (
+        TopDownPerson * SingleCameraVideo * TopDownMethodLookup & test_key & "top_down_method=12"
+    ).fetch("keypoints", "camera_name")
+    cal_camera_names, saved_camera_params = (Calibration * CalibratedRecording & test_key).fetch1(
+        "camera_names", "camera_calibration"
+    )
+    calibration_points, calibration_shape = (Calibration & test_key).fetch1("calibration_points", "calibration_shape")
+
+    calibration = dual_calibration_procedure(calibration_points, keypoints2d, iterations=10)
+
+
+if __name__ == "__main__":
+    test()
