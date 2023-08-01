@@ -195,6 +195,7 @@ def write_queue(
 
     timestamps = []
     real_times = []
+    frame_spreads = []
 
     out_video = None
 
@@ -222,6 +223,12 @@ def write_queue(
 
         else:
             out_video.write(im)
+
+            # Check the timestamp spread between the current frame and previous frame
+            # print(f"{serial} Timestamp spread: {timestamps[-1] - timestamps[-2]}")
+            if (timestamps[-1] - timestamps[-2]) * 1e-6 > acquisition_fps * 1.2:
+                print(f"Warning | {serial} Timestamp spread: {(timestamps[-1] - timestamps[-2]) * 1e-6} {acquisition_fps} {acquisition_fps * 1.2}")
+                # frame_spreads.append((timestamps[-1] - timestamps[-2]) * 1e-6)
 
         image_queue.task_done()
 
@@ -432,7 +439,7 @@ class FlirRecorder:
         self.video_base_file = recording_path
 
         # Initializing an image queue for each camera
-        self.image_queue_dict = {c.DeviceSerialNumber: Queue(100) for c in self.cams}
+        self.image_queue_dict = {c.DeviceSerialNumber: Queue(max_frames) for c in self.cams}
 
         # set up the threads to write videos to disk, if requested
         if self.video_base_file is not None:
