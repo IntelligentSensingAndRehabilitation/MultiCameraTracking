@@ -153,7 +153,14 @@ async def lifespan(app: FastAPI):
     state = get_global_state()
 
     db = get_db()
-    synchronize_to_datajoint(db)
+
+    # adding a try/except here to catch the case where the database is not available
+    # this can happen if the database is not running or if the network is down
+    try:
+        synchronize_to_datajoint(db)
+    except Exception as e:  
+        acquisition_logger.error(f"Could not synchronize to datajoint: {e}")
+        
 
     yield
 

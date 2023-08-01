@@ -12,6 +12,8 @@ COPY docker/flir/*.whl /spinnaker
 
 ARG DEBIAN_FRONTEND=noninteractive
 
+RUN apt-get update
+
 RUN apt-get install -y libusb-1.0-0 qtbase5-dev qtchooser qt5-qmake qtbase5-dev-tools curl screen
 
 RUN echo 'debconf debconf/frontend select Noninteractive' | debconf-set-selections && \
