@@ -152,6 +152,8 @@ async def lifespan(app: FastAPI):
 
     state = get_global_state()
 
+    import datajoint as dj
+
     db = get_db()
 
     # adding a try/except here to catch the case where the database is not available
@@ -631,27 +633,6 @@ async def video_websocket_endpoint(websocket: WebSocket):
         logger.info("Video  Websocket disconnected with ConnectionClosedOK: %s", e)
 
     logger.info("Video websocket exited")
-
-
-@api_router.get("/keypoints")
-async def get_keypoints():
-    from multi_camera.datajoint.multi_camera_dj import PersonKeypointReconstruction
-
-    keys = PersonKeypointReconstruction.fetch("KEY")
-    key = keys[8500]
-
-    keypoints3d = (PersonKeypointReconstruction & key).fetch1("keypoints3d")
-
-    # keypoints3d = keypoints3d[:, :26, :3]
-    keypoints3d = keypoints3d[:, :, :3]
-    keypoints3d = keypoints3d - np.mean(np.mean(keypoints3d, axis=0, keepdims=True), axis=1, keepdims=True)
-    keypoints3d = keypoints3d / 1000.0  # convert to meters
-    # set the z coordinate minimum to be zero
-    keypoints3d[:, :, 2] = keypoints3d[:, :, 2] - np.min(keypoints3d[:, :, 2])
-
-    # convert the numpy 3d array to JSON to send to the client
-    keypoints3d = keypoints3d.tolist()
-    return keypoints3d
 
 
 class SMPLData(BaseModel):

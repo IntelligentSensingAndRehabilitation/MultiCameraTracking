@@ -122,7 +122,6 @@ export const AquisitionApi = (props) => {
         fetchCurrentConfig();
         fetchRecordingStatus();
         fetchSession();
-        fetchKeypoints();
     }, []);
 
     useEffect(() => {
@@ -234,13 +233,6 @@ export const AquisitionApi = (props) => {
         console.log("Recording DB: ", response.data)
         return response.data;
     };
-
-    async function fetchKeypoints() {
-        const response = await axios.get(`${API_BASE_URL}/keypoints`);
-        //console.log("Keypoints: ", response.data)
-        setKeypoints(response.data);
-        return response.data;
-    }
 
     // Mesh functions
 
@@ -466,7 +458,6 @@ export const AquisitionApi = (props) => {
         changeComment,
         runCalibration,
         processSession,
-        fetchKeypoints,
         fetchUnannotatedRecordings,
         annotateRecording,
         fetchMesh,
