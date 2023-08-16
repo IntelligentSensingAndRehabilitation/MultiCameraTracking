@@ -152,8 +152,6 @@ async def lifespan(app: FastAPI):
 
     state = get_global_state()
 
-    import datajoint as dj
-
     db = get_db()
 
     # adding a try/except here to catch the case where the database is not available
