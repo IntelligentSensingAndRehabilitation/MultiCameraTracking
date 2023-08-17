@@ -213,10 +213,12 @@ class NewTrialData(BaseModel):
     comment: str
     max_frames: int
 
+class PreviewData(BaseModel):
+    max_frames: int
+
 
 class ConfigFileData(BaseModel):
     config: str
-
 
 class PriorRecordings(BaseModel):
     participant: str
@@ -330,7 +332,10 @@ async def new_trial(data: NewTrialData, db: Session = Depends(db_dependency)):
 
 
 @api_router.post("/preview")
-async def preview():
+async def preview(data: PreviewData):
+
+    max_frames = data.max_frames
+
     def receive_frames_wrapper(frames):
         loop.create_task(receive_frames(frames))
 
@@ -339,7 +344,7 @@ async def preview():
     from functools import partial
 
     state: GlobalState = get_global_state()
-    await run_in_threadpool(state.acquisition.start_acquisition, preview_callback=receive_frames_wrapper)
+    await run_in_threadpool(state.acquisition.start_acquisition, preview_callback=receive_frames_wrapper, max_frames=max_frames)
 
     return {}
 

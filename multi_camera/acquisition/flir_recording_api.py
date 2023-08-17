@@ -434,7 +434,7 @@ class FlirRecorder:
 
         return status
 
-    def start_acquisition(self, recording_path=None, preview_callback: callable = None, max_frames: int = 100):
+    def start_acquisition(self, recording_path=None, preview_callback: callable = None, max_frames: int = 1000):
         self.set_status("Recording")
 
         self.preview_callback = preview_callback
@@ -708,7 +708,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Record video from GigE FLIR cameras")
     parser.add_argument("vid_file", help="Video file to write")
-    parser.add_argument("-m", "--max_frames", type=int, default=100, help="Maximum frames to record")
+    parser.add_argument("-m", "--max_frames", type=int, default=1000, help="Maximum frames to record")
     parser.add_argument("-n", "--num_cams", type=int, default=4, help="Number of input cameras")
     parser.add_argument("-r", "--reset", default=False, action="store_true", help="Reset cameras first")
     parser.add_argument(

@@ -59,6 +59,6 @@ WORKDIR /
 RUN mkdir -p /data
 COPY configs /configs
 
-# Run bash script to start front end and back endd
+# Run bash script to start front end and back end
 ENTRYPOINT ["/bin/bash"]
 CMD ["/Mocap/start_acquisition_gui.sh"]

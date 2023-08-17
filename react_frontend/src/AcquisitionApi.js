@@ -204,7 +204,10 @@ export const AquisitionApi = (props) => {
     }
 
     async function previewVideo(max_frames) {
-        await axios.post(`${API_BASE_URL}/preview`);
+        await axios.post(`${API_BASE_URL}/preview`,
+        {
+            max_frames: max_frames
+        });
         setRecordingProgress(0);
     }
 
