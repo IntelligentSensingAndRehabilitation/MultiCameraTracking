@@ -37,6 +37,9 @@ COPY react_frontend /Mocap/react_frontend
 ### Installing extra things (curl, screen, netstat) (can be removed after image is in stable state)
 RUN apt-get install -y net-tools
 
+### Install EasyMocap
+RUN pip3 install git+https://github.com/peabody124/EasyMocap
+
 ### Install MultiCameraTracking package and dependencies
 
 WORKDIR /Mocap
