@@ -397,6 +397,7 @@ async def update_recording(recording: PriorRecordings, db=Depends(db_dependency)
         filename=recording.filename,
         recording_timestamp=recording.recording_timestamp,
         comment=recording.comment,
+        config_file=recording.config_file,
         should_process=recording.should_process,
         timestamp_spread=recording.timestamp_spread,
     )

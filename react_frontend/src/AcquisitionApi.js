@@ -402,7 +402,7 @@ export const AquisitionApi = (props) => {
 
     const changeComment = async (participant, filename, newComment) => {
         console.log(`Comment changed for ${participant} ${filename}: ${newComment}`);
-        const matchedRecording = getMatchingPriorRecordings(participant, filename);
+        const matchedRecording = await getMatchingPriorRecordings(participant, filename);
         matchedRecording.comment = newComment;
         await axios.post(`${API_BASE_URL}/update_recording`, matchedRecording);
         fetchRecordings();

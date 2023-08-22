@@ -225,10 +225,14 @@ def write_queue(
             out_video.write(im)
 
             # Check the timestamp spread between the current frame and previous frame
-            # print(f"{serial} Timestamp spread: {timestamps[-1] - timestamps[-2]}")
-            if (timestamps[-1] - timestamps[-2]) * 1e-6 > acquisition_fps * 1.2:
-                print(f"Warning | {serial} Timestamp spread: {(timestamps[-1] - timestamps[-2]) * 1e-6} {acquisition_fps} {acquisition_fps * 1.2}")
-                # frame_spreads.append((timestamps[-1] - timestamps[-2]) * 1e-6)
+            # Skip if either timestamp is 0
+            if timestamps[-1] != 0 and timestamps[-2] != 0:
+                spread = (timestamps[-1] - timestamps[-2]) * 1e-6
+                buffer_fps = acquisition_fps * 1.2
+                if spread > buffer_fps:
+                    print(f"Warning | {serial} Timestamp spread: {spread} {acquisition_fps} {buffer_fps}")
+                    print(timestamps[-1], timestamps[-2])
+                    # frame_spreads.append((timestamps[-1] - timestamps[-2]) * 1e-6)
 
         image_queue.task_done()
 
