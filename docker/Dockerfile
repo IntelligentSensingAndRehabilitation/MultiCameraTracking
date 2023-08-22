@@ -1,9 +1,5 @@
 FROM peabody124/posepipe
 
-# A hack currently, to have a local .datajoint_config.json replace the default one from posepipe
-COPY datajoint_config.json /root/.datajoint_config.json
-
-
 ### Install Spinnaker
 
 COPY docker/flir/spinnaker-3.1.0.79-amd64 /spinnaker
@@ -58,6 +54,9 @@ RUN chmod +x /Mocap/start_acquisition_gui.sh
 WORKDIR /
 RUN mkdir -p /data
 COPY configs /configs
+
+# A hack currently, to have a local .datajoint_config.json replace the default one from posepipe
+COPY datajoint_config.json /root/.datajoint_config.json
 
 # Run bash script to start front end and back end
 ENTRYPOINT ["/bin/bash"]
