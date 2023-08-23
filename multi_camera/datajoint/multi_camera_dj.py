@@ -973,7 +973,6 @@ def import_recording(vid_base, vid_path=".", video_project="MULTICAMERA_TEST", l
     from datetime import datetime
 
     from multi_camera.datajoint.multi_camera_dj import MultiCameraRecording, SingleCameraVideo
-    from ..analysis.calibration import hash_names
     from pose_pipeline import Video
 
     # search for files. expects them to be in the format vid_base.serial_number.mp4
@@ -993,8 +992,11 @@ def import_recording(vid_base, vid_path=".", video_project="MULTICAMERA_TEST", l
 
         return base, date
 
+    rec_json = json.load(open(os.path.join(vid_path, vid_base + ".json"), "r"))
+
     camera_names = [os.path.split(v)[1].split(".")[1] for v in vids]
-    camera_hash = hash_names(camera_names)
+    camera_hash = rec_json["camera_config_hash"]
+
     _, timestamp = mysplit(vid_base)
     timestamp = datetime.strptime(timestamp, "%Y%m%d_%H%M%S")
 
