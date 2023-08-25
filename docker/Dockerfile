@@ -40,6 +40,11 @@ RUN apt-get install -y net-tools
 ### Install EasyMocap
 RUN pip3 install git+https://github.com/peabody124/EasyMocap
 
+RUN apt-get install -y libtbb-dev
+RUN pip3 install tbb
+RUN pip3 install --upgrade tbb
+RUN pip3 install numba
+
 ### Install MultiCameraTracking package and dependencies
 
 WORKDIR /Mocap
