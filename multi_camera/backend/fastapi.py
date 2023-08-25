@@ -118,6 +118,10 @@ print(CONFIG_PATH)
 config_files = os.listdir(CONFIG_PATH)
 print(config_files)
 print([""] + [f for f in config_files if f.endswith(".yaml")])
+# import socket
+# print(socket.gethostname())
+# print(os.environ.get("HOSTNAME", "localhost"))
+# print(socket.getfqdn())
 
 
 loop = asyncio.get_event_loop()
@@ -191,11 +195,13 @@ class AppStatus:
 
 Server.handle_exit = AppStatus.handle_exit
 
+# base_url = os.environ.get("REACT_APP_BASE_URL", "localhost")
+
 # Add a middleware to handle CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000","http://localhost:8000"],
-    # allow_origins=["*"],
+    # allow_origins=[f"http://{base_url}:3000",f"http://{base_url}:8000"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
