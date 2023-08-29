@@ -1,9 +1,5 @@
 FROM peabody124/posepipe
 
-# A hack currently, to have a local .datajoint_config.json replace the default one from posepipe
-COPY datajoint_config.json /root/.datajoint_config.json
-
-
 ### Install Spinnaker
 
 COPY docker/flir/spinnaker-3.1.0.79-amd64 /spinnaker
@@ -11,6 +7,8 @@ COPY docker/flir/*.whl /spinnaker
 
 
 ARG DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update
 
 RUN apt-get install -y libusb-1.0-0 qtbase5-dev qtchooser qt5-qmake qtbase5-dev-tools curl screen
 
@@ -39,6 +37,14 @@ COPY react_frontend /Mocap/react_frontend
 ### Installing extra things (curl, screen, netstat) (can be removed after image is in stable state)
 RUN apt-get install -y net-tools
 
+### Install EasyMocap
+RUN pip3 install git+https://github.com/peabody124/EasyMocap
+
+RUN apt-get install -y libtbb-dev
+RUN pip3 install tbb
+RUN pip3 install --upgrade tbb
+RUN pip3 install numba
+
 ### Install MultiCameraTracking package and dependencies
 
 WORKDIR /Mocap
@@ -55,8 +61,11 @@ RUN chmod +x /Mocap/start_acquisition_gui.sh
 
 WORKDIR /
 RUN mkdir -p /data
-COPY configs /configs
+RUN mkdir -p /configs
 
-# Run bash script to start front end and back endd
+# A hack currently, to have a local .datajoint_config.json replace the default one from posepipe
+COPY datajoint_config.json /root/.datajoint_config.json
+
+# Run bash script to start front end and back end
 ENTRYPOINT ["/bin/bash"]
 CMD ["/Mocap/start_acquisition_gui.sh"]

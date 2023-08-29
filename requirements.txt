@@ -9,3 +9,7 @@ pyyaml
 sqlalchemy
 fastapi[all]
 colorlog
+jax
+jaxlib
+jaxopt
+jaxlie

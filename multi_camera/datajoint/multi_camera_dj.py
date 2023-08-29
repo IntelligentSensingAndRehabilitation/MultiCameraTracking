@@ -973,7 +973,6 @@ def import_recording(vid_base, vid_path=".", video_project="MULTICAMERA_TEST", l
     from datetime import datetime
 
     from multi_camera.datajoint.multi_camera_dj import MultiCameraRecording, SingleCameraVideo
-    from ..analysis.calibration import hash_names
     from pose_pipeline import Video
 
     # search for files. expects them to be in the format vid_base.serial_number.mp4
@@ -994,7 +993,13 @@ def import_recording(vid_base, vid_path=".", video_project="MULTICAMERA_TEST", l
         return base, date
 
     camera_names = [os.path.split(v)[1].split(".")[1] for v in vids]
-    camera_hash = hash_names(camera_names)
+
+    # Loading the JSON file corresponding to the calibration to get the hash
+    with open(os.path.join(vid_path,f"{vid_base}.json"),'r') as f:
+        output_json = json.load(f)
+
+    camera_hash = output_json["camera_config_hash"]
+
     _, timestamp = mysplit(vid_base)
     timestamp = datetime.strptime(timestamp, "%Y%m%d_%H%M%S")
 
@@ -1005,10 +1010,9 @@ def import_recording(vid_base, vid_path=".", video_project="MULTICAMERA_TEST", l
         "video_base_filename": vid_base,
     }
 
-    timestamps = json.load(open(os.path.join(vid_path, vid_base + ".json"), "r"))
-    frame_timestamps = np.array(timestamps["timestamps"])
-    if "serials" in timestamps.keys():
-        serials = timestamps["serials"]
+    frame_timestamps = np.array(output_json["timestamps"])
+    if "serials" in output_json.keys():
+        serials = output_json["serials"]
     else:
         assert legacy_flip is not None, "Please specify flip direction for videos without serial numbers"
         if legacy_flip:

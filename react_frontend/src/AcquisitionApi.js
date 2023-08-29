@@ -2,7 +2,11 @@ import React from 'react';
 import { useState, useEffect, useRef, createContext } from 'react';
 import axios from 'axios';
 
-const BASE_URL = 'localhost:8000/api/v1';
+// get first part of base url from environment variable
+// if not set, then use localhost
+const BASE_HOSTNAME = process.env.REACT_APP_BASE_URL || 'localhost';
+
+const BASE_URL = `${BASE_HOSTNAME}:8000/api/v1`;
 const API_BASE_URL = `http://${BASE_URL}`;
 const WS_BASE_URL = `ws://${BASE_URL}/ws`;
 
@@ -122,7 +126,6 @@ export const AquisitionApi = (props) => {
         fetchCurrentConfig();
         fetchRecordingStatus();
         fetchSession();
-        fetchKeypoints();
     }, []);
 
     useEffect(() => {
@@ -205,7 +208,10 @@ export const AquisitionApi = (props) => {
     }
 
     async function previewVideo(max_frames) {
-        await axios.post(`${API_BASE_URL}/preview`);
+        await axios.post(`${API_BASE_URL}/preview`,
+        {
+            max_frames: max_frames
+        });
         setRecordingProgress(0);
     }
 
@@ -234,13 +240,6 @@ export const AquisitionApi = (props) => {
         console.log("Recording DB: ", response.data)
         return response.data;
     };
-
-    async function fetchKeypoints() {
-        const response = await axios.get(`${API_BASE_URL}/keypoints`);
-        //console.log("Keypoints: ", response.data)
-        setKeypoints(response.data);
-        return response.data;
-    }
 
     // Mesh functions
 
@@ -407,7 +406,7 @@ export const AquisitionApi = (props) => {
 
     const changeComment = async (participant, filename, newComment) => {
         console.log(`Comment changed for ${participant} ${filename}: ${newComment}`);
-        const matchedRecording = getMatchingPriorRecordings(participant, filename);
+        const matchedRecording = await getMatchingPriorRecordings(participant, filename);
         matchedRecording.comment = newComment;
         await axios.post(`${API_BASE_URL}/update_recording`, matchedRecording);
         fetchRecordings();
@@ -466,7 +465,6 @@ export const AquisitionApi = (props) => {
         changeComment,
         runCalibration,
         processSession,
-        fetchKeypoints,
         fetchUnannotatedRecordings,
         annotateRecording,
         fetchMesh,

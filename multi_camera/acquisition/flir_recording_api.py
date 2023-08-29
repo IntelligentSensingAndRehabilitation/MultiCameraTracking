@@ -195,6 +195,7 @@ def write_queue(
 
     timestamps = []
     real_times = []
+    frame_spreads = []
 
     out_video = None
 
@@ -222,6 +223,16 @@ def write_queue(
 
         else:
             out_video.write(im)
+
+            # Check the timestamp spread between the current frame and previous frame
+            # Skip if either timestamp is 0
+            if timestamps[-1] != 0 and timestamps[-2] != 0:
+                spread = (timestamps[-1] - timestamps[-2]) * 1e-6
+                buffer_fps = acquisition_fps * 1.2
+                if spread > buffer_fps:
+                    print(f"Warning | {serial} Timestamp spread: {spread} {acquisition_fps} {buffer_fps}")
+                    print(timestamps[-1], timestamps[-2])
+                    # frame_spreads.append((timestamps[-1] - timestamps[-2]) * 1e-6)
 
         image_queue.task_done()
 
@@ -314,7 +325,7 @@ class FlirRecorder:
 
         iface_list = self.system.GetInterfaces()
 
-        if config_file is not None:
+        if config_file:
             with open(config_file, "r") as file:
                 self.camera_config = yaml.safe_load(file)
 
@@ -361,12 +372,14 @@ class FlirRecorder:
             # of cameras to select
             self.cams = [Camera(i, lock=True) for i in self.iface_cameras]
 
-        binning = 1
-        exposure_time = 15000
-
-        # Parse additional parameters from the config file
-        exposure_time = self.camera_config["acquisition-settings"]["exposure_time"]
-        frame_rate = self.camera_config["acquisition-settings"]["frame_rate"]
+        if self.camera_config:
+            # Parse additional parameters from the config file
+            exposure_time = self.camera_config["acquisition-settings"]["exposure_time"]
+            frame_rate = self.camera_config["acquisition-settings"]["frame_rate"]
+        else:
+            # If no config file is passed, use default values
+            exposure_time = 15000
+            frame_rate = 30
 
         # Updating the binning needed to run at 60 Hz. 
         # TODO: make this check more robust in the future
@@ -425,14 +438,14 @@ class FlirRecorder:
 
         return status
 
-    def start_acquisition(self, recording_path=None, preview_callback: callable = None, max_frames: int = 100):
+    def start_acquisition(self, recording_path=None, preview_callback: callable = None, max_frames: int = 1000):
         self.set_status("Recording")
 
         self.preview_callback = preview_callback
         self.video_base_file = recording_path
 
         # Initializing an image queue for each camera
-        self.image_queue_dict = {c.DeviceSerialNumber: Queue(100) for c in self.cams}
+        self.image_queue_dict = {c.DeviceSerialNumber: Queue(max_frames) for c in self.cams}
 
         # set up the threads to write videos to disk, if requested
         if self.video_base_file is not None:
@@ -533,11 +546,14 @@ class FlirRecorder:
 
         exposure_times = []
         frame_rates = []
+        camera_ids = []
         for c in self.cams:
             # Recording the final exposure times and requested frame rates for each camera
             # Actual frame rate can be calculated from the timestamps in the output json
             exposure_times.append(c.ExposureTime)
             frame_rates.append(c.BinningHorizontal * 30)
+
+            camera_ids.append(c.DeviceSerialNumber)
             # Stopping each camera
             c.stop()
 
@@ -556,7 +572,7 @@ class FlirRecorder:
         output_json["timestamps"] = np.array(output_json["timestamps"]).T.tolist()
         print(np.array(output_json["timestamps"]).shape)
 
-        if self.camera_config != "":
+        if self.camera_config:
             output_json["meta_info"] = self.camera_config["meta-info"]
             output_json["camera_info"] = self.camera_config["camera-info"]
             output_json["exposure_times"] = exposure_times
@@ -564,6 +580,12 @@ class FlirRecorder:
             camera_config_hash = self.get_config_hash(self.camera_config)
             print("CONFIG HASH",camera_config_hash)
             output_json["camera_config_hash"] = camera_config_hash
+        else:
+            output_json["meta_info"] = "No Config"
+            output_json["camera_info"] = camera_ids
+            output_json["exposure_times"] = exposure_times
+            output_json["frame_rate_requested"] = frame_rates
+            output_json["camera_config_hash"] = None
 
         if self.video_base_file is not None:
             # stop video writing threads and output json file
@@ -690,7 +712,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Record video from GigE FLIR cameras")
     parser.add_argument("vid_file", help="Video file to write")
-    parser.add_argument("-m", "--max_frames", type=int, default=100, help="Maximum frames to record")
+    parser.add_argument("-m", "--max_frames", type=int, default=1000, help="Maximum frames to record")
     parser.add_argument("-n", "--num_cams", type=int, default=4, help="Number of input cameras")
     parser.add_argument("-r", "--reset", default=False, action="store_true", help="Reset cameras first")
     parser.add_argument(
