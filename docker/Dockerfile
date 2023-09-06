@@ -10,7 +10,7 @@ ARG DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update
 
-RUN apt-get install -y libusb-1.0-0 qtbase5-dev qtchooser qt5-qmake qtbase5-dev-tools curl screen
+RUN apt-get install -y libusb-1.0-0 qtbase5-dev qt5-default qtchooser qt5-qmake qtbase5-dev-tools curl screen
 
 RUN echo 'debconf debconf/frontend select Noninteractive' | debconf-set-selections && \
     echo libgentl libspinnaker/accepted-flir-eula boolean true | debconf-set-selections && \
@@ -38,7 +38,9 @@ COPY react_frontend /Mocap/react_frontend
 RUN apt-get install -y net-tools
 
 ### Install EasyMocap
-RUN pip3 install git+https://github.com/peabody124/EasyMocap
+#RUN pip3 install git+https://github.com/peabody124/EasyMocap
+COPY docker/EasyMocap /EasyMocap
+RUN pip3 install -e /EasyMocap
 
 RUN apt-get install -y libtbb-dev
 RUN pip3 install tbb
@@ -52,9 +54,8 @@ COPY requirements.txt .
 RUN pip3 install -r requirements.txt
 COPY setup.py README.md /Mocap/
 COPY multi_camera /Mocap/multi_camera
+COPY model_data /Mocap/model_data
 RUN pip3 install -e /Mocap/
-
-WORKDIR /Mocap
 
 COPY docker/start_acquisition_gui.sh /Mocap/start_acquisition_gui.sh
 RUN chmod +x /Mocap/start_acquisition_gui.sh
@@ -66,6 +67,17 @@ RUN mkdir -p /configs
 # A hack currently, to have a local .datajoint_config.json replace the default one from posepipe
 COPY datajoint_config.json /root/.datajoint_config.json
 
-# Run bash script to start front end and back end
+### Install for biomechanical visualization
+# from https://github.com/facebookresearch/pytorch3d/blob/main/INSTALL.md#3-install-wheels-for-linux
+RUN pip3 install fvcore iopath torch trimesh pyvista
+RUN pip3 install --no-index --no-cache-dir pytorch3d -f https://dl.fbaipublicfiles.com/pytorch3d/packaging/wheels/py38_cu117_pyt201/download.html
+
+# need to use this specific version for now
+COPY docker/nimblephysics-0.8.73-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl /
+RUN pip3 install /nimblephysics-0.8.73-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
+#RUN pip3 install nimblephysics
+
+
+# # Run bash script to start front end and back end
 ENTRYPOINT ["/bin/bash"]
 CMD ["/Mocap/start_acquisition_gui.sh"]
