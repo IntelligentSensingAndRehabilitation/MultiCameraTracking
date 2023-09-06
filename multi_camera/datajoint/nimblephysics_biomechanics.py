@@ -13,9 +13,7 @@ from multi_camera.datajoint.multi_camera_dj import (
     PersonKeypointReconstructionMethodLookup,
 )
 
-# TODO: Ugh! for some reason we have to keep this in the same schema or get a foreign key error
-schema = dj.schema("mocap_sessions")
-# schema = dj.schema("multicamera_tracking_nimblephysics")
+schema = dj.schema("mocap_sessions_nimblephysics")
 
 
 reconstruction_settings = {

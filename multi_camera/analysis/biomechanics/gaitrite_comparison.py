@@ -3,41 +3,45 @@ import datajoint as dj
 
 from multi_camera.analysis.biomechanics import bilevel_optimization
 from multi_camera.analysis import gaitrite_comparison as analysis_gaitrite_comparison
-from multi_camera.datajoint.biomechanics import BiomechanicalReconstruction
+from multi_camera.validation.biomechanics.biomechanics import BiomechanicalReconstruction
 from multi_camera.datajoint import gaitrite_comparison as dj_gaitrite_comparison
 from multi_camera.datajoint.gaitrite_comparison import GaitRiteCalibration, GaitRiteRecordingAlignment
 
 schema = dj.schema("multicamera_tracking_biomechanics_gaitrite")
 
+
 def get_foot_positions(skeleton, poses):
     heels = []
     for p in poses:
         skeleton.setPositions(p)
-        
+
         right_heel = None
         right_toes = None
         left_heel = None
         left_toes = None
-        
+
         for b in skeleton.getBodyNodes():
-            for s in b.getShapeNodes():
+            n = b.getNumShapeNodes()
+            for i in range(n):
+                s = b.getShapeNode(i)
+
                 name = s.getName()
-                if 'calcn_r' in name:
+                if "calcn_r" in name:
                     right_heel = s.getWorldTransform().matrix()[:3, -1]
-                elif 'toes_r' in name:
+                elif "toes_r" in name:
                     right_toes = s.getWorldTransform().matrix()[:3, -1]
-                elif 'calcn_l' in name:
+                elif "calcn_l" in name:
                     left_heel = s.getWorldTransform().matrix()[:3, -1]
-                elif 'toes_l' in name:
+                elif "toes_l" in name:
                     left_toes = s.getWorldTransform().matrix()[:3, -1]
-                
+
         assert left_heel is not None and right_heel is not None and left_toes is not None and right_toes is not None
-        
+
         heels.append([left_heel, left_toes, right_heel, right_toes])
-        
+
     # convert to mm expected by calibration code
     heels = np.array(heels) * 1000.0
-    
+
     # append ones on last axis to fake confidence estimates
     heels = np.concatenate([heels, np.ones(heels.shape[:-1] + (1,))], axis=-1)
 
@@ -48,10 +52,10 @@ def fetch_data(key, skeleton=None):
     df = dj_gaitrite_comparison.fetch_data(key)[-1]
 
     if skeleton is None:
-        model_name, skeleton_def = (BiomechanicalReconstruction & key).fetch1('model_name', 'skeleton_definition')
-        skeleton = bilevel_optimization.reload_skeleton(model_name, skeleton_def['group_scales'], return_map=False)
+        model_name, skeleton_def = (BiomechanicalReconstruction & key).fetch1("model_name", "skeleton_definition")
+        skeleton = bilevel_optimization.reload_skeleton(model_name, skeleton_def["group_scales"], return_map=False)
 
-    timestamps, poses = (BiomechanicalReconstruction.Trial & key).fetch1('timestamps', 'poses')
+    timestamps, poses = (BiomechanicalReconstruction.Trial & key).fetch1("timestamps", "poses")
 
     foot_positions = get_foot_positions(skeleton, poses)
 
@@ -61,12 +65,12 @@ def fetch_data(key, skeleton=None):
 def align_trials(key):
     assert len(BiomechanicalReconstruction & key) == 1
 
-    model_name, skeleton_def = (BiomechanicalReconstruction & key).fetch1('model_name', 'skeleton_definition')
-    skeleton = bilevel_optimization.reload_skeleton(model_name, skeleton_def['group_scales'], return_map=False)
+    model_name, skeleton_def = (BiomechanicalReconstruction & key).fetch1("model_name", "skeleton_definition")
+    skeleton = bilevel_optimization.reload_skeleton(model_name, skeleton_def["group_scales"], return_map=False)
 
-    trial_keys = (BiomechanicalReconstruction.Trial & key).fetch('KEY')
+    trial_keys = (BiomechanicalReconstruction.Trial & key).fetch("KEY")
     data = [fetch_data(k, skeleton) for k in trial_keys]
-    toffsets = [(GaitRiteRecordingAlignment & k).fetch1('t_offset') for k in trial_keys]
+    toffsets = [(GaitRiteRecordingAlignment & k).fetch1("t_offset") for k in trial_keys]
 
     res = analysis_gaitrite_comparison.align_steps_multiple_trials(data, toffsets)
     R, t, s, residuals, grouped_residuals, score = res
@@ -96,9 +100,10 @@ class BiomechanicsCalibration(dj.Computed):
 
     def make(self, key):
         R, t, s, toffsets, score = align_trials(key)
+        print(R, t, s)
         self.insert1(dict(key, r=R, t=t, s=s, t_offsets=toffsets, score=score))
 
-        trial_keys = (BiomechanicalReconstruction.Trial & key).fetch('KEY')
+        trial_keys = (BiomechanicalReconstruction.Trial & key).fetch("KEY")
         for k, toffset in zip(trial_keys, toffsets):
             self.Trial.insert1(dict(**k, t_offset=toffset))
 
@@ -130,7 +135,6 @@ class BiomechanicsStepLengthError(dj.Computed):
         """
 
     def make(self, key):
-
         t_offset = (BiomechanicsCalibration.Trial & key).fetch1("t_offset")
 
         dt, kp3d, df = fetch_data(key)
@@ -233,7 +237,6 @@ class BiomechanicsStepWidthError(dj.Computed):
                 heel_trace = kp3d[trace_idx, 2, :2]
 
             if i >= 2 and last_left_heel is not None and last_right_heel is not None:
-
                 # we need to know the next contralateral foot position to compute the
                 # line of progression required for measuring the step width, so update
                 # the index accordingly. Note that the code below compares against the
@@ -292,7 +295,6 @@ class BiomechanicsStepWidthError(dj.Computed):
 
 
 def plot_data(key, t_offset=None, axis=0):
-
     import matplotlib.pyplot as plt
 
     if t_offset is None:
