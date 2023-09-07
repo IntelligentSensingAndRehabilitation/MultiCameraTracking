@@ -26,7 +26,9 @@ def load_skeleton_meshes(skeleton):
     objects = {}
 
     for b in skeleton.getBodyNodes():
-        for s in b.getShapeNodes():
+        n = b.getNumShapeNodes()
+        for i in range(n):
+            s = b.getShapeNode(i)
             name = s.getName()
             shape = s.getShape()
             scale = shape.getScale()
@@ -48,7 +50,9 @@ def pose_skeleton(skeleton, pose, meshes=None):
 
     posed_meshes = {}
     for b in skeleton.getBodyNodes():
-        for s in b.getShapeNodes():
+        n = b.getNumShapeNodes()
+        for i in range(n):
+            s = b.getShapeNode(i)
             name = s.getName()
             mesh = meshes[name].copy()
             mesh = mesh.apply_transform(s.getWorldTransform().matrix())

@@ -70,7 +70,9 @@ def getBiomechanicalTrajectory(skeleton, poses):
         skeleton.setPositions(pose)
 
         for b in skeleton.getBodyNodes():
-            for s in b.getShapeNodes():
+            n = b.getNumShapeNodes()
+            for i in range(n):
+                s = b.getShapeNode(i)
                 name = s.getName()
                 transform_matrix = s.getWorldTransform().matrix()
 
