@@ -18,7 +18,7 @@ affinity:
       MAX_DIST: 0.1
   svt_args:
     maxIter: 10000
-    w_sparse: 0.3
+    w_sparse: 0.2
     w_rank: 50
 
 associate:

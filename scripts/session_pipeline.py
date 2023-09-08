@@ -69,9 +69,9 @@ def preannotation_session_pipeline(keys: List[Dict] = None, bridging: bool = Tru
         print("Computing initial reconstruction for {} videos".format(len(keys)))
 
     if bridging:
-        bottom_up_pipeline(keys, bottom_up_method_name="Bridging_OpenPose")
+        bottom_up_pipeline(keys, bottom_up_method_name="Bridging_OpenPose", reserve_jobs=True)
     else:
-        bottom_up_pipeline(keys, bottom_up_method_name="OpenPose_HR")
+        bottom_up_pipeline(keys, bottom_up_method_name="OpenPose_HR", reserve_jobs=True)
 
     # now run easymocap
     VideoInfo.populate(SingleCameraVideo * MultiCameraRecording, reserve_jobs=True)
@@ -121,3 +121,4 @@ if __name__ == "__main__":
     assign_calibration()
     preannotation_session_pipeline()
     postannotation_session_pipeline()
+    postannotation_session_pipeline(top_down_method_name="MMPoseHalpe")

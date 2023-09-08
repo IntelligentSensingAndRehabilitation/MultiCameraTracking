@@ -36,7 +36,7 @@ def run_calibration(vid_base, vid_path=None):
 
     print(vid_path, vid_base)
 
-    entry = run_calibration(vid_base, vid_path, jax_cal=True)
+    entry = run_calibration(vid_base, vid_path, jax_cal=False)
 
     if np.isnan(entry["reprojection_error"]):
         raise Exception(f"Calibration failed: {entry}")

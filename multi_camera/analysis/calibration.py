@@ -847,6 +847,23 @@ def cycle_residual_fun(camera_params, keypoints_2d, nonlinear_threshold=1000, si
     return residuals
 
 
+def huber_loss(err: float, delta: float = 1.0) -> float:
+    """Huber loss.
+
+    Args:
+      err: difference between prediction and target
+      delta: radius of quadratic behavior
+    Returns:
+      loss value
+
+    References:
+      https://en.wikipedia.org/wiki/Huber_loss
+    """
+    # err = jnp.linalg.norm(err, axis=-1)  # take euclidean distance first
+    err = jnp.abs(err)
+    return jnp.where(err > delta, delta * (err - 0.5 * delta), 0.5 * err**2)
+
+
 def keypoint3d_reprojection_residuals(params, keypoints2d):
     """
     Compute the residual distance between estimated keypoints reprojected
@@ -920,6 +937,18 @@ def checkerboard_and_keypoints_residuals(
     L1 = checkerboard_reprojection_residuals(params, checkerboard_points, checkerboard_shape)
     L2 = keypoint3d_reprojection_residuals(params, keypoints2d)
 
+    L1 = huber_loss(L1)
+    L2 = huber_loss(L2)
+
+    # get the checkerboard parameters and smoothness for tvec and rvec
+    # checkerboard_rvecs = params["checkerboard_rvecs"] # ignore for now until handling unwrapping
+    checkerboard_tvecs = params["checkerboard_tvecs"]
+    delta_reg = jnp.mean(jnp.abs(jnp.diff(checkerboard_tvecs, axis=1)))
+
+    # get the keypoint parameters and smoothness
+    keypoints3d = params["keypoints3d"]
+    delta_keypoints = jnp.mean(jnp.abs(jnp.diff(keypoints3d, axis=1)))
+
     if False:
         # for soem reason this introduces nan values???
 
@@ -943,7 +972,7 @@ def checkerboard_and_keypoints_residuals(
 
     L = jnp.mean(L1) * checkerboard_ratio + L2 * (1 - checkerboard_ratio)
 
-    return L
+    return L  # + delta_keypoints + delta_reg
 
 
 def make_residual_fun_wrapper(fun: Callable, initial_params: Dict, exclude_parameters: List[str] = [], reduce=False):
@@ -1005,6 +1034,7 @@ def checkerboard_initialize(
     checkerboard_tvecs = np.zeros((N, 3))
 
     checkerboard_3d = triangulate_point(camera_params, checkerboard_points)
+    checkerboard_3d = robust_triangulate_points(camera_params, checkerboard_points)[..., :-1]  # drop confidence
 
     checkerboard_tvecs = jnp.mean(checkerboard_3d, axis=1)  # average over the spatial dimensions of checkerboard
     checkerboard_tvecs = checkerboard_tvecs / 1000
@@ -1022,6 +1052,7 @@ def checkerboard_bundle_calibrate(
     initial_params: Dict = None,
     threshold: float = 0.2,
     anneal: bool = True,
+    checkerboard_reset_n: int = 0,
     return_error: bool = False,
 ):
     """
@@ -1084,6 +1115,10 @@ def checkerboard_bundle_calibrate(
 
         # monitor the cycle error, but it's not easy to use directly during optimization
         print(f"Iteration {i} error: {err}, cycle error: {cycle_err}")
+
+        if checkerboard_reset_n > 0 and i % checkerboard_reset_n == 0:
+            checkerboard_params = checkerboard_initialize(initial_params, checkerboard_points)
+            params["checkerboard_tvecs"] = checkerboard_params["checkerboard_tvecs"]
 
         if anneal and i == iterations // 4:
             print("Adding distortion parameters")
@@ -1214,6 +1249,8 @@ def bundle_checkerboard_and_keypoints_calibrate(
     max_frames_init: int = 50,
     iterations: int = 25,
     threshold: float = 0.2,
+    checkerboard_reset_n=5,
+    keypoint_reset_n=5,
     anneal: bool = False,
 ):
     """
@@ -1233,7 +1270,8 @@ def bundle_checkerboard_and_keypoints_calibrate(
     if initial_params is None:
         initial_params = initialize_group_calibration(parsers, max_cv2_frames=max_frames_init)[0]
 
-    keypoints3d = triangulate_point(initial_params, keypoints2d)
+    # keypoints3d = triangulate_point(initial_params, keypoints2d)
+    keypoints3d = robust_triangulate_points(initial_params, keypoints2d)
 
     checkerboard_shape = parsers[0].objp
 
@@ -1276,13 +1314,23 @@ def bundle_checkerboard_and_keypoints_calibrate(
     residual_fun, x, restore_params = make_residual_fun_wrapper(
         checkerboard_and_keypoints_residuals, params, ["mtx", "dist"] if anneal else [], reduce=True
     )
-    optimizer = jaxopt.GradientDescent(fun=residual_fun, verbose=False, maxiter=5000, acceleration=True)
+    optimizer = jaxopt.GradientDescent(fun=residual_fun, verbose=False, maxiter=5000, acceleration=True, stepsize=-1.0)
 
     for i in range(iterations):
         res = optimizer.run(
             x, checkerboard_points=checkerboard_points, checkerboard_shape=checkerboard_shape, keypoints2d=keypoints2d
         )
         x = res.params
+
+        if keypoint_reset_n > 0 and i % keypoint_reset_n == 0:
+            print("resetting keypoints3d")
+            keypoints3d = robust_triangulate_points(initial_params, keypoints2d)
+            params["keypoints3d"] = keypoints3d
+
+        if checkerboard_reset_n > 0 and i % checkerboard_reset_n == 0:
+            print("resetting checkerboard")
+            checkerboard_params = checkerboard_initialize(initial_params, checkerboard_points)
+            params["checkerboard_tvecs"] = checkerboard_params["checkerboard_tvecs"]
 
         err = residual_fun(
             res.params,
