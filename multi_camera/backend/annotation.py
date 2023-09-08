@@ -1,7 +1,7 @@
+import os
 from typing import List
 
-# TODO: create server configuration for things like this
-model_path: str = "/Mocap/model_data/smpl_clean/"
+model_path : str = os.path.join(os.path.dirname(os.path.abspath(__file__)),  "../../model_data/smpl_clean/")
 
 
 def get_unannotated_recordings():
