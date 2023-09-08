@@ -38,9 +38,14 @@ COPY react_frontend /Mocap/react_frontend
 RUN apt-get install -y net-tools
 
 ### Install EasyMocap
-#RUN pip3 install git+https://github.com/peabody124/EasyMocap
-COPY docker/EasyMocap /EasyMocap
-RUN pip3 install -e /EasyMocap
+WORKDIR /
+RUN git clone https://github.com/peabody124/EasyMocap
+RUN pip install -e /EasyMocap
+
+### Install for biomechanical visualization
+# from https://github.com/facebookresearch/pytorch3d/blob/main/INSTALL.md#3-install-wheels-for-linux
+RUN pip3 install fvcore iopath torch trimesh pyvista
+RUN pip3 install --no-index --no-cache-dir pytorch3d -f https://dl.fbaipublicfiles.com/pytorch3d/packaging/wheels/py38_cu117_pyt201/download.html
 
 RUN apt-get install -y libtbb-dev
 RUN pip3 install tbb
