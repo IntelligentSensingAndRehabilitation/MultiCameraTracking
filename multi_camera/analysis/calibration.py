@@ -139,8 +139,38 @@ class CheckerboardAccumulator:
             rvecs.append(rvec)
             tvecs.append(tvec)
 
+<<<<<<< HEAD
         self.calibrated_frames = self.frames
         return {"mtx": mtx, "dist": dist, "rvecs": rvecs, "tvecs": tvecs, "frames": self.calibrated_frames}
+=======
+        initial_matrix = np.array([[1000, 0, h / 2], [0, 1000, w / 2], [0, 0, 1]])
+
+        _, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(
+            objpoints, imgpoints, (h, w), initial_matrix, np.zeros((5,)), flags=flags
+        )
+        newcameramtx, roi = cv2.getOptimalNewCameraMatrix(mtx, dist, (w, h), 1, (w, h))
+
+        rvecs = []
+        tvecs = []
+        for imgpoint in self.corners:
+            retval, rvec, tvec, inliers = cv2.solvePnPRansac(
+                self.objp, imgpoint, mtx, dist, confidence=0.9, reprojectionError=30
+            )
+            rvecs.append(rvec)
+            tvecs.append(tvec)
+
+        self.calibrated_frames = self.frames
+
+        return {
+            "mtx": mtx,
+            "dist": dist,
+            "rvecs": rvecs,
+            "tvecs": tvecs,
+            "newcameramtx": newcameramtx,
+            "roi": roi,
+            "frames": self.calibrated_frames,
+        }
+>>>>>>> 40f269f... Calibration: more robust initialization
 
     def get_points(self, idx):
         return [self.objp] * len(idx), list(np.array(self.corners)[idx])
@@ -375,46 +405,56 @@ def initialize_group_calibration(parsers, max_cv2_frames=50):
 
         assert type(matches[i, j]) == np.ndarray
 
-        p1 = parsers[i]
-        p2 = parsers[j]
-
         frames = matches[i, j]
+
+        rvec_i = [cals[i]["rvecs"][i] for k in cals[i]["frames"] if k in frames]
+        tvec_i = [cals[i]["tvecs"][i] for k in cals[i]["frames"] if k in frames]
+
+        rvec_j = [cals[j]["rvecs"][j] for k in cals[j]["frames"] if k in frames]
+        tvec_j = [cals[j]["tvecs"][j] for k in cals[j]["frames"] if k in frames]
 
         print(f"Linking {i} -> {j} using {len(frames)} frames")
 
-        objpoints = [p1.objp] * len(frames)
+        def make_M(rvec, tvec):
+            # from aniposelib
+            out = np.zeros((4, 4))
+            rotmat, _ = cv2.Rodrigues(rvec)
+            out[:3, :3] = rotmat
+            out[:3, 3] = tvec.flatten()
+            out[3, 3] = 1
+            return out
 
-        idx1 = [p1.frames.index(f) for f in frames]
-        im1points = [p1.corners[i] for i in idx1]
+        def mean_transform(M_list):
+            rvecs = [cv2.Rodrigues(M[:3, :3])[0][:, 0] for M in M_list]
+            tvecs = [M[:3, 3] for M in M_list]
 
-        idx2 = [p2.frames.index(f) for f in frames]
-        im2points = [p2.corners[i] for i in idx2]
+            rvec = np.mean(rvecs, axis=0)
+            tvec = np.mean(tvecs, axis=0)
 
-        h, w, _ = p1.shape
+            return make_M(rvec, tvec)
 
-        cal1 = cals[i]
-        cal2 = cals[j]
+        L = []
+        for ri, ti, rj, tj in zip(rvec_i, tvec_i, rvec_j, tvec_j):
+            M_i = make_M(ri, ti)
+            M_j = make_M(rj, tj)
+            M = np.matmul(M_i, np.linalg.inv(M_j))
+            L.append(M)
 
-        stereocalib_criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 1000, 1e-6)
-        stereocalib_flags = cv2.CALIB_USE_INTRINSIC_GUESS
+        def mean_transform(M_list):
+            rvecs = [cv2.Rodrigues(M[:3, :3])[0][:, 0] for M in M_list]
+            tvecs = [M[:3, 3] for M in M_list]
 
-        res = cv2.stereoCalibrate(
-            objpoints,
-            im1points,
-            im2points,
-            cal1["mtx"].copy(),
-            cal1["dist"].copy(),
-            cal2["mtx"].copy(),
-            cal2["dist"].copy(),
-            (h, w),
-            criteria=stereocalib_criteria,
-            flags=stereocalib_flags,
-        )
+            rvec = np.mean(rvecs, axis=0)
+            tvec = np.mean(tvecs, axis=0)
 
-        retval, cameraMatrix1, distCoeffs1, cameraMatrix2, distCoeffs2, R, T, E, F = res
+            return make_M(rvec, tvec)
+
+        M = mean_transform(L)
+        T = M[:3, 3]
+        R = M[:3, :3]
 
         # adjust rotation and translation based on the reference camera
-        T = T[:, 0] + R @ Ts[i]
+        T = T + R @ Ts[i]
         R = R @ Rs[i]
 
         Rs[j] = R
