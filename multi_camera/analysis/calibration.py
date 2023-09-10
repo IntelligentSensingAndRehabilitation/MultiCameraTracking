@@ -407,12 +407,34 @@ def initialize_group_calibration(parsers, max_cv2_frames=50):
 
             return make_M(rvec, tvec)
 
+        from scipy.cluster.hierarchy import linkage, fcluster
+        from scipy.cluster.vq import whiten
+        from collections import defaultdict, Counter
+
         L = []
         for ri, ti, rj, tj in zip(rvec_i, tvec_i, rvec_j, tvec_j):
             M_i = make_M(ri, ti)
             M_j = make_M(rj, tj)
             M = np.matmul(M_i, np.linalg.inv(M_j))
             L.append(M)
+
+        def get_most_common(vals):
+            Z = linkage(whiten(vals), "ward")
+            n_clust = max(len(vals) / 10, 3)
+            clusts = fcluster(Z, t=n_clust, criterion="maxclust")
+            cc = Counter(clusts[clusts >= 0])
+            most = cc.most_common(n=1)
+            top = most[0][0]
+            good = clusts == top
+            return good
+
+        def select_matrices(Ms):
+            Ms = np.array(Ms)
+            rvecs = [cv2.Rodrigues(M[:3, :3])[0][:, 0] for M in Ms]
+            tvecs = np.array([M[:3, 3] for M in Ms])
+            best = get_most_common(np.hstack([rvecs, tvecs]))
+            Ms_best = Ms[best]
+            return Ms_best
 
         def mean_transform(M_list):
             rvecs = [cv2.Rodrigues(M[:3, :3])[0][:, 0] for M in M_list]
@@ -423,7 +445,23 @@ def initialize_group_calibration(parsers, max_cv2_frames=50):
 
             return make_M(rvec, tvec)
 
-        M = mean_transform(L)
+        def mean_transform_robust(M_list, approx=None, error=0.3):
+            if approx is None:
+                M_list_robust = M_list
+            else:
+                M_list_robust = []
+                for M in M_list:
+                    rot_error = (M - approx)[:3, :3]
+                    m = np.max(np.abs(rot_error))
+                    if m < error:
+                        M_list_robust.append(M)
+            return mean_transform(M_list_robust)
+
+        L_best = select_matrices(L)
+        M_mean = mean_transform(L_best)
+        M_mean = mean_transform_robust(L, M_mean, error=0.1)
+        M = M_mean
+
         T = M[:3, 3]
         R = M[:3, :3]
 
