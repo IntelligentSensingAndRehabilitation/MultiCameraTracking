@@ -308,8 +308,32 @@ def initialize_group_calibration(parsers, max_cv2_frames=50):
                 nonzero_matches[i, j] = True
                 nonzero_matches[j, i] = True
 
+    # now use numpy map over the matrix and get counts
+    get_count = lambda x: len(x) if type(x) == np.ndarray else 0
+    matrix = np.vectorize(get_count)(matches)
+
+    # Step 1: Identify the hub node
+    origin = np.argmax(matrix.sum(axis=0))
+
+    # Step 2: Build the list of pairs to create a subgraph
+    subgraph_edges = []
+    visited = {origin}
+
+    while len(visited) < len(matrix):
+        # Find the neighbor with the highest weight that hasn't been visited yet
+        max_weight = -1
+        next_node = None
+        for i in visited:
+            for j in range(len(matrix)):
+                if j not in visited and matrix[i, j] > max_weight:
+                    max_weight = matrix[i, j]
+                    next_node = (i, j)
+
+        # Add the edge to the subgraph and mark the node as visited
+        subgraph_edges.append(next_node)
+        visited.add(next_node[1])
+
     # find the row with the most calibrated cameras to call the origin
-    origin = np.argmax(np.sum(nonzero_matches, axis=0))
     print(f"Using camera {origin} as the origin")
     initialized = np.zeros((N,), dtype=bool)
     initialized[origin] = True
@@ -322,64 +346,66 @@ def initialize_group_calibration(parsers, max_cv2_frames=50):
     # we iterate through this multiple times to try and find any paths between
     # cameras to the origin camera
 
-    for i in itertools.chain.from_iterable(itertools.repeat(np.arange(0, N), N)):
+    min_count = np.linspace(max_cv2_frames, 1, N // 2).astype(int)
+    thresh_idx = 0
+    for i, j in subgraph_edges:  # in itertools.chain.from_iterable(itertools.repeat(np.arange(0, N), N * 2)):
         # iterate through cameras as a reference
 
         if ~initialized[i]:
             continue
 
-        for j in range(0, N):
-            if initialized[j]:
-                # no need to double compute
-                continue
+        if initialized[j]:
+            # no need to double compute
+            continue
 
-            if type(matches[i, j]) == np.ndarray:
-                p1 = parsers[i]
-                p2 = parsers[j]
+        assert type(matches[i, j]) == np.ndarray
 
-                frames = matches[i, j]
+        p1 = parsers[i]
+        p2 = parsers[j]
 
-                print(f"Linking {i} -> {j} using {len(frames)} frames")
+        frames = matches[i, j]
 
-                objpoints = [p1.objp] * len(frames)
+        print(f"Linking {i} -> {j} using {len(frames)} frames")
 
-                idx1 = [p1.frames.index(f) for f in frames]
-                im1points = [p1.corners[i] for i in idx1]
+        objpoints = [p1.objp] * len(frames)
 
-                idx2 = [p2.frames.index(f) for f in frames]
-                im2points = [p2.corners[i] for i in idx2]
+        idx1 = [p1.frames.index(f) for f in frames]
+        im1points = [p1.corners[i] for i in idx1]
 
-                h, w, _ = p1.shape
+        idx2 = [p2.frames.index(f) for f in frames]
+        im2points = [p2.corners[i] for i in idx2]
 
-                cal1 = cals[i]
-                cal2 = cals[j]
+        h, w, _ = p1.shape
 
-                stereocalib_criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 1000, 1e-6)
-                stereocalib_flags = cv2.CALIB_USE_INTRINSIC_GUESS
+        cal1 = cals[i]
+        cal2 = cals[j]
 
-                res = cv2.stereoCalibrate(
-                    objpoints,
-                    im1points,
-                    im2points,
-                    cal1["mtx"].copy(),
-                    cal1["dist"].copy(),
-                    cal2["mtx"].copy(),
-                    cal2["dist"].copy(),
-                    (h, w),
-                    criteria=stereocalib_criteria,
-                    flags=stereocalib_flags,
-                )
+        stereocalib_criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 1000, 1e-6)
+        stereocalib_flags = cv2.CALIB_USE_INTRINSIC_GUESS
 
-                retval, cameraMatrix1, distCoeffs1, cameraMatrix2, distCoeffs2, R, T, E, F = res
+        res = cv2.stereoCalibrate(
+            objpoints,
+            im1points,
+            im2points,
+            cal1["mtx"].copy(),
+            cal1["dist"].copy(),
+            cal2["mtx"].copy(),
+            cal2["dist"].copy(),
+            (h, w),
+            criteria=stereocalib_criteria,
+            flags=stereocalib_flags,
+        )
 
-                # adjust rotation and translation based on the reference camera
-                T = T[:, 0] + R @ Ts[i]
-                R = R @ Rs[i]
+        retval, cameraMatrix1, distCoeffs1, cameraMatrix2, distCoeffs2, R, T, E, F = res
 
-                Rs[j] = R
-                Ts[j] = T
+        # adjust rotation and translation based on the reference camera
+        T = T[:, 0] + R @ Ts[i]
+        R = R @ Rs[i]
 
-                initialized[j] = True
+        Rs[j] = R
+        Ts[j] = T
+
+        initialized[j] = True
 
     if np.any(~initialized):
         print("Not all cameras initialized. Calibration graph not fully connected")
@@ -709,12 +735,12 @@ def run_calibration(vid_base, vid_path=".", return_parsers=False, frame_skip=2, 
     cam_names = [os.path.split(v)[1].split(".")[1] for v in vids]
 
     # Loading the JSON file corresponding to the calibration to get the hash
-    with open(os.path.join(vid_path,f"{vid_base}.json"),'r') as f:
+    with open(os.path.join(vid_path, f"{vid_base}.json"), "r") as f:
         output_json = json.load(f)
 
     config_hash = output_json["camera_config_hash"]
-    
-    print(f'Cam names: {cam_names} camera config hash: {config_hash}')
+
+    print(f"Cam names: {cam_names} camera config hash: {config_hash}")
 
     print(f"Found {len(vids)} videos. Now detecting checkerboards.")
     parsers = get_checkerboards(
