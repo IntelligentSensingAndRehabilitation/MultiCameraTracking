@@ -101,7 +101,7 @@ class CheckerboardAccumulator:
             idx = np.linspace(0, N - 1, max_frames).astype(int)
             objpoints = list(np.array(objpoints)[idx])
             imgpoints = list(np.array(imgpoints)[idx])
-            self.calibrated_frames = [self.frames[i] for i in idx.tolist()]
+            self.calibrated_frames = idx.tolist()
         else:
             self.calibrated_frames = self.frames
 
@@ -126,26 +126,7 @@ class CheckerboardAccumulator:
         )
         newcameramtx, roi = cv2.getOptimalNewCameraMatrix(mtx, dist, (w, h), 1, (w, h))
 
-        rvecs = []
-        tvecs = []
-        for imgpoint in self.corners:
-            retval, rvec, tvec, inliers = cv2.solvePnPRansac(
-                self.objp, imgpoint, mtx, dist, confidence=0.9, reprojectionError=30
-            )
-            rvecs.append(rvec)
-            tvecs.append(tvec)
-
-        self.calibrated_frames = self.frames
-
-        return {
-            "mtx": mtx,
-            "dist": dist,
-            "rvecs": rvecs,
-            "tvecs": tvecs,
-            "newcameramtx": newcameramtx,
-            "roi": roi,
-            "frames": self.calibrated_frames,
-        }
+        return {"mtx": mtx, "dist": dist, "rvecs": rvecs, "tvecs": tvecs, "newcameramtx": newcameramtx, "roi": roi}
 
     def get_points(self, idx):
         return [self.objp] * len(idx), list(np.array(self.corners)[idx])
@@ -379,94 +360,46 @@ def initialize_group_calibration(parsers, max_cv2_frames=50):
 
         assert type(matches[i, j]) == np.ndarray
 
+        p1 = parsers[i]
+        p2 = parsers[j]
+
         frames = matches[i, j]
-
-        rvec_i = [cals[i]["rvecs"][i] for k in cals[i]["frames"] if k in frames]
-        tvec_i = [cals[i]["tvecs"][i] for k in cals[i]["frames"] if k in frames]
-
-        rvec_j = [cals[j]["rvecs"][j] for k in cals[j]["frames"] if k in frames]
-        tvec_j = [cals[j]["tvecs"][j] for k in cals[j]["frames"] if k in frames]
 
         print(f"Linking {i} -> {j} using {len(frames)} frames")
 
-        def make_M(rvec, tvec):
-            # from aniposelib
-            out = np.zeros((4, 4))
-            rotmat, _ = cv2.Rodrigues(rvec)
-            out[:3, :3] = rotmat
-            out[:3, 3] = tvec.flatten()
-            out[3, 3] = 1
-            return out
+        objpoints = [p1.objp] * len(frames)
 
-        def mean_transform(M_list):
-            rvecs = [cv2.Rodrigues(M[:3, :3])[0][:, 0] for M in M_list]
-            tvecs = [M[:3, 3] for M in M_list]
+        idx1 = [p1.frames.index(f) for f in frames]
+        im1points = [p1.corners[i] for i in idx1]
 
-            rvec = np.mean(rvecs, axis=0)
-            tvec = np.mean(tvecs, axis=0)
+        idx2 = [p2.frames.index(f) for f in frames]
+        im2points = [p2.corners[i] for i in idx2]
 
-            return make_M(rvec, tvec)
+        h, w, _ = p1.shape
 
-        from scipy.cluster.hierarchy import linkage, fcluster
-        from scipy.cluster.vq import whiten
-        from collections import defaultdict, Counter
+        cal1 = cals[i]
+        cal2 = cals[j]
 
-        L = []
-        for ri, ti, rj, tj in zip(rvec_i, tvec_i, rvec_j, tvec_j):
-            M_i = make_M(ri, ti)
-            M_j = make_M(rj, tj)
-            M = np.matmul(M_i, np.linalg.inv(M_j))
-            L.append(M)
+        stereocalib_criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 1000, 1e-6)
+        stereocalib_flags = cv2.CALIB_USE_INTRINSIC_GUESS
 
-        def get_most_common(vals):
-            Z = linkage(whiten(vals), "ward")
-            n_clust = max(len(vals) / 10, 3)
-            clusts = fcluster(Z, t=n_clust, criterion="maxclust")
-            cc = Counter(clusts[clusts >= 0])
-            most = cc.most_common(n=1)
-            top = most[0][0]
-            good = clusts == top
-            return good
+        res = cv2.stereoCalibrate(
+            objpoints,
+            im1points,
+            im2points,
+            cal1["mtx"].copy(),
+            cal1["dist"].copy(),
+            cal2["mtx"].copy(),
+            cal2["dist"].copy(),
+            (h, w),
+            criteria=stereocalib_criteria,
+            flags=stereocalib_flags,
+        )
 
-        def select_matrices(Ms):
-            Ms = np.array(Ms)
-            rvecs = [cv2.Rodrigues(M[:3, :3])[0][:, 0] for M in Ms]
-            tvecs = np.array([M[:3, 3] for M in Ms])
-            best = get_most_common(np.hstack([rvecs, tvecs]))
-            Ms_best = Ms[best]
-            return Ms_best
-
-        def mean_transform(M_list):
-            rvecs = [cv2.Rodrigues(M[:3, :3])[0][:, 0] for M in M_list]
-            tvecs = [M[:3, 3] for M in M_list]
-
-            rvec = np.mean(rvecs, axis=0)
-            tvec = np.mean(tvecs, axis=0)
-
-            return make_M(rvec, tvec)
-
-        def mean_transform_robust(M_list, approx=None, error=0.3):
-            if approx is None:
-                M_list_robust = M_list
-            else:
-                M_list_robust = []
-                for M in M_list:
-                    rot_error = (M - approx)[:3, :3]
-                    m = np.max(np.abs(rot_error))
-                    if m < error:
-                        M_list_robust.append(M)
-            return mean_transform(M_list_robust)
-
-        L_best = select_matrices(L)
-        M_mean = mean_transform(L_best)
-        M_mean = mean_transform_robust(L, M_mean, error=0.1)
-        M = M_mean
-
-        T = M[:3, 3]
-        R = M[:3, :3]
+        retval, cameraMatrix1, distCoeffs1, cameraMatrix2, distCoeffs2, R, T, E, F = res
 
         # adjust rotation and translation based on the reference camera
-        T = T + R @ Ts[i]
+        T = T[:, 0] + R @ Ts[i]
         R = R @ Rs[i]
 
         Rs[j] = R
