@@ -446,56 +446,46 @@ def initialize_group_calibration(parsers, max_cv2_frames=50):
 
         assert type(matches[i, j]) == np.ndarray, f"No matches between {i} and {j}: {matches[i, j]}"
 
+        p1 = parsers[i]
+        p2 = parsers[j]
+
         frames = matches[i, j]
-
-        rvec_i = [cals[i]["rvecs"][i] for k in cals[i]["frames"] if k in frames]
-        tvec_i = [cals[i]["tvecs"][i] for k in cals[i]["frames"] if k in frames]
-
-        rvec_j = [cals[j]["rvecs"][j] for k in cals[j]["frames"] if k in frames]
-        tvec_j = [cals[j]["tvecs"][j] for k in cals[j]["frames"] if k in frames]
 
         print(f"Linking {i} -> {j} using {len(frames)} frames")
 
-        def make_M(rvec, tvec):
-            # from aniposelib
-            out = np.zeros((4, 4))
-            rotmat, _ = cv2.Rodrigues(rvec)
-            out[:3, :3] = rotmat
-            out[:3, 3] = tvec.flatten()
-            out[3, 3] = 1
-            return out
+        objpoints = [p1.objp] * len(frames)
 
-        def mean_transform(M_list):
-            rvecs = [cv2.Rodrigues(M[:3, :3])[0][:, 0] for M in M_list]
-            tvecs = [M[:3, 3] for M in M_list]
+        idx1 = [p1.frames.index(f) for f in frames]
+        im1points = [p1.corners[i] for i in idx1]
 
-            rvec = np.mean(rvecs, axis=0)
-            tvec = np.mean(tvecs, axis=0)
+        idx2 = [p2.frames.index(f) for f in frames]
+        im2points = [p2.corners[i] for i in idx2]
 
-            return make_M(rvec, tvec)
+        h, w, _ = p1.shape
 
-        L = []
-        for ri, ti, rj, tj in zip(rvec_i, tvec_i, rvec_j, tvec_j):
-            M_i = make_M(ri, ti)
-            M_j = make_M(rj, tj)
-            M = np.matmul(M_i, np.linalg.inv(M_j))
-            L.append(M)
+        cal1 = cals[i]
+        cal2 = cals[j]
 
-        def mean_transform(M_list):
-            rvecs = [cv2.Rodrigues(M[:3, :3])[0][:, 0] for M in M_list]
-            tvecs = [M[:3, 3] for M in M_list]
+        stereocalib_criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 1000, 1e-6)
+        stereocalib_flags = cv2.CALIB_USE_INTRINSIC_GUESS
 
-            rvec = np.mean(rvecs, axis=0)
-            tvec = np.mean(tvecs, axis=0)
+        res = cv2.stereoCalibrate(
+            objpoints,
+            im1points,
+            im2points,
+            cal1["mtx"].copy(),
+            cal1["dist"].copy(),
+            cal2["mtx"].copy(),
+            cal2["dist"].copy(),
+            (h, w),
+            criteria=stereocalib_criteria,
+            flags=stereocalib_flags,
+        )
 
-            return make_M(rvec, tvec)
-
-        M = mean_transform(L)
-        T = M[:3, 3]
-        R = M[:3, :3]
+        retval, cameraMatrix1, distCoeffs1, cameraMatrix2, distCoeffs2, R, T, E, F = res
 
         # adjust rotation and translation based on the reference camera
-        T = T + R @ Ts[i]
+        T = T[:, 0] + R @ Ts[i]
         R = R @ Rs[i]
 
         Rs[j] = R
