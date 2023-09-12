@@ -56,6 +56,11 @@ class CheckerboardAccumulator:
                 self.frames.append(i)
                 self.corners.append(checkerboard_detections[i, :, None].astype(np.float32))
 
+        keep = self.filter_corners()
+        print("Keeping {} frames".format(np.mean(keep)))
+        self.frames = list(np.array(self.frames)[keep])
+        self.corners = list(np.array(self.corners)[keep])
+
         return self
 
     def process_frame(self, idx, img):
@@ -89,16 +94,66 @@ class CheckerboardAccumulator:
 
         return ret
 
-    def calibrate_camera(self, flags=None, max_frames=500):
+    def get_rvecs_tvecs(self, mtx, dist, corners=None):
+        if corners is None:
+            corners = self.corners
+
+        rvecs = []
+        tvecs = []
+        for imgpoint in corners:
+            retval, rvec, tvec, inliers = cv2.solvePnPRansac(
+                self.objp, imgpoint, mtx, dist, confidence=0.9, reprojectionError=30
+            )
+            rvecs.append(rvec)
+            tvecs.append(tvec)
+
+        return rvecs, tvecs
+
+    def filter_corners(self, thresh=5.0, return_errors=False):
         N = len(self.frames)
         objpoints = [self.objp] * N
         imgpoints = self.corners
+
+        h, w, _ = self.shape
+        mtx = cv2.initCameraMatrix2D(objpoints, imgpoints, (w, h))
+        dist = np.zeros((5,))
+
+        corners = self.corners
+        rvecs, tvecs = self.get_rvecs_tvecs(mtx, dist, self.corners)
+
+        print(len(rvecs), len(tvecs), len(corners))
+        errors = []
+        for i in range(len(rvecs)):
+            imgpoints2, _ = cv2.projectPoints(self.objp, rvecs[i], tvecs[i], mtx, dist)
+            error = cv2.norm(corners[i], imgpoints2, cv2.NORM_L2)
+
+            errors.append(error)
+
+        if return_errors:
+            return np.array(errors)
+        else:
+            return np.array(errors) < thresh
+
+    def calibrate_camera(self, flags=None, max_frames=100, filter=False):
+        frames = self.frames
+        N = len(frames)
+        objpoints = [self.objp] * N
+        imgpoints = self.corners
+
+        if filter:
+            keep = self.filter_corners()
+            objpoints = list(np.array(objpoints)[keep])
+            imgpoints = list(np.array(imgpoints)[keep])
+            frames = list(np.array(frames)[keep])
+            N = len(frames)
 
         # if N > max_frames take an approximately evently space subset of both lists
         # to make the total max_frames. cv2 calibration starts taking excessively long
         # much beyond this
         if N > max_frames:
             idx = np.linspace(0, N - 1, max_frames).astype(int)
+            # randomly sample a set of frames
+            # idx = np.random.choice(N, max_frames, replace=False)
             objpoints = list(np.array(objpoints)[idx])
             imgpoints = list(np.array(imgpoints)[idx])
             self.calibrated_frames = [self.frames[i] for i in idx.tolist()]
@@ -107,48 +162,40 @@ class CheckerboardAccumulator:
 
         h, w, _ = self.shape
 
-        # if flags is None:
-        #     flags = (
-        #         cv2.CALIB_ZERO_DISPARITY
-        #         | cv2.CALIB_FIX_K1
-        #         | cv2.CALIB_FIX_K2
-        #         | cv2.CALIB_FIX_K3
-        #         | cv2.CALIB_FIX_K4
-        #         | cv2.CALIB_FIX_K5
-        #         | cv2.CALIB_ZERO_TANGENT_DIST
-        #         | cv2.CALIB_FIX_PRINCIPAL_POINT
-        #         | cv2.CALIB_FIX_ASPECT_RATIO
-        #     )
+        if True:
+            if flags is None:
+                flags = (
+                    cv2.CALIB_FIX_K2
+                    | cv2.CALIB_FIX_K3
+                    | cv2.CALIB_FIX_K4
+                    | cv2.CALIB_FIX_K5
+                    | cv2.CALIB_ZERO_TANGENT_DIST
+                    | cv2.CALIB_FIX_PRINCIPAL_POINT
+                    | cv2.CALIB_FIX_ASPECT_RATIO
+                )
 
-        # initial_matrix = np.array([[1000, 0, w / 2], [0, 1000, h / 2], [0, 0, 1]])
+            initial_matrix = np.array([[1950, 0, w / 2], [0, 1950, h / 2], [0, 0, 1]])
 
-        # _, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(
-        #     objpoints, imgpoints, (w, h), initial_matrix, np.zeros((5,)), flags=flags
-        # )
-        # newcameramtx, roi = cv2.getOptimalNewCameraMatrix(mtx, dist, (w, h), 1, (w, h))
-
-        mtx = cv2.initCameraMatrix2D(objpoints, imgpoints, (w, h))
-        dist = np.zeros((5,))
-
-        rvecs = []
-        tvecs = []
-        for imgpoint in self.corners:
-            retval, rvec, tvec, inliers = cv2.solvePnPRansac(
-                self.objp, imgpoint, mtx, dist, confidence=0.9, reprojectionError=30
+            _, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(
+                objpoints, imgpoints, (w, h), initial_matrix, np.zeros((5,)), flags=flags
             )
-            rvecs.append(rvec)
-            tvecs.append(tvec)
 
-<<<<<<< HEAD
-        self.calibrated_frames = self.frames
-        return {"mtx": mtx, "dist": dist, "rvecs": rvecs, "tvecs": tvecs, "frames": self.calibrated_frames}
-=======
-        initial_matrix = np.array([[1000, 0, h / 2], [0, 1000, w / 2], [0, 0, 1]])
+            if dist[0] > 0:
+                print("Warning: distortion is positive")
+                flags = flags | cv2.CALIB_FIX_K1
+                _, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(
+                    objpoints, imgpoints, (w, h), initial_matrix, np.zeros((5,)), flags=flags
+                )
 
-        _, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(
-            objpoints, imgpoints, (h, w), initial_matrix, np.zeros((5,)), flags=flags
-        )
-        newcameramtx, roi = cv2.getOptimalNewCameraMatrix(mtx, dist, (w, h), 1, (w, h))
+            print(mtx.astype(int))
+            print(dist)
+            # newcameramtx, roi = cv2.getOptimalNewCameraMatrix(mtx, dist, (w, h), 1, (w, h))
+
+        else:
+            mtx = cv2.initCameraMatrix2D(objpoints, imgpoints, (w, h))
+            dist = np.zeros((5,))
+
+            print(mtx.astype(int))
 
         rvecs = []
         tvecs = []
@@ -160,17 +207,15 @@ class CheckerboardAccumulator:
             tvecs.append(tvec)
 
         self.calibrated_frames = self.frames
-
         return {
             "mtx": mtx,
             "dist": dist,
             "rvecs": rvecs,
             "tvecs": tvecs,
-            "newcameramtx": newcameramtx,
-            "roi": roi,
             "frames": self.calibrated_frames,
+            "objpoints": objpoints,
+            "imgpoints": imgpoints,
         }
->>>>>>> 40f269f... Calibration: more robust initialization
 
     def get_points(self, idx):
         return [self.objp] * len(idx), list(np.array(self.corners)[idx])
@@ -335,10 +380,9 @@ def initialize_group_calibration(parsers, max_cv2_frames=50):
 
     N = found.shape[0]
     matches = np.zeros((N, N), dtype=object)
-    nonzero_matches = np.zeros((N, N), dtype=bool)
 
     for i in range(N):
-        matches[i, i] = 0
+        matches[i, i] = np.array([])
         for j in range(i + 1, N):
             both = np.logical_and(found[i], found[j])
             idx = np.where(both)[0]
@@ -349,9 +393,6 @@ def initialize_group_calibration(parsers, max_cv2_frames=50):
                 idx = checkerboard_frames[idx]
                 matches[i, j] = idx
                 matches[j, i] = idx
-
-                nonzero_matches[i, j] = True
-                nonzero_matches[j, i] = True
 
     # now use numpy map over the matrix and get counts
     get_count = lambda x: len(x) if type(x) == np.ndarray else 0
@@ -403,7 +444,7 @@ def initialize_group_calibration(parsers, max_cv2_frames=50):
             # no need to double compute
             continue
 
-        assert type(matches[i, j]) == np.ndarray
+        assert type(matches[i, j]) == np.ndarray, f"No matches between {i} and {j}: {matches[i, j]}"
 
         frames = matches[i, j]
 
@@ -1060,7 +1101,42 @@ def checkerboard_and_keypoints_residuals(
     return L  # + delta_keypoints + delta_reg
 
 
-def make_residual_fun_wrapper(fun: Callable, initial_params: Dict, exclude_parameters: List[str] = [], reduce=False):
+def camera_regularizer(params):
+    """
+    Add a regularization term to the camera parameters
+
+    This is used to keep the parameters within reasonable bounds
+    """
+
+    mtx = params["mtx"]
+    dist = params["dist"]
+
+    # regularize the focal length
+    focal_loss = jnp.sum(jax.nn.relu(-mtx[:, :2])) * 1e5
+
+    # regularize the principal point
+    principal_loss = jnp.sum(jax.nn.relu(-mtx[:, 2:])) * 1e0
+
+    # regularize the distortion
+    dist_loss = jnp.sum(dist**2) * 1e0
+
+    # isotropic focal length
+    focal_loss = focal_loss + jnp.sum((mtx[:, 0] - mtx[:, 1]) ** 2) * 1e1
+
+    # principal offset
+    expected_principal = jnp.array([[2047 / 2, 1535 / 2]]) / 1000.0
+    principal_loss = principal_loss + jnp.sum((mtx[:, 2:] - expected_principal) ** 2) * 1e1
+
+    return focal_loss + principal_loss + dist_loss
+
+
+def make_residual_fun_wrapper(
+    fun: Callable,
+    initial_params: Dict,
+    exclude_parameters: List[str] = [],
+    reduce=False,
+    regularizer: Callable = camera_regularizer,
+):
     """
     Wraps the residual function to serialize/deserialize the parameters
 
@@ -1068,6 +1144,8 @@ def make_residual_fun_wrapper(fun: Callable, initial_params: Dict, exclude_param
         fun: the residual function to wrap
         initial_params: the initial parameters to use
         exclude_parameters: parameters to exclude from the serialization
+        reduce: whether to reduce the residuals to a single value
+        regularizer: a function to apply to the residuals
 
     Returns:
         - Wrapped residual function
@@ -1095,6 +1173,9 @@ def make_residual_fun_wrapper(fun: Callable, initial_params: Dict, exclude_param
 
         if reduce:
             residuals = jnp.mean(residuals)
+
+            if regularizer:
+                residuals = residuals + regularizer(params)
 
         return residuals
 
@@ -1135,6 +1216,7 @@ def checkerboard_bundle_calibrate(
     max_frames_init: int = 30,
     iterations: int = 25,
     initial_params: Dict = None,
+    initial_method_aniposelib: bool = False,
     threshold: float = 0.2,
     anneal: bool = True,
     checkerboard_reset_n: int = 0,
@@ -1157,7 +1239,21 @@ def checkerboard_bundle_calibrate(
     """
 
     if initial_params is None:
-        initial_params = initialize_group_calibration(parsers, max_cv2_frames=max_frames_init)[0]
+        if initial_method_aniposelib:
+            from multi_camera.analysis.calibration import calibrate_bundle
+
+            cgroup = calibrate_bundle(parsers, bundle_adjust=False)[1]
+            initial_params = {
+                "mtx": np.array(
+                    [[c["matrix"][0][0], c["matrix"][1][1], c["matrix"][0][2], c["matrix"][1][2]] for c in cgroup]
+                )
+                / 1000.0,
+                "dist": np.array([c["distortions"] for c in cgroup]),
+                "rvec": np.array([c["rotation"] for c in cgroup]),
+                "tvec": np.array([c["translation"] for c in cgroup]) / 1000.0,
+            }
+        else:
+            initial_params = initialize_group_calibration(parsers, max_cv2_frames=max_frames_init)[0]
 
     print("initial_params", initial_params)
 
@@ -1175,14 +1271,13 @@ def checkerboard_bundle_calibrate(
     optimizer = jaxopt.GradientDescent(
         fun=residual_fun,
         verbose=False,
-        maxiter=2000,
+        maxiter=5000,
         acceleration=True,
     )
 
     def refine_checkerboard_position(x):
         res = optimizer.run(x, checkerboard_points=checkerboard_points, checkerboard_shape=parsers[0].objp)
         x = res.params
-        camera_params = restore_params(x)
         res = residual_fun(x, checkerboard_points=checkerboard_points, checkerboard_shape=parsers[0].objp)
         return x, res
 
@@ -1198,16 +1293,23 @@ def checkerboard_bundle_calibrate(
     total_samples = checkerboard_points.shape[1]
 
     for i in range(iterations):
-        if i < iterations // 4 and random_sample_size > 0:
-            this_sample_size = int(random_sample_size + (total_samples - random_sample_size) * (i / (iterations // 4)))
+        if i < iterations // 2 and random_sample_size > 0:
+            this_sample_size = int(random_sample_size + (total_samples - random_sample_size) * (i / (iterations // 2)))
             random_samples = np.random.choice(total_samples, size=this_sample_size, replace=False)
+
+            lm = False
             residual_fun, x, restore_params = make_residual_fun_wrapper(
                 partial(checkerboard_reprojection_residuals, samples=random_samples),
                 camera_params,
                 ["mtx", "dist"],
-                reduce=True,
+                reduce=not lm,
             )
-            optimizer = jaxopt.GradientDescent(fun=residual_fun, verbose=False, maxiter=5000, acceleration=True)
+            if lm:
+                optimizer = jaxopt.LevenbergMarquardt(residual_fun, verbose=True, maxiter=10)
+            else:
+                optimizer = jaxopt.GradientDescent(
+                    fun=residual_fun, verbose=False, maxiter=1500, stepsize=-10.0, acceleration=True
+                )
 
             # adding this makes diagnostics more sensible by optimize the positions that were excluded
             # previously, but also slows things down without actually improve convergence
@@ -1223,6 +1325,9 @@ def checkerboard_bundle_calibrate(
         cycle_err = cycle_residual_fun(camera_params, checkerboard_points)
         cycle_err = (cycle_err**2).mean()
 
+        if lm:
+            pre_err = np.mean(pre_err)
+            err = np.mean(err)
         # monitor the cycle error, but it's not easy to use directly during optimization
         print(f"Iteration {i} error: {pre_err:0.3f} -> {err:0.3f}, cycle error: {cycle_err:0.3f}")
 
@@ -1230,60 +1335,47 @@ def checkerboard_bundle_calibrate(
             checkerboard_params = checkerboard_initialize(initial_params, checkerboard_points)
             params["checkerboard_tvecs"] = checkerboard_params["checkerboard_tvecs"]
 
-        if anneal and i == iterations // 4:
-            print("Adding distortion parameters")
-            residual_fun, x, restore_params = make_residual_fun_wrapper(
-                checkerboard_reprojection_residuals, camera_params, ["mtx"], reduce=True
-            )
-            residual_fun = jax.jit(residual_fun)
-            optimizer = jaxopt.GradientDescent(fun=residual_fun, verbose=False, maxiter=5000, acceleration=True)
+        # if anneal and i == iterations // 4:
+        #     print("Adding distortion parameters")
+        #     residual_fun, x, restore_params = make_residual_fun_wrapper(
+        #         checkerboard_reprojection_residuals, camera_params, ["mtx"], reduce=True
+        #     )
+        #     residual_fun = jax.jit(residual_fun)
+        #     optimizer = jaxopt.GradientDescent(fun=residual_fun, verbose=False, maxiter=5000, acceleration=True)
 
-        if anneal and i == (2 * iterations) // 4:
-            print("Adding camera calibration matrix")
+        # if anneal and i == (2 * iterations) // 4:
+        #     print("Adding camera calibration matrix")
 
-            # now allow the camera calibration matrix to change
-            residual_fun, x, restore_params = make_residual_fun_wrapper(
-                checkerboard_reprojection_residuals,
-                camera_params,
-                ["checkerboard_rvecs", "checkerboard_tvecs"],
-                reduce=True,
-            )
-            residual_fun = jax.jit(residual_fun)
-            optimizer = jaxopt.GradientDescent(fun=residual_fun, verbose=False, maxiter=5000, acceleration=True)
+        #     # now allow the camera calibration matrix to change
+        #     residual_fun, x, restore_params = make_residual_fun_wrapper(
+        #         checkerboard_reprojection_residuals,
+        #         camera_params,
+        #         ["checkerboard_rvecs", "checkerboard_tvecs"],
+        #         reduce=True,
+        #     )
+        #     residual_fun = jax.jit(residual_fun)
+        #     optimizer = jaxopt.GradientDescent(fun=residual_fun, verbose=False, maxiter=5000, acceleration=True)
 
-        if anneal and i == (3 * iterations) // 4:
+        if anneal and i == (1 * iterations) // 2:
             print("Allowing everything to change")
+
+            this_sample_size = int(random_sample_size)
+            random_samples = np.random.choice(total_samples, size=this_sample_size, replace=False)
 
             # now allow the everything to change
             residual_fun, x, restore_params = make_residual_fun_wrapper(
+                # partial(checkerboard_reprojection_residuals, samples=random_samples),
                 checkerboard_reprojection_residuals,
                 camera_params,
                 reduce=True,
             )
             residual_fun = jax.jit(residual_fun)
-            optimizer = jaxopt.GradientDescent(fun=residual_fun, verbose=False, maxiter=5000, acceleration=True)
+            optimizer = jaxopt.GradientDescent(
+                fun=residual_fun, verbose=False, maxiter=5000, acceleration=True, stepsize=-0.1
+            )
 
         if err < threshold:
             break
-
-    for i in range(0):
-        # now allow the everything to change
-        residual_fun, x, restore_params = make_residual_fun_wrapper(
-            cycle_residual_fun,
-            camera_params,
-            reduce=True,
-        )
-        residual_fun = jax.jit(residual_fun)
-        optimizer = jaxopt.GradientDescent(fun=residual_fun, verbose=False, maxiter=5000, acceleration=True)
-
-        res = optimizer.run(x, keypoints_2d=checkerboard_points)
-
-        camera_params = restore_params(x)
-        cycle_err = cycle_residual_fun(camera_params, keypoints_2d=checkerboard_points)
-        cycle_err = (cycle_err**2).mean()
-
-        # monitor the cycle error, but it's not easy to use directly during optimization
-        print(f"Iteration {i} e cycle error: {cycle_err:0.3f}")
 
     camera_params = restore_params(x)
     camera_params.pop("checkerboard_rvecs")
