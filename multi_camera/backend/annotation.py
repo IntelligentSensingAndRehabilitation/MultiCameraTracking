@@ -41,6 +41,9 @@ def get_mesh(filename: str, downsampling: int = 5):
     def process_frame(frame, smpl):
         smpl_fields = ["poses", "shapes", "Rh", "Th"]
         smpl_batch = {}
+        if len(frame) == 0:
+            return []
+
         for f in smpl_fields:
             smpl_batch[f] = np.concatenate([person[f] for person in frame], axis=0)
 
