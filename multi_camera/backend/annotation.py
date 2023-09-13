@@ -1,16 +1,19 @@
 import os
 from typing import List
 
-model_path : str = os.path.join(os.path.dirname(os.path.abspath(__file__)),  "../../model_data/smpl_clean/")
+model_path: str = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../model_data/smpl_clean/")
 
 
 def get_unannotated_recordings():
-    from multi_camera.datajoint.easymocap import EasymocapSmpl
+    from multi_camera.datajoint.easymocap import EasymocapSmpl, EasymocapTracking
     from multi_camera.datajoint.multi_camera_dj import MultiCameraRecording, SingleCameraVideo
     from multi_camera.datajoint.sessions import Recording
     from pose_pipeline.pipeline import PersonBbox
 
-    keys = (EasymocapSmpl * MultiCameraRecording * Recording - SingleCameraVideo * PersonBbox).fetch("KEY")
+    keys = (
+        EasymocapSmpl * MultiCameraRecording * Recording
+        & (EasymocapTracking & "num_tracks>0") - SingleCameraVideo * PersonBbox
+    ).fetch("KEY")
     video_base_filenames = (MultiCameraRecording & keys).fetch("video_base_filename")
     return video_base_filenames
 
