@@ -68,7 +68,6 @@ class CheckerboardAccumulator:
         img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
 
         chessboard_flags = cv2.CALIB_CB_ADAPTIVE_THRESH + cv2.CALIB_CB_NORMALIZE_IMAGE + cv2.CALIB_CB_FAST_CHECK
-        # chessboard_flags = cv2.CALIB_CB_FAST_CHECK + cv2.CALIB_CB_LARGER + chessboard_flags
 
         gray_ds = cv2.resize(gray, (img.shape[1] // self.downsample, img.shape[0] // self.downsample))
         ret, corners = cv2.findChessboardCorners(gray_ds, (self.cols, self.rows), chessboard_flags)
@@ -109,7 +108,7 @@ class CheckerboardAccumulator:
 
         return rvecs, tvecs
 
-    def filter_corners(self, thresh=5.0, return_errors=False):
+    def filter_corners(self, thresh=5.0, return_errors=False, update_self=False):
         N = len(self.frames)
         objpoints = [self.objp] * N
         imgpoints = self.corners
@@ -128,6 +127,12 @@ class CheckerboardAccumulator:
             error = cv2.norm(corners[i], imgpoints2, cv2.NORM_L2)
 
             errors.append(error)
+
+        if update_self:
+            keep = np.array(errors) < thresh
+            print("Keeping {} frames".format(np.mean(keep)))
+            self.frames = list(np.array(self.frames)[keep])
+            self.corners = list(np.array(self.corners)[keep])
 
         if return_errors:
             return np.array(errors)
@@ -221,7 +226,7 @@ class CheckerboardAccumulator:
         return [self.objp] * len(idx), list(np.array(self.corners)[idx])
 
 
-def get_checkerboards(filenames, max_frames=None, skip=1, multithread=False, **kwargs):
+def get_checkerboards(filenames, max_frames=None, skip=1, multithread=False, filter_frames=True, **kwargs):
     """
     Detect checkboards in a list of videos.
 
@@ -265,7 +270,7 @@ def get_checkerboards(filenames, max_frames=None, skip=1, multithread=False, **k
             if idx == 0:
                 progress_fn = trange
             else:
-                progress_fn = range
+                progress_fn = trange
 
             for i in progress_fn(0, frames, skip):
                 if skip != 1:
@@ -282,6 +287,9 @@ def get_checkerboards(filenames, max_frames=None, skip=1, multithread=False, **k
 
     for c in caps:
         c.release()
+
+    for p in parsers:
+        p.filter_corners(update_self=True)
 
     return parsers
 
@@ -368,8 +376,7 @@ def initialize_group_calibration(parsers, max_cv2_frames=50):
     from jax import numpy as jnp
     from jaxlie import SO3, SE3
 
-    # cals = [p.calibrate_camera(max_frames=max_cv2_frames) for p in parsers]
-    cals = [p.calibrate_camera() for p in parsers]
+    ### First build up a mapping from all the cameras for the calibration graph
 
     # get the checkerboard points
     checkerboard_points = get_checkerboard_points(parsers)
@@ -398,12 +405,14 @@ def initialize_group_calibration(parsers, max_cv2_frames=50):
     get_count = lambda x: len(x) if type(x) == np.ndarray else 0
     matrix = np.vectorize(get_count)(matches)
 
+    display(matrix)
+
     # Step 1: Identify the hub node
-    origin = np.argmax(matrix.sum(axis=0))
+    origin = np.argmax((matrix**2).sum(axis=0))
 
     # Step 2: Build the list of pairs to create a subgraph
     subgraph_edges = []
-    visited = {origin}
+    visited = [origin]
 
     while len(visited) < len(matrix):
         # Find the neighbor with the highest weight that hasn't been visited yet
@@ -413,11 +422,14 @@ def initialize_group_calibration(parsers, max_cv2_frames=50):
             for j in range(len(matrix)):
                 if j not in visited and matrix[i, j] > max_weight:
                     max_weight = matrix[i, j]
-                    next_node = (i, j)
+                    next_node = (i, j, matrix[i, j])
 
         # Add the edge to the subgraph and mark the node as visited
         subgraph_edges.append(next_node)
-        visited.add(next_node[1])
+        visited.append(next_node[1])
+
+    assert max_weight > 0, "Missing edges found in the calibration graph"
+    display(subgraph_edges)
 
     # find the row with the most calibrated cameras to call the origin
     print(f"Using camera {origin} as the origin")
@@ -429,12 +441,10 @@ def initialize_group_calibration(parsers, max_cv2_frames=50):
 
     Rs[origin] = np.eye(3)  # establish the first camera as the reference
 
-    # we iterate through this multiple times to try and find any paths between
-    # cameras to the origin camera
+    ### Now initialize the camera calibrations
+    cals = [p.calibrate_camera() for p in parsers]
 
-    min_count = np.linspace(max_cv2_frames, 1, N // 2).astype(int)
-    thresh_idx = 0
-    for i, j in subgraph_edges:  # in itertools.chain.from_iterable(itertools.repeat(np.arange(0, N), N * 2)):
+    for i, j, w in subgraph_edges:  # in itertools.chain.from_iterable(itertools.repeat(np.arange(0, N), N * 2)):
         # iterate through cameras as a reference
 
         if ~initialized[i]:
@@ -877,6 +887,7 @@ def run_calibration(vid_base, vid_path=".", return_parsers=False, frame_skip=2, 
         }
 
     print("Zeroing coordinates")
+    checkerboard_points = get_checkerboard_points(parsers)
     x0, board_rotation = extract_origin(camera_params, checkerboard_points[:, 5:])
     camera_params_zeroed = shift_calibration(camera_params, x0, board_rotation, zoffset=1245)
     params_dict = jax.tree_map(np.array, camera_params_zeroed)
@@ -1346,7 +1357,7 @@ def checkerboard_bundle_calibrate(
         #     residual_fun = jax.jit(residual_fun)
         #     optimizer = jaxopt.GradientDescent(fun=residual_fun, verbose=False, maxiter=5000, acceleration=True)
 
-        if anneal and i == (1 * iterations) // 2:
+        if anneal and i == (iterations - 5):  # (1 * iterations) // 2:
             print("Allowing everything to change")
 
             this_sample_size = int(random_sample_size)
@@ -1361,7 +1372,7 @@ def checkerboard_bundle_calibrate(
             )
             residual_fun = jax.jit(residual_fun)
             optimizer = jaxopt.GradientDescent(
-                fun=residual_fun, verbose=False, maxiter=5000, acceleration=True, stepsize=-0.1
+                fun=residual_fun, verbose=False, maxiter=15000, acceleration=True, stepsize=-0.1
             )
 
         if err < threshold:
@@ -1419,7 +1430,7 @@ def bundle_calibrate(initial_params: Dict, keypoints2d: np.ndarray, iterations: 
 
         if i == (iterations // 4):
             residual_fun, x, restore_params = make_residual_fun_wrapper(
-                keypoint3d_reprojection_residuals, camera_params, ["mtx"], reduce=True
+                keypoint3d_reprojection_residuals, camera_params, ["mtx", "dist"], reduce=True
             )
             residual_fun = jax.jit(residual_fun)
             optimizer = jaxopt.GradientDescent(fun=residual_fun, verbose=False, maxiter=5000)
