@@ -67,7 +67,7 @@ class CheckerboardAccumulator:
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
 
-        chessboard_flags = cv2.CALIB_CB_ADAPTIVE_THRESH + cv2.CALIB_CB_NORMALIZE_IMAGE + cv2.CALIB_CB_FAST_CHECK
+        chessboard_flags = cv2.CALIB_CB_ADAPTIVE_THRESH + cv2.CALIB_CB_NORMALIZE_IMAGE # + cv2.CALIB_CB_FAST_CHECK
 
         gray_ds = cv2.resize(gray, (img.shape[1] // self.downsample, img.shape[0] // self.downsample))
         ret, corners = cv2.findChessboardCorners(gray_ds, (self.cols, self.rows), chessboard_flags)
@@ -108,7 +108,7 @@ class CheckerboardAccumulator:
 
         return rvecs, tvecs
 
-    def filter_corners(self, thresh=5.0, return_errors=False, update_self=False):
+    def filter_corners(self, thresh=10.0, return_errors=False, update_self=False):
         N = len(self.frames)
         objpoints = [self.objp] * N
         imgpoints = self.corners
@@ -406,6 +406,17 @@ def initialize_group_calibration(parsers, max_cv2_frames=50):
     matrix = np.vectorize(get_count)(matches)
 
     display(matrix)
+
+    from scipy.sparse import csr_matrix
+    from scipy.sparse.csgraph import reverse_cuthill_mckee
+
+    matrix_csr = csr_matrix(matrix)
+
+    # Applying reverse Cuthill-McKee algorithm
+    reordering = reverse_cuthill_mckee(matrix_csr)
+    reordered_matrix = matrix[reordering][:, reordering]
+    display(reordered_matrix)
+
 
     # Step 1: Identify the hub node
     origin = np.argmax((matrix**2).sum(axis=0))
@@ -844,7 +855,7 @@ def run_calibration(vid_base, vid_path=".", return_parsers=False, frame_skip=2, 
         max_frames=5000,
         skip=frame_skip,
         save_images=False,
-        downsample=2,
+        downsample=1,
         multithread=True,
         checkerboard_size=110.0,
     )
@@ -874,7 +885,7 @@ def run_calibration(vid_base, vid_path=".", return_parsers=False, frame_skip=2, 
         )
 
     else:
-        error, cgroup = calibrate_bundle(parsers, n_samp_iter=500, n_samp_full=5000)
+        error, cgroup = calibrate_bundle(parsers, n_samp_iter=2000, n_samp_full=2500)
 
         camera_params = {
             "mtx": np.array(
@@ -885,6 +896,9 @@ def run_calibration(vid_base, vid_path=".", return_parsers=False, frame_skip=2, 
             "rvec": np.array([c["rotation"] for c in cgroup]),
             "tvec": np.array([c["translation"] for c in cgroup]) / 1000.0,
         }
+
+        if np.isnan(error):
+            error = 10000
 
     print("Zeroing coordinates")
     checkerboard_points = get_checkerboard_points(parsers)
@@ -1739,6 +1753,89 @@ def test():
 
     calibration = dual_calibration_procedure(calibration_points, keypoints2d, iterations=10)
 
+
+def plot_cal(camera_params):
+    import cv2
+    from matplotlib import pyplot as plt
+    
+    tvec = camera_params['tvec']
+    rvec = camera_params['rvec']
+
+    pixel_size_micron = 3.45
+    pixels_per_mm = 1000 / pixel_size_micron
+
+    # Removed display function calls to prevent error
+    # Assuming camera_params['mtx'] and camera_params['dist'] are well-defined
+
+    # Convert rotation vectors to rotation matrices
+    rmats = [cv2.Rodrigues(np.array(r[None, :]))[0].T for r in rvec]
+
+    pos = np.array([-R.dot(t) for R, t in zip(rmats, tvec)])
+
+    drange = np.max(np.abs(pos)) * 1.1   
+
+    fig = plt.figure(figsize=(9,4))
+    
+    ax = fig.add_subplot(121, projection='3d')
+    ax.scatter(pos[:,0], pos[:,1], pos[:,2], c='r', marker='o')
+
+    ax.set_xlim(-drange, drange)
+    ax.set_ylim(-drange, drange)
+    ax.set_zlim(-drange, drange)
+
+    # 3D orientation visualization
+    for i, (R, t) in enumerate(zip(rmats, pos)):
+        length = drange / 5.0
+        x_axis = np.array([length, 0, 0])
+        y_axis = np.array([0, length, 0])
+        z_axis = np.array([0, 0, length])
+        x_axis = R.dot(x_axis) + t
+        y_axis = R.dot(y_axis) + t
+        z_axis = R.dot(z_axis) + t
+        ax.quiver(t[0], t[1], t[2], x_axis[0]-t[0], x_axis[1]-t[1], x_axis[2]-t[2], color='r', arrow_length_ratio=0.5)
+        ax.quiver(t[0], t[1], t[2], y_axis[0]-t[0], y_axis[1]-t[1], y_axis[2]-t[2], color='g', arrow_length_ratio=0.1)
+        ax.quiver(t[0], t[1], t[2], z_axis[0]-t[0], z_axis[1]-t[1], z_axis[2]-t[2], color='b', arrow_length_ratio=0.1)
+
+    ax = fig.add_subplot(122)
+    ax.scatter(pos[:,0], pos[:,1], c='r', marker='o')
+    ax.set_xlim(-drange, drange)
+    ax.set_ylim(-drange, drange)
+
+    # 2D orientation visualization
+    for i, (R, t) in enumerate(zip(rmats, pos)):
+        length = drange / 10.0
+        x_axis = np.array([length, 0, 0])
+        y_axis = np.array([0, 0, length])
+        x_axis = R.dot(x_axis) + t
+        y_axis = R.dot(y_axis) + t
+        #ax.quiver(t[0], t[1], x_axis[0]-t[0], x_axis[1]-t[1], color='r', angles='xy', scale_units='xy', scale=0.5, headlength=4, headwidth=4)
+        ax.quiver(t[0], t[1], y_axis[0]-t[0], y_axis[1]-t[1], color='g', angles='xy', scale_units='xy', scale=0.5, headlength=4, headwidth=4)
+
+    # Display numbers by the cameras
+    for i in range(pos.shape[0]):
+        ax.text(pos[i,0]+0.2, pos[i,1]+0.2, str(i), color='k')
+
+    plt.show()
+
+
+def zero_calibration(camera_params: Dict, parsers: List[CheckerboardAccumulator]):
+    """
+    Zero the calibration by shifting the camera parameters to the origin
+
+    Parameters:
+        camera_params: the camera parameters
+        parsers: the list of CheckerboardAccumulator parsers to use
+
+    Returns:
+        the zeroed camera parameters
+    """
+
+    checkerboard_points = get_checkerboard_points(parsers)
+    x0, board_rotation = extract_origin(camera_params, checkerboard_points[:, 5:])
+    camera_params_zeroed = shift_calibration(camera_params, x0, board_rotation, zoffset=1245)
+    params_dict = jax.tree_map(np.array, camera_params_zeroed)
+
+    return params_dict
 
 if __name__ == "__main__":
     test()
