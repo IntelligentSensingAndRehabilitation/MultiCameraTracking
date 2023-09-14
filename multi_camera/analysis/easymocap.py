@@ -59,7 +59,7 @@ def mvmp_association_and_tracking(dataset, keypoints='body25'):
         results.append([{'id': -1, 'keypoints3d': v.keypoints3d, 'bbox': v.bbox, 'Vused': v.Vused,
                          'num_views': len(v.Vused), 'kptsRepro': v.kptsRepro} for k, v in group.items()])
 
-    tracker = Track3D(with2d=False, WINDOW_SIZE=12, MIN_FRAMES=30, SMOOTH_SIZE=5, out=None, path=None)
+    tracker = Track3D(with2d=False, WINDOW_SIZE=12, MIN_FRAMES=2, SMOOTH_SIZE=5, out=None, path=None)
     edges = tracker.compute_dist(results)
     results = tracker.associate(results, edges)
     results, occupancy = tracker.reset_id(results)
