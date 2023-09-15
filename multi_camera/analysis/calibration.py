@@ -288,8 +288,8 @@ def get_checkerboards(filenames, max_frames=None, skip=1, multithread=False, fil
     for c in caps:
         c.release()
 
-    for p in parsers:
-        p.filter_corners(update_self=True)
+    #for p in parsers:
+    #    p.filter_corners(update_self=True)
 
     return parsers
 
