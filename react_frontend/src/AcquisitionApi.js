@@ -209,9 +209,9 @@ export const AquisitionApi = (props) => {
 
     async function previewVideo(max_frames) {
         await axios.post(`${API_BASE_URL}/preview`,
-        {
-            max_frames: max_frames
-        });
+            {
+                max_frames: max_frames
+            });
         setRecordingProgress(0);
     }
 
@@ -258,12 +258,12 @@ export const AquisitionApi = (props) => {
         return response.data.success;
     };
 
-    async function fetchMesh(filename) {
+    async function fetchMesh(filename, downsampling) {
         // Fetch the mesh data for the given recording
         const response = await axios.get(`${API_BASE_URL}/mesh`, {
             params: {
                 filename: filename,
-                downsample: 5
+                downsample: downsampling
             }
         });
         const data = response.data;

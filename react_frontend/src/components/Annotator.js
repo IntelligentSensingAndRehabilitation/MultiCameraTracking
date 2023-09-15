@@ -25,6 +25,7 @@ const Annotator = ({ data }) => {
     const [currentRecording, setCurrentRecording] = useState(null);
     const [recordingValidated, setRecordingValidated] = useState(false);
     const [unannotatedRecordings, setUnannotatedRecordings] = useState([]);
+    const [downsampling, setDownsampling] = useState(5);
 
     const refreshRecordings = () => {
         fetchUnannotatedRecordings().then((data) => {
@@ -62,7 +63,7 @@ const Annotator = ({ data }) => {
             setRecordingValidated(false);
 
             if (currentRecording != null && currentRecording !== "") {
-                fetchMesh(currentRecording).then((data) => {
+                fetchMesh(currentRecording, downsampling).then((data) => {
                     console.log("Mesh data: ", data)
                     system.smpl = data;
 
@@ -74,7 +75,7 @@ const Annotator = ({ data }) => {
                 });
             }
         }
-    }, [currentRecording]);
+    }, [currentRecording, downsampling]);
 
     const onAnnotate = () => {
         if (recordingValidated) {
@@ -139,7 +140,23 @@ const Annotator = ({ data }) => {
                     </Col>
 
                 </Form.Group>
+
+                <div className='p-2'></div>
+
+                <Form.Group controlId="downsampling" as={Row} >
+                    <Form.Label column sm={3}>Downsampling</Form.Label>
+                    <Col sm={6}>
+                        <Form.Control as="select" value={downsampling} onChange={(e) => setDownsampling(e.target.value)}>
+                            <option>1</option>
+                            <option>2</option>
+                            <option>5</option>
+                            <option>10</option>
+                            <option>15</option>
+                        </Form.Control>
+                    </Col>
+                </Form.Group>
             </Form>
+
 
             <Row className='p-2'>
                 <div ref={guiRef} id="gui" style={guiStyle}></div>
