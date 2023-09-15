@@ -66,6 +66,13 @@ def project_distortion(camera_params, i, points):
     dist = jnp.take(camera_params["dist"], i, axis=0)
     gamma = 1.0 + dist[0] * r2  # + dist[1] * r2**2 + dist[4] * r2**3
 
+    # in the case of negative points, shrink them very close to center of screen
+    # this is to make sure that calibration can't "see" through the back of the
+    # camera
+    negative = transformed[..., 2] < 0
+    negative_scale = jnp.where(negative, 1e-3, 1)
+    gamma = gamma * negative_scale
+
     xpp = gamma * xp  # + 2*dist[2]*xp*yp + dist[3] * (r2 + 2 * xp**2)
     ypp = gamma * yp  # + dist[2]*(r2 + 2*yp**2) + 2*dist[3]*xp*yp
 
