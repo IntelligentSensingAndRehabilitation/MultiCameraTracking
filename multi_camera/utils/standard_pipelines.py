@@ -19,7 +19,7 @@ def reconstruction_pipeline(
     keys: List[Dict],
     top_down_method_name: str = "MMPoseHalpe",
     tracking_method_name: str = "EasyMocap",
-    reconstruction_method_name: str = "RobustTriangulation",
+    reconstruction_method_name: str = "Robust Triangulation",
     reserve_jobs: bool = True,
 ):
     from pose_pipeline.utils import standard_pipelines as pose_pipelines
