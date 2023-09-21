@@ -19,7 +19,6 @@ def run_pipeline_on_gpu(gpu):
     import pose_pipeline
     from multi_camera.utils import standard_pipelines
     from multi_camera.datajoint.multi_camera_dj import PersonKeypointReprojectionQuality
-    from multi_camera.datajoint.biomechanics import BiomechanicalReconstruction
     from multi_camera.datajoint.gaitrite_comparison import (
         GaitRiteSession,
         GaitRiteRecording,
@@ -71,18 +70,18 @@ def run_pipeline_on_gpu(gpu):
             ]
             methods = [
                 "Robust Triangulation",
-                "Implicit Optimization",
-                "Explicit Optimization",
-                "Explicit Optimization KP Conf, MaxHuber=10",
+                #"Implicit Optimization",
+                #"Explicit Optimization",
+                #"Explicit Optimization KP Conf, MaxHuber=10",
                 "Implicit Optimization KP Conf, MaxHuber=10",
-                "Triangulation",
-                "Robust Triangulation $\\\\sigma=100$",
-                "Robust Triangulation $\\\\sigma=50$",
-                "Robust Triangulation $\\\\gamma=0.3$",
-                "Implicit Optimization KP Conf",
-                "Implicit Optimization $\\\gamma=0.3$",
-                "Implicit Optimization, MaxHuber=10",
-                "Implicit Optimization $\\\\sigma=50$",
+                #"Triangulation",
+                #"Robust Triangulation $\\\\sigma=100$",
+                #"Robust Triangulation $\\\\sigma=50$",
+                #"Robust Triangulation $\\\\gamma=0.3$",
+                #"Implicit Optimization KP Conf",
+                #"Implicit Optimization $\\\gamma=0.3$",
+                #"Implicit Optimization, MaxHuber=10",
+                #"Implicit Optimization $\\\\sigma=50$",
             ]
             
             #keypoints = ["Bridging_bml_movi_87", "MMPoseHalpe"]
