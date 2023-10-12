@@ -23,6 +23,11 @@ const Video = () => {
         ws.current.onmessage = (event) => {
             console.log("new image")
             const data = event.data;
+
+            if (imageSrc) {
+                URL.revokeObjectURL(imageSrc);
+            }
+
             const blob = new Blob([data], { type: "image/jpeg" });
             const url = URL.createObjectURL(blob);
             setImageSrc(url);
@@ -39,6 +44,9 @@ const Video = () => {
         return () => {
             if (ws.current) {
                 ws.current.close();
+            }
+            if (imageSrc) {
+                URL.revokeObjectURL(imageSrc);
             }
         };
     }, []);

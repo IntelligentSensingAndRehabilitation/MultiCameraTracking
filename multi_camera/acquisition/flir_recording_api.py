@@ -531,10 +531,11 @@ class FlirRecorder:
                     tqdm.write("Bad frame")
                     continue
 
-                # Writing the frame information for the current camera to its queue
-                self.image_queue_dict[c.DeviceSerialNumber].put(
-                    {"im": im, "real_times": real_times, "timestamps": timestamps}
-                )
+                if self.video_base_file is not None:
+                    # Writing the frame information for the current camera to its queue
+                    self.image_queue_dict[c.DeviceSerialNumber].put(
+                        {"im": im, "real_times": real_times, "timestamps": timestamps}
+                    )
 
             all_timestamps.append(frame_timestamps)
 
