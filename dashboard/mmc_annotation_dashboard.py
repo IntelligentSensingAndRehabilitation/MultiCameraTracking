@@ -1,16 +1,29 @@
 import streamlit as st
+import os
+import glob
 import numpy as np
+import pandas as pd
+from pose_pipeline import BlurredVideo
 from sensor_fusion.mmc_linkage import RecordingLink
-from multi_camera.datajoint.multi_camera_dj import MultiCameraRecording
+from multi_camera.datajoint.multi_camera_dj import (
+    MultiCameraRecording,
+    SingleCameraVideo,
+)
 from multi_camera.datajoint.sessions import Recording, Session
 from multi_camera.datajoint.annotation import (
     VideoActivityLookup,
     WalkingTypeLookup,
     AssistiveDeviceLookup,
+    VideoActivity as MMCVideoActivity,
+    WalkingType as MMCWalkingType,
+    AssistiveDevice as MMCAssistiveDevice,
 )
-import pandas as pd
 
-st.set_page_config(layout="wide",page_title="MMC Annotation Dashboard")
+# remove old videos
+old_videos = glob.glob('tmp*.mp4')
+for old_video in old_videos: os.remove(old_video)
+
+st.set_page_config(layout="wide", page_title="MMC Annotation Dashboard")
 
 participant_id_options = np.unique(Session.fetch("participant_id"))
 participant_id = st.selectbox("Participant ID", participant_id_options)
@@ -24,6 +37,9 @@ df = (
     MultiCameraRecording
     * (Recording & ({"participant_id": participant_id, "session_date": session_date}))
 ).fetch(as_dict=True)
+
+# get filenames for video display
+base_filenames = [x["video_base_filename"] for x in df]
 
 my_column_config = {
     "camera_config_hash": None,
@@ -62,5 +78,40 @@ my_column_config.update(
     }
 )
 
+with st.form(key="my_form"):
+    st.title("Enter/Edit Annotations")
+    edited_df = st.data_editor(df, column_config=my_column_config, disabled=disabled_editing)
 
-st.data_editor(df, column_config=my_column_config, disabled=disabled_editing)
+    submitted = st.form_submit_button("Submit")
+    if submitted:
+        for idx,row in edited_df.iterrows():
+            if row["Annotation"] is not None:
+                key = (MultiCameraRecording & {'recording_timestamps':row['recording_timestamps']}).fetch1("KEY")
+                key.update({'video_activity': row["Annotation"]})
+                MMCVideoActivity.insert1(key, skip_duplicates=True)
+            if row["Annotation Sub-Type"] is not None:
+                key = (MMCVideoActivity & {'recording_timestamps':row['recording_timestamps']}).fetch1("KEY")
+                key.update({'walking_type': row["Annotation Sub-Type"]})
+                MMCWalkingType.safe_insert(key, skip_duplicates=True)
+            if row["Assistive Device"] is not None:
+                key = (MultiCameraRecording & {'recording_timestamps':row['recording_timestamps']}).fetch1("KEY")
+                key.update({'assistive_device': row["Assistive Device"]})
+                MMCAssistiveDevice.insert1(key, skip_duplicates=True)
+            else:
+                key = (MultiCameraRecording & {'recording_timestamps':row['recording_timestamps']}).fetch1("KEY")
+                key.update({'assistive_device': "None"})
+                MMCAssistiveDevice.insert1(key, skip_duplicates=True)
+
+# visualization
+selected_recording = st.selectbox("Select Recording", base_filenames)
+
+single_camera_vids = (BlurredVideo & (
+    SingleCameraVideo
+    & (MultiCameraRecording & {"video_base_filename": selected_recording})
+)).fetch("output_video", limit=2)
+
+col1, col2 = st.columns(2)
+with col1:
+    st.video(single_camera_vids[0])
+with col2:
+    st.video(single_camera_vids[1])
