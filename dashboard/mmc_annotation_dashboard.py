@@ -25,7 +25,9 @@ for old_video in old_videos: os.remove(old_video)
 
 st.set_page_config(layout="wide", page_title="MMC Annotation Dashboard")
 
-participant_id_options = np.unique(Session.fetch("participant_id"))
+# choose which subjects/sessions
+res = Recording & (MultiCameraRecording & 'video_project NOT LIKE "CUET"') #TODO: need to expand this later
+participant_id_options = np.unique((Session & res).fetch("participant_id"))
 participant_id = st.selectbox("Participant ID", participant_id_options)
 
 session_date_options = (Session & {"participant_id": participant_id}).fetch(
@@ -33,6 +35,7 @@ session_date_options = (Session & {"participant_id": participant_id}).fetch(
 )
 session_date = st.selectbox("Session Date", session_date_options)
 
+# construct dataframe
 df = (
     MultiCameraRecording
     * (Recording & ({"participant_id": participant_id, "session_date": session_date}))
@@ -111,7 +114,10 @@ single_camera_vids = (BlurredVideo & (
 )).fetch("output_video", limit=2)
 
 col1, col2 = st.columns(2)
-with col1:
-    st.video(single_camera_vids[0])
-with col2:
-    st.video(single_camera_vids[1])
+try:
+    with col1:
+        st.video(single_camera_vids[0])
+    with col2:
+        st.video(single_camera_vids[1])
+except:
+    st.write("No videos available for this recording")
