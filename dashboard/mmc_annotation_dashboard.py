@@ -108,6 +108,10 @@ with st.form(key="my_form"):
 # visualization
 selected_recording = st.selectbox("Select Recording", base_filenames)
 
+if len(BlurredVideo & (SingleCameraVideo & (MultiCameraRecording & {"video_base_filename": selected_recording}))) < 2:
+    with st.spinner("Generating blurred videos..."):
+        BlurredVideo.populate(SingleCameraVideo & ((SingleCameraVideo & (MultiCameraRecording & {"video_base_filename": selected_recording})) - BlurredVideo).fetch('KEY',limit=2))
+
 single_camera_vids = (BlurredVideo & (
     SingleCameraVideo
     & (MultiCameraRecording & {"video_base_filename": selected_recording})
