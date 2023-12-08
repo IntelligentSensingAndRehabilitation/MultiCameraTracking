@@ -81,12 +81,64 @@ my_column_config.update(
     }
 )
 
+def validate_annotations(df):
+    for index, row in df.iterrows():
+        if row['Annotation Sub-Type'] is not None:
+            if row['Annotation'] != 'Overground Walking' and row['Annotation'] is not None:
+                print(row['Annotation'] == None)
+                print('\n\n\n')
+                st.error("Annotation Sub-Type can only be set for Overground Walking. Please correct this.")
+                return False
+    return True
+
+def clean_annotations(df):
+    for index,row in df.iterrows():
+        if row['Annotation'] is None and row['Annotation Sub-Type'] in ['Fast','Slow','ssgs']:
+            df.loc[index,'Annotation'] = 'Overground Walking'
+            st.warning('Inferring Overground Walking from Annotation Sub-Type')
+    return df
+
+video_activity_mapping = {
+    "fast": "Overground Walking",
+    "slow": "Overground Walking",
+    "ssgs": "Overground Walking",
+    "_ss_": "Overground Walking",
+    "tug": "TUG",
+    "fsst": "FSST",
+    "tandem": "Tandem Walking",
+    "eyes closed": "PST Closed",
+    "eyes open": "PST Open",
+    "TUG": "TUG",
+    "PST_closed": "PST Closed",
+    "PST_open": "PST Open",
+    "PS_closed": "PST Closed",
+    "PS_open": "PST Open",
+}
+walking_type_mapping = {
+    "fast": "Fast",
+    "slow": "Slow",
+    "ssgs": "ssgs",
+    "_ss_": "ssgs",
+}
+
+def fill_annotation(row, mapping):
+    for keyword, value in mapping.items():
+        if keyword.lower() in row["video_base_filename"].lower():
+            return value
+    return None
+
+df["Annotation"] = df.apply(fill_annotation, mapping=video_activity_mapping, axis=1)
+df["Annotation Sub-Type"] = df.apply(fill_annotation, mapping=walking_type_mapping, axis=1)
+
+
 with st.form(key="my_form"):
     st.title("Enter/Edit Annotations")
-    edited_df = st.data_editor(df, column_config=my_column_config, disabled=disabled_editing)
+    edited_df = st.data_editor(df, column_config=my_column_config, disabled=disabled_editing, key="data_editor")
 
     submitted = st.form_submit_button("Submit")
-    if submitted:
+    if submitted and validate_annotations(edited_df):
+        edited_df = clean_annotations(edited_df)
+        print(st.session_state['data_editor'])
         for idx,row in edited_df.iterrows():
             if row["Annotation"] is not None:
                 key = (MultiCameraRecording & {'recording_timestamps':row['recording_timestamps']}).fetch1("KEY")
