@@ -26,7 +26,7 @@ for old_video in old_videos: os.remove(old_video)
 st.set_page_config(layout="wide", page_title="MMC Annotation Dashboard")
 
 # choose which subjects/sessions
-res = Recording & (MultiCameraRecording & 'video_project NOT LIKE "CUET"') #TODO: need to expand this later
+res = Recording & (MultiCameraRecording & 'video_project NOT LIKE "CUET"' & 'video_project NOT LIKE "h36m"') #TODO: need to expand this later
 participant_id_options = np.unique((Session & res).fetch("participant_id"))
 participant_id = st.selectbox("Participant ID", participant_id_options)
 
@@ -160,9 +160,11 @@ with st.form(key="my_form"):
 # visualization
 selected_recording = st.selectbox("Select Recording", base_filenames)
 
-if len(BlurredVideo & (SingleCameraVideo & (MultiCameraRecording & {"video_base_filename": selected_recording}))) < 2:
-    with st.spinner("Generating blurred videos..."):
-        BlurredVideo.populate(SingleCameraVideo & ((SingleCameraVideo & (MultiCameraRecording & {"video_base_filename": selected_recording})) - BlurredVideo).fetch('KEY',limit=2))
+generate = st.button("Generate Blurred Videos")
+if generate:
+    if len(BlurredVideo & (SingleCameraVideo & (MultiCameraRecording & {"video_base_filename": selected_recording}))) < 2:
+        with st.spinner("Generating blurred videos..."):
+            BlurredVideo.populate(SingleCameraVideo & ((SingleCameraVideo & (MultiCameraRecording & {"video_base_filename": selected_recording})) - BlurredVideo).fetch('KEY',limit=2))
 
 single_camera_vids = (BlurredVideo & (
     SingleCameraVideo
