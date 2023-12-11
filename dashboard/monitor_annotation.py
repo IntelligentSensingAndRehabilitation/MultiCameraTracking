@@ -55,6 +55,34 @@ df = pd.concat([df, pd.DataFrame(disp, index=["Sensor Placement"])], ignore_inde
 
 st.dataframe(df)
 
+# get stats on which ones have missing data
+with st.expander("Show missing data"):
+    missing_video_activity = (FirebaseSession.AppVideo - SFVideoActivity).fetch('subject_id','session_start_time',as_dict=True)
+    df_missing_video_activity = pd.DataFrame(missing_video_activity)
+    df_missing_video_activity = df_missing_video_activity.assign(missing_video_activity=1)
+    df_missing_video_activity = df_missing_video_activity.groupby(['subject_id','session_start_time']).count()
+
+    missing_walking_annotation = ((SFVideoActivity & 'video_activity="Overground Walking"')- SFWalkingType).fetch('subject_id','session_start_time',as_dict=True)
+    df_missing_walking_annotation = pd.DataFrame(missing_walking_annotation)
+    df_missing_walking_annotation = df_missing_walking_annotation.assign(missing_walking_annotation=1)
+    df_missing_walking_annotation = df_missing_walking_annotation.groupby(['subject_id','session_start_time']).count()
+
+    missing_assistive_device = (FirebaseSession.AppVideo - SFAssistiveDevice).fetch('subject_id','session_start_time',as_dict=True)
+    df_missing_assistive_device = pd.DataFrame(missing_assistive_device)
+    df_missing_assistive_device = df_missing_assistive_device.assign(missing_assistive_device=1)
+    df_missing_assistive_device = df_missing_assistive_device.groupby(['subject_id','session_start_time']).count()
+
+    missing_sensor_placement = ((FirebaseSession.AppVideo & SessionSensor) - SensorPlacement).fetch('subject_id','session_start_time',as_dict=True)
+    df_missing_sensor_placement = pd.DataFrame(missing_sensor_placement)
+    df_missing_sensor_placement = df_missing_sensor_placement.assign(missing_sensor_placement=1)
+    df_missing_sensor_placement = df_missing_sensor_placement.groupby(['subject_id','session_start_time']).count()
+
+    combined_df = df_missing_video_activity.join(df_missing_walking_annotation, how='outer').fillna(0).astype(int)
+    combined_df = combined_df.join(df_missing_assistive_device, how='outer').fillna(0).astype(int)
+    combined_df = combined_df.join(df_missing_sensor_placement, how='outer').fillna(0).astype(int)
+    st.dataframe(combined_df)
+    
+
 
 # multi camera annotations
 mmc_missing_video_activity = len((MultiCameraRecording - MMCVideoActivity))
