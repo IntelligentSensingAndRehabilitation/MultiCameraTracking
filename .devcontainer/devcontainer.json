@@ -1,0 +1,47 @@
+{
+    "name": "Markerless Motion Capture",
+    "image": "mcr.microsoft.com/devcontainers/python:0-3.11",
+    // "features": {
+    //     "ghcr.io/devcontainers/features/nvidia-cuda:1.1.0": {
+    //         "installCudnn": true
+    //         // https://developer.nvidia.com/rdp/cudnn-download
+    //         // sudo apt-cache policy libcudnn8 | grep 12.1
+    //         // https://github.com/devcontainers/features/issues/718
+    //         //"cudaVersion": "12.1",
+    //         //"cudnnVersion": "8.9.3.28-1"            
+    //     }
+    // },
+    "postCreateCommand": "pip install -e .",
+    "mounts": [
+        "source=/data,target=/data,type=bind"
+    ],
+    "customizations": {
+        "settings": {
+            "python.pythonPath": "/usr/local/bin/python",
+            "python.formatting.provider": "black",
+            "python.linting.enabled": true,
+            "python.linting.pylintEnabled": true,
+            "python.linting.mypyEnabled": true,
+            "editor.insertSpaces": true,
+            "editor.tabSize": 4,
+            "editor.detectIndentation": false,
+            "editor.formatOnSave": false,
+            "[python]": {
+                "editor.formatOnSave": true
+            },
+            "python.testing.pytestPath": "/usr/local/bin/pytest",
+            "python.testing.pytestEnabled": true
+        },
+        "vscode": {
+            "extensions": [
+                "ms-python.python",
+                "ms-python.vscode-pylance",
+                "ms-toolsai.jupyter"
+            ]
+        }
+    },
+    "runArgs": ["--env-file", ".env"],
+    "hostRequirements": {
+        "gpu": "optional" 
+      }
+}
