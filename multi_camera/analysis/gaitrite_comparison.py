@@ -12,7 +12,7 @@ def parse_gaitrite(filename: str):
     Returns: A tuple of the start time and the dataframe.
     """
 
-    from datetime import datetime
+    from datetime import datetime, timedelta
 
     columns = [
         "Heel X",
@@ -69,6 +69,12 @@ def parse_gaitrite(filename: str):
         date_time_string = re.search(r"\d{8}_\d{6}", filename).group(0)
         # Parse the date and time component using the strptime method
         t0 = (datetime.strptime(date_time_string, "%Y%m%d_%H%M%S"), t0[1])
+
+    if False:
+        # add 5 hours to t0 to account for timezone difference, use time delta
+        print(f"before {t0}")
+        t0 = (t0[0] + timedelta(hours=5), t0[1])
+        print(f"after {t0}")
 
     print("\n", filename, t0)
 
@@ -401,6 +407,8 @@ def align_steps_multiple_trials(data, t_offsets):
     residuals = np.dot(measurements, R) * s + t - gt
 
     score = np.nansum(np.abs(residuals) * confidence) / (1e-9 + np.nansum(confidence)) / 2  # two columns
+    if s < 0.9 or s > 1.1:
+        score += 1e4
 
     # np.nansum(noise * confidence) / (1e-9 + np.nansum(confidence))
 

@@ -8,6 +8,7 @@ from tqdm import tqdm
 from mpl_toolkits.mplot3d import Axes3D
 from pose_pipeline import OpenPosePerson, TopDownPerson, LiftingPerson
 
+
 def center_skeleton(keypoints3d, joints):
     joints = [j.upper() for j in joints]
     pelvis = np.mean(
@@ -19,7 +20,6 @@ def center_skeleton(keypoints3d, joints):
 
 
 def skeleton_video(keypoints3d, filename, method, fps=30.0):
-
     if method == "OpenPose":
         joints = OpenPosePerson.joint_names()
         left = [
@@ -201,7 +201,7 @@ def skeleton_video(keypoints3d, filename, method, fps=30.0):
             "Left Knee",
             "Left Hip",
             "Pelvis",
-            #"Neck",
+            # "Neck",
             "Left Shoulder",
             "Left Elbow",
             "Left Wrist",
@@ -215,7 +215,7 @@ def skeleton_video(keypoints3d, filename, method, fps=30.0):
             "Right Knee",
             "Right Hip",
             "Pelvis",
-            #"Neck",
+            # "Neck",
             "Right Shoulder",
             "Right Elbow",
             "Right Wrist",
@@ -330,8 +330,7 @@ def skeleton_video(keypoints3d, filename, method, fps=30.0):
     return anim
 
 
-def get_projected_keypoint_overlay(key: dict, cam_idx: int=0, radius=5, color=(255, 0, 0)):
-
+def get_projected_keypoint_overlay(key: dict, cam_idx: int = 0, radius=5, color=(255, 0, 0)):
     from pose_pipeline import TopDownPerson, VideoInfo
     from pose_pipeline.utils.bounding_box import crop_image_bbox
     from multi_camera.datajoint.multi_camera_dj import (
@@ -382,29 +381,32 @@ def get_projected_keypoint_overlay(key: dict, cam_idx: int=0, radius=5, color=(2
             return frame
         frame = draw_keypoints(frame, keypoints2d[cam_idx, idx], radius=radius, color=color)
         return frame
-    
+
     return overlay
 
 
-bml_movi_87_skeleton = [[67, 70],
-       [68, 69],
-       [68, 73],
-       [68, 81],
-       [69, 70],
-       [70, 76],
-       [70, 84],
-       [71, 75],
-       [71, 78],
-       [72, 76],
-       [72, 77],
-       [73, 75],
-       [74, 77],
-       [79, 83],
-       [79, 86],
-       [80, 84],
-       [80, 85],
-       [81, 83],
-       [82, 85]]
+bml_movi_87_skeleton = [
+    [67, 70],
+    [68, 69],
+    [68, 73],
+    [68, 81],
+    [69, 70],
+    [70, 76],
+    [70, 84],
+    [71, 75],
+    [71, 78],
+    [72, 76],
+    [72, 77],
+    [73, 75],
+    [74, 77],
+    [79, 83],
+    [79, 86],
+    [80, 84],
+    [80, 85],
+    [81, 83],
+    [82, 85],
+]
+
 
 def make_reprojection_video(
     key: dict,
@@ -475,14 +477,14 @@ def make_reprojection_video(
         x = x.copy()
         x[np.isnan(x)] = 0
         return x.astype(int)
-    bboxes = [cast((PersonBbox & v).fetch1("bbox")) for v in video_keys]    
+
+    bboxes = [cast((PersonBbox & v).fetch1("bbox")) for v in video_keys]
 
     kp2d_detected = np.array([(TopDownPerson & v).fetch1("keypoints")[:total_frames] for v in video_keys])
 
-    bml_movi_87 = (TopDownMethodLookup & key).fetch1('top_down_method_name') == 'Bridging_bml_movi_87'
+    bml_movi_87 = (TopDownMethodLookup & key).fetch1("top_down_method_name") == "Bridging_bml_movi_87"
 
     def make_frames(video_idx):
-
         video = videos[video_idx]
         cap = cv2.VideoCapture(video)
         bbox_fn = bbox_fns[video_idx]
@@ -538,9 +540,14 @@ def make_reprojection_video(
 
         return results
 
-    # use multithreading futures to run make_frames for each video in parallel and collate teh results
-    with concurrent.futures.ThreadPoolExecutor() as executor:
-        results = list(executor.map(make_frames, range(len(video_keys))))
+    if False:
+        results = []
+        for idx, video_key in enumerate(video_keys):
+            results.append(make_frames(idx))
+    else:
+        # use multithreading futures to run make_frames for each video in parallel and collate teh results
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            results = list(executor.map(make_frames, range(len(video_keys))))
 
     def images_to_grid(images, n_cols=5):
         n_rows = int(np.ceil(len(images) / n_cols))
