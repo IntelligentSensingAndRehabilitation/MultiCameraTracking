@@ -7,11 +7,12 @@
     //         // https://developer.nvidia.com/rdp/cudnn-download
     //         // sudo apt-cache policy libcudnn8 | grep 12.1
     //         // https://github.com/devcontainers/features/issues/718
+    //         // https://github.com/microsoft/vscode-dev-containers/pull/1176/files#diff-59c48712e09a80eee1a411e90165e4e9cac97531b5e5e1102ec418b727dca82c
     //         //"cudaVersion": "12.1",
-    //         //"cudnnVersion": "8.9.3.28-1"            
+    //         //"cudnnVersion": "8.9.3.28-1"
     //     }
     // },
-    "postCreateCommand": "pip install -e .",
+    "postCreateCommand": ".devcontainer/post-create.sh",
     "mounts": [
         "source=/data,target=/data,type=bind"
     ],

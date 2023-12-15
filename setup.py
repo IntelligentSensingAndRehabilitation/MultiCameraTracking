@@ -18,5 +18,5 @@ setuptools.setup(
         "Operating System :: OS Independent",
     ],
     python_requires='>=3.6',
-    install_requires=['datajoint', 'jax', 'jaxlib', 'jaxopt', 'jaxlie', 'aniposelib', 'opencv-python', 'numpy', 'tqdm']
+    install_requires=['datajoint', 'jax', 'jaxlib', 'jaxopt', 'jaxlie', 'aniposelib', 'opencv-python', 'opencv-contrib-python', 'numpy', 'scipy', 'tqdm']
 )
