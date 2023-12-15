@@ -199,7 +199,18 @@ def get_skeleton_mesh_overlay(key, cam_idx=0):
         SingleCameraVideo,
         PersonKeypointReconstruction,
     )
-    from multi_camera.validation.biomechanics.biomechanics import BiomechanicalReconstruction
+
+    if False:  # for validation data
+        from multi_camera.validation.biomechanics.biomechanics import BiomechanicalReconstruction
+
+        model_name = (BiomechanicalReconstruction & key).fetch1("model_name")
+    else:
+        from multi_camera.datajoint.nimblephysics_biomechanics import BiomechanicalReconstruction
+
+        # expects all fits for this code to use the same model
+        from multi_camera.datajoint.nimblephysics_biomechanics import reconstruction_settings
+
+        model_name = reconstruction_settings["model_name"]
 
     # set up the cameras
     camera_params, camera_names = (Calibration & key).fetch1("camera_calibration", "camera_names")
@@ -230,9 +241,9 @@ def get_skeleton_mesh_overlay(key, cam_idx=0):
 
     # select the desired one since we are only supporting a single camera for now
     cameras = cameras[cam_idx]
-
     # get the skeleton
-    model_name, skeleton_def = (BiomechanicalReconstruction & key).fetch1("model_name", "skeleton_definition")
+    skeleton_def = (BiomechanicalReconstruction & key).fetch1("skeleton_definition")
+
     skeleton = bilevel_optimization.reload_skeleton(model_name, skeleton_def["group_scales"])
     timestamps, poses = (BiomechanicalReconstruction.Trial & key).fetch1("timestamps", "poses")
 
@@ -318,7 +329,18 @@ def get_markers_overlay(key, cam_idx=0, radius=5, color=(0, 0, 255)):
         PersonKeypointReconstruction,
     )
     from multi_camera.datajoint.calibrate_cameras import Calibration
-    from multi_camera.validation.biomechanics.biomechanics import BiomechanicalReconstruction
+
+    if False:  # for validation data
+        from multi_camera.validation.biomechanics.biomechanics import BiomechanicalReconstruction
+
+        model_name = (BiomechanicalReconstruction & key).fetch1("model_name")
+    else:
+        from multi_camera.datajoint.nimblephysics_biomechanics import BiomechanicalReconstruction
+
+        # expects all fits for this code to use the same model
+        from multi_camera.datajoint.nimblephysics_biomechanics import reconstruction_settings
+
+        model_name = reconstruction_settings["model_name"]
 
     from pose_pipeline.utils.visualization import draw_keypoints
     from multi_camera.analysis.camera import project_distortion
@@ -336,8 +358,12 @@ def get_markers_overlay(key, cam_idx=0, radius=5, color=(0, 0, 255)):
     width = np.unique((VideoInfo & video_keys).fetch("width"))[0]
     height = np.unique((VideoInfo & video_keys).fetch("height"))[0]
 
-    # load the skeleton
-    model_name, skeleton_def = (BiomechanicalReconstruction & key).fetch1("model_name", "skeleton_definition")
+    # expects all fits for this code to use the same model
+    from multi_camera.datajoint.nimblephysics_biomechanics import reconstruction_settings
+
+    # get the skeleton
+    skeleton_def = (BiomechanicalReconstruction & key).fetch1("skeleton_definition")
+
     skeleton = reload_skeleton(model_name, skeleton_def["group_scales"])
     timestamps, poses = (BiomechanicalReconstruction.Trial & key).fetch1("timestamps", "poses")
 
@@ -386,10 +412,21 @@ def create_centered_video(key, out_file_name=None):
     import os
     import tempfile
     from .bilevel_optimization import get_markers, reload_skeleton
-    from multi_camera.validation.biomechanics.biomechanics import BiomechanicalReconstruction
     from pose_pipeline.utils.video_format import compress
 
-    model_name, skeleton_def = (BiomechanicalReconstruction & key).fetch1("model_name", "skeleton_definition")
+    if False:  # for validation data
+        from multi_camera.validation.biomechanics.biomechanics import BiomechanicalReconstruction
+
+        model_name = (BiomechanicalReconstruction & key).fetch1("model_name")
+    else:
+        from multi_camera.datajoint.nimblephysics_biomechanics import BiomechanicalReconstruction
+
+        # expects all fits for this code to use the same model
+        from multi_camera.datajoint.nimblephysics_biomechanics import reconstruction_settings
+
+        model_name = reconstruction_settings["model_name"]
+
+    skeleton_def = (BiomechanicalReconstruction & key).fetch1("skeleton_definition")
     skeleton = reload_skeleton(model_name, skeleton_def["group_scales"], return_map=False)
     poses = (BiomechanicalReconstruction.Trial & key).fetch1("poses")
 
@@ -415,7 +452,7 @@ def create_overlay_video(key, cam_idx, out_file_name=None):
     import os
     import tempfile
     from pose_pipeline.utils.visualization import video_overlay
-    from pose_pipeline.pipeline import BlurredVideo, TopDownPerson
+    from pose_pipeline.pipeline import Video, BlurredVideo, TopDownPerson
     from multi_camera.utils.visualization import get_projected_keypoint_overlay
     from multi_camera.datajoint.multi_camera_dj import (
         MultiCameraRecording,
