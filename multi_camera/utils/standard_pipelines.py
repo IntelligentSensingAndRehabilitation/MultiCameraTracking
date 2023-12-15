@@ -19,7 +19,7 @@ def reconstruction_pipeline(
     keys: List[Dict],
     top_down_method_name: str = "MMPoseHalpe",
     tracking_method_name: str = "EasyMocap",
-    reconstruction_method_name: str = "RobustTriangulation",
+    reconstruction_method_name: str = "Robust Triangulation",
     reserve_jobs: bool = True,
 ):
     from pose_pipeline.utils import standard_pipelines as pose_pipelines
@@ -59,17 +59,22 @@ def reconstruction_pipeline(
                 "Bridging_COCO_25",
                 "Bridging_bml_movi_87",
             ]:
-                pose_pipelines.bottomup_to_topdown([v], top_down_method_name, tracking_method_name)
+                pose_pipelines.bottomup_to_topdown(
+                    [v], top_down_method_name, tracking_method_name, reserve_jobs=reserve_jobs
+                )
             else:
                 pose_pipelines.top_down_pipeline(
-                    v, tracking_method_name=tracking_method_name, top_down_method_name=top_down_method_name
+                    v,
+                    tracking_method_name=tracking_method_name,
+                    top_down_method_name=top_down_method_name,
+                    reserve_jobs=reserve_jobs,
                 )
 
         k["reconstruction_method"] = reconstruction_method
         k["top_down_method"] = top_down_method
         k["tracking_method"] = tracking_method
         PersonKeypointReconstructionMethod.insert1(k, skip_duplicates=True)
-        PersonKeypointReconstruction.populate(k, suppress_errors=True, reserve_jobs=reserve_jobs)
+        PersonKeypointReconstruction.populate(k, suppress_errors=False, reserve_jobs=reserve_jobs)
 
         final_keys.append(k)
 

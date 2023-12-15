@@ -67,13 +67,13 @@ class GaitRiteCalibration(dj.Computed):
 
     def make(self, key):
         recording_keys = (
-            GaitRiteRecording * PersonKeypointReconstruction & key & "reconstruction_method=2 and top_down_method=2"
+            GaitRiteRecording * PersonKeypointReconstruction & key & "reconstruction_method=0 and top_down_method=2"
         ).fetch("KEY")
         data = [fetch_data(k) for k in recording_keys]
 
         def drop_steps(d):
             dt, kp3d, df = d
-            df = df.iloc[2:-2]
+            df = df.iloc[1:-1]
             return dt, kp3d, df
 
         data = [drop_steps(d) for d in data]
@@ -88,7 +88,7 @@ class GaitRiteCalibration(dj.Computed):
         return (
             GaitRiteSession
             - (
-                GaitRiteRecording - (PersonKeypointReconstruction & "reconstruction_method=2 and top_down_method=2")
+                GaitRiteRecording - (PersonKeypointReconstruction & "reconstruction_method=0 and top_down_method=2")
             ).proj()
         )
 
@@ -217,7 +217,6 @@ class GaitRiteRecordingStepPositionError(dj.Computed):
         """
 
     def make(self, key):
-
         t_offset = (GaitRiteRecordingAlignment & key).fetch1("t_offset")
 
         dt, kp3d, df = fetch_data(key)
@@ -311,7 +310,6 @@ class GaitRiteRecordingStepLengthError(dj.Computed):
         """
 
     def make(self, key):
-
         t_offset = (GaitRiteRecordingAlignment & key).fetch1("t_offset")
 
         dt, kp3d, df = fetch_data(key)
@@ -413,7 +411,6 @@ class GaitRiteRecordingStepWidthError(dj.Computed):
                 heel_trace = kp3d[trace_idx, 2, :2]
 
             if i >= 2 and last_left_heel is not None and last_right_heel is not None:
-
                 # we need to know the next contralateral foot position to compute the
                 # line of progression required for measuring the step width, so update
                 # the index accordingly. Note that the code below compares against the
@@ -472,7 +469,6 @@ class GaitRiteRecordingStepWidthError(dj.Computed):
 
 
 def get_walking_time_range(key, margin=2.5):
-
     assert len(GaitRiteRecordingAlignment & key) <= 1, "Select only one recording"
     assert len(GaitRiteRecordingAlignment & key) == 1, f"No GaitRiteAlignment found for  {key}"
     t_offset = (GaitRiteRecordingAlignment & key).fetch1("t_offset")
@@ -483,7 +479,6 @@ def get_walking_time_range(key, margin=2.5):
 
 
 def match_data(filename):
-
     t0, df = parse_gaitrite(filename)
 
     delta_t = f'ABS(TIMESTAMP(recording_timestamps) - TIMESTAMP("{t0[0]}"))'
@@ -539,8 +534,7 @@ def fetch_data(key, only_present=False):
     return dt, kp3d, df
 
 
-def plot_data(key, t_offset=None, axis=0):
-
+def plot_data(key, ax, orientation=0, i=0, t_offset=None, axis=0):
     import matplotlib.pyplot as plt
 
     if t_offset is None:
@@ -662,7 +656,6 @@ def import_gaitrite_files(subject_id: int, filenames: List[str]):
 
     # open a datajoint transaction
     with dj.conn().transaction:
-
         # insert the session
         key = dict(subject_id=subject_id, gaitrite_sesion_date=min_t0)
         GaitRiteSession.insert1(key)
