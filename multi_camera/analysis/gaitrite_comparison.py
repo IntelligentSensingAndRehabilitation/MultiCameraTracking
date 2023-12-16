@@ -293,7 +293,7 @@ def find_local_minima(data: tuple, t_range: List[float] = None, ret_scores=False
         t_range = get_offset_range(data[0][present], data[2])
         print(f"Offset range: {t_range}")
 
-    t_offsets = np.arange(t_range[0], t_range[1], 0.1)
+    t_offsets = np.arange(t_range[0], t_range[1], 0.05)
     scores = np.array([score_extraction(extract_traces(*data, t, 4)) for t in t_offsets])
 
     # Find the local minima
