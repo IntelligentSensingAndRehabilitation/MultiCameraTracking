@@ -62,7 +62,7 @@ class KeypointTrajectory(nn.Module):
 
 def positional_encoding(inputs, positional_encoding_dims=3):
     batch_size, _ = inputs.shape
-    inputs_freq = jax.vmap(lambda x: inputs * 2.0 ** x)(jnp.arange(positional_encoding_dims))
+    inputs_freq = jax.vmap(lambda x: inputs * 2.0**x)(jnp.arange(positional_encoding_dims))
     periodic_fns = jnp.stack([jnp.sin(inputs_freq), jnp.cos(inputs_freq)])
     periodic_fns = periodic_fns.swapaxes(0, 2).reshape([batch_size, -1])
     periodic_fns = jnp.concatenate([inputs, periodic_fns], axis=-1)
@@ -81,7 +81,6 @@ class ImplicitTrajectory(nn.Module):
 
     @nn.compact
     def __call__(self, input_points):
-
         # works better when using time scale (0,1)
         input_points = input_points / self.size * jnp.pi
         input_points = positional_encoding(input_points, 6)
@@ -101,19 +100,34 @@ class ImplicitTrajectory(nn.Module):
 
 def huber(x, delta=5.0, max=10000, max_slope=0.1):
     """Huber loss."""
-    x = jnp.where(jnp.abs(x) < delta, 0.5 * x ** 2, delta * (jnp.abs(x) - 0.5 * delta))
+    x = jnp.where(jnp.abs(x) < delta, 0.5 * x**2, delta * (jnp.abs(x) - 0.5 * delta))
     x = jnp.where(x > max, (x - max) * max_slope + max, x)
     return x
 
 
-def reprojection_loss(camera_params, points2d, points3d, huber_max=10, threshold=0.5):
-    """Compute reprojection loss between 3D keypoints and 2D keypoints."""
+def reprojection_loss(camera_params, points2d, points3d, huber_max=10, threshold=0.5, weights=None):
+    """
+    Compute reprojection loss between 3D keypoints and 2D keypoints.
+
+    Parameters:
+        camera_params: dictionary of camera parameters
+        points2d (cameras x time x joints x 3): 2D keypoints with confidences
+        points3d (time x joints x 3): 3D keypoints to compute reprojection for
+        huber_max: float
+        threshold: float
+        weights: (joints) weights for each joint
+    """
 
     conf = points2d[..., -1]
-    conf = conf * (conf > 0.5)  # only use points with high confidence
+    conf = conf * (conf > threshold)  # only use points with high confidence
     loss = reprojection_error(camera_params, points2d[..., :-1], points3d)
-    delta = huber(jnp.linalg.norm(loss, axis=-1), max=huber_max)
-    return jnp.nanmean(delta * conf)
+    loss = huber(jnp.linalg.norm(loss, axis=-1), max=huber_max)
+    loss = loss * conf
+    if weights is not None:
+        weights = weights.reshape(1, 1, loss.shape[2])
+        loss = loss * weights
+
+    return jnp.nanmean(loss)
 
 
 def smoothness_loss(points3d):
@@ -177,7 +191,6 @@ def optimize_trajectory(
     camera_weight_distance=20,
     return_weights=False,
 ):
-
     from .camera import robust_triangulate_points
 
     if method == "implicit":
@@ -256,7 +269,7 @@ def optimize_trajectory(
             pred = model.apply(variables, x)
             l_repro = reprojection_loss(camera_params, keypoints2d, pred, huber_max=huber_max)
             l_delta = smoothness_loss(pred)
-            l_skeleton = skeleton_loss(pred, skeleton)
+            l_skeleton = skeleton_loss(pred, skeleton) if skeleton is not None else 0.0
 
             print(
                 f"Loss on step {i}: {loss_val:.3f} (repro: {l_repro:.3f}, delta: {l_delta:.3f}, skeleton: {l_skeleton:.3f})"
@@ -275,11 +288,10 @@ def optimize_trajectory(
     camera_weights = jnp.exp(-delta / camera_weight_distance) * conf
 
     if return_confidence:
-        conf3d = jnp.sum(camera_weights ** 2, axis=0) / jnp.sum(camera_weights, axis=0)
+        conf3d = jnp.sum(camera_weights**2, axis=0) / jnp.sum(camera_weights, axis=0)
         pred = jnp.concatenate([pred, conf3d[..., None]], axis=-1)
 
     if return_model:
-
         losses = {
             "reprojection_loss": reprojection_loss(camera_params, keypoints2d, pred),
             "smoothness_loss": smoothness_loss(pred),
