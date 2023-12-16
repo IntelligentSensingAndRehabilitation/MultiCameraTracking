@@ -9,6 +9,7 @@ import datajoint as dj
 from pose_pipeline.pipeline import TopDownMethodLookup
 from multi_camera.datajoint import sessions
 from multi_camera.datajoint.multi_camera_dj import (
+    SingleCameraVideo,
     PersonKeypointReconstruction,
     PersonKeypointReconstructionMethodLookup,
 )
@@ -69,6 +70,16 @@ class BiomechanicalReconstruction(dj.Computed):
         average_rmse           : float
         average_max_error      : float
         """
+
+        def reload_skeleton(self):
+            assert len(self) == 1, "Can only load skeleton for one trial at a time"
+
+            from multi_camera.analysis.biomechanics.bilevel_optimization import get_markers, reload_skeleton
+
+            model_name = reconstruction_settings["model_name"]
+            skeleton_def = (BiomechanicalReconstruction & self).fetch1("skeleton_definition")
+
+            return reload_skeleton(model_name, skeleton_def["group_scales"])
 
     class JointRmse(dj.Part):
         definition = """
@@ -176,6 +187,30 @@ class BiomechanicalReconstruction(dj.Computed):
             self.Trial.insert1(t)
             for joint_name, rmse in metrics["getSortedMarkerRMSE"]:
                 self.JointRmse.insert1({"joint_name": joint_name, "rmse": rmse, **trial_key})
+
+
+@schema
+class BiomechanicalTrialMeshOverlay(dj.Computed):
+    definition = """
+    -> BiomechanicalReconstruction.Trial
+    -> SingleCameraVideo
+    ---
+    output_video      : attach@localattach    # datajoint managed video file
+    """
+
+    def make(self, key):
+        from multi_camera.datajoint.calibrate_cameras import Calibration
+        from multi_camera.analysis.biomechanics.render import create_overlay_video
+
+        camera_name = (SingleCameraVideo & key).fetch1("camera_name")
+        camera_names = (Calibration & key).fetch1("camera_names")
+        N = camera_names.index(camera_name)
+        print(f"Creating overlay for {camera_name} ({N})")
+
+        vid = create_overlay_video((BiomechanicalReconstruction.Trial & key).fetch1("KEY"), N)
+
+        key["output_video"] = vid
+        self.insert1(key)
 
 
 if __name__ == "__main__":
