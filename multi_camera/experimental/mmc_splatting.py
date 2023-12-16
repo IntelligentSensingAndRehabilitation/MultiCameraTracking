@@ -11,7 +11,7 @@ import numpy as np
 import torch
 
 
-def create_uniform_gaussians(num_points: int, scale: float = 1.0, sh_degree: int = 3):
+def create_uniform_gaussians(num_points: int, scale: float = 1.0, sh_degree: int = 1):
     """
     Create a set of uniform gaussians
 
@@ -132,7 +132,7 @@ def get_cameras(key: dict, *args, **kwargs):
     return cameras
 
 
-def get_images(key: dict, frame_num: int):
+def get_images(key: dict, frame_num: int, undistort: bool = True):
     """
     Get the camera parameters for a given key
 
@@ -142,20 +142,48 @@ def get_images(key: dict, frame_num: int):
     """
 
     from pose_pipeline.pipeline import Video
-    from multi_camera.datajoint.multi_camera_dj import MultiCameraRecording, SingleCameraVideo
+    from multi_camera.datajoint.multi_camera_dj import (
+        MultiCameraRecording,
+        SingleCameraVideo,
+        Calibration,
+        CalibratedRecording,
+    )
 
     assert len(MultiCameraRecording & key) == 1, "Key must be unique"
 
     videos, camera_names = (Video * SingleCameraVideo & key).fetch("video", "camera_name")
     print("Camera names: ", camera_names)
 
+    def undistort_im(im, view_idx):
+        cal = (Calibration & (CalibratedRecording & key)).fetch1("camera_calibration")
+        dist = cal["dist"]
+        mtx = cal["mtx"] * 1000.0
+
+        K = np.zeros((3, 3))
+        K[0, 0] = mtx[view_idx, 0]
+        K[1, 1] = mtx[view_idx, 1]
+        K[0, 2] = mtx[view_idx, 2]
+        K[1, 2] = mtx[view_idx, 3]
+        K[2, 2] = 1.0
+
+        d = dist[view_idx]
+
+        cameraMatrix = K
+        distCoeffs = d
+
+        dst = cv2.undistort(im, cameraMatrix, distCoeffs)
+        return dst
+
     # use cv2 to read the specific frame from each camera
     images = []
-    for v in videos:
+    for i, v in enumerate(videos):
         cap = cv2.VideoCapture(v)
         cap.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
         ret, frame = cap.read()
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+        frame = undistort_im(frame, i)
+
         images.append(frame)
         cap.release()
         os.remove(v)
@@ -188,7 +216,9 @@ class OptimizationParams:
     densify_grad_threshold = 0.0002
 
 
-def optimize_key(key: dict, frame: int, iterations: int = 2_000, num_points: int = 1000):
+def optimize_key(
+    key: dict, frame: int, iterations: int = 2_000, num_points: int = 1000, test_idx=None, camera_extent=0.1
+):
     import torch
     from random import randint
     from utils.loss_utils import l1_loss, ssim
@@ -198,6 +228,7 @@ def optimize_key(key: dict, frame: int, iterations: int = 2_000, num_points: int
     images = get_images(key, frame)
     cameras = get_cameras(key, scale=1.0, zfar=100.0)
 
+    white_background = True
     bg_color = [1, 1, 1]
     background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")  # white background
 
@@ -211,9 +242,12 @@ def optimize_key(key: dict, frame: int, iterations: int = 2_000, num_points: int
 
     for iteration in range(1, iterations):
         if not train_idx:
-            train_idx = list(range(len(images) - 1))
+            train_idx = list(range(len(images)))
 
         view_idx = train_idx.pop(randint(0, len(train_idx) - 1))
+
+        if view_idx == test_idx:
+            continue
 
         render_pkg = render(cameras[view_idx], gaussians, pipe, background)
         image, viewspace_point_tensor, visibility_filter, radii = (
@@ -250,13 +284,12 @@ def optimize_key(key: dict, frame: int, iterations: int = 2_000, num_points: int
                 gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)
 
                 if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0:
-                    size_threshold = 20 if iteration > opt.opacity_reset_interval else None
-                    camera_extent = 0.1
+                    size_threshold = 0.05 if iteration > opt.opacity_reset_interval else None
                     gaussians.densify_and_prune(opt.densify_grad_threshold, 0.005, camera_extent, size_threshold)
 
-                if (
-                    iteration % opt.opacity_reset_interval == 0
-                ):  # or (dataset.white_background and iteration == opt.densify_from_iter):
+                if iteration % opt.opacity_reset_interval == 0 or (
+                    white_background and iteration == opt.densify_from_iter
+                ):
                     gaussians.reset_opacity()
 
             gaussians.optimizer.step()
