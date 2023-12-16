@@ -534,7 +534,7 @@ def fetch_data(key, only_present=False):
     return dt, kp3d, df
 
 
-def plot_data(key, ax, orientation=0, i=0, t_offset=None, axis=0):
+def plot_data(key, orientation=0, i=0, t_offset=None, axis=0):
     import matplotlib.pyplot as plt
 
     if t_offset is None:
