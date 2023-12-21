@@ -523,55 +523,111 @@ class FlirRecorder:
 
         all_timestamps = []
 
-        for frame_idx in tqdm(range(max_frames)):
-            # Use thread safe checking of semaphore to determine whether to stop recording
-            if self.stop_recording.is_set():
-                self.stop_recording.clear()
-                print("Stopping recording")
-                break
+        if self.camera_config["acquisition-type"] == "continuous":
 
-            self.set_progress(frame_idx / max_frames)
+            # use a while loop to keep recording until the stop_recording event is set
+            # frame_idx = 0
+            while True:
+                # Use thread safe checking of semaphore to determine whether to stop recording
+                if self.stop_recording.is_set():
+                    self.stop_recording.clear()
+                    print("Stopping recording")
+                    break
 
-            # get the image raw data
-            # for each camera, get the current frame and assign it to
-            # the corresponding camera
-            real_times = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-            real_time_images = []
+                # self.set_progress(frame_idx / max_frames)
 
-            frame_timestamps = {"real_times": real_times}
+                # get the image raw data
+                # for each camera, get the current frame and assign it to
+                # the corresponding camera
+                real_times = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+                real_time_images = []
 
-            for c in self.cams:
-                im_ref = c.get_image()
-                timestamps = im_ref.GetTimeStamp()
+                frame_timestamps = {"real_times": real_times}
 
-                # store camera timestamps
-                frame_timestamps[c.DeviceSerialNumber] = timestamps
+                for c in self.cams:
+                    im_ref = c.get_image()
+                    timestamps = im_ref.GetTimeStamp()
 
-                # get the data array
-                # Using try/except to handle frame tearing
-                try:
-                    im = im_ref.GetNDArray()
-                    im_ref.Release()
+                    # store camera timestamps
+                    frame_timestamps[c.DeviceSerialNumber] = timestamps
 
-                    if self.preview_callback is not None:
-                        # if preview is enabled, save the size of the first image
-                        # and append the image from each camera to a list
-                        real_time_images.append(im)
+                    # get the data array
+                    # Using try/except to handle frame tearing
+                    try:
+                        im = im_ref.GetNDArray()
+                        im_ref.Release()
 
-                except Exception as e:
-                    tqdm.write("Bad frame")
-                    continue
+                        if self.preview_callback is not None:
+                            # if preview is enabled, save the size of the first image
+                            # and append the image from each camera to a list
+                            real_time_images.append(im)
 
-                if self.video_base_file is not None:
-                    # Writing the frame information for the current camera to its queue
-                    self.image_queue_dict[c.DeviceSerialNumber].put(
-                        {"im": im, "real_times": real_times, "timestamps": timestamps}
-                    )
+                    except Exception as e:
+                        tqdm.write("Bad frame")
+                        continue
 
-            all_timestamps.append(frame_timestamps)
+                    if self.video_base_file is not None:
+                        # Writing the frame information for the current camera to its queue
+                        self.image_queue_dict[c.DeviceSerialNumber].put(
+                            {"im": im, "real_times": real_times, "timestamps": timestamps}
+                        )
 
-            if self.preview_callback:
-                self.preview_callback(real_time_images)
+                all_timestamps.append(frame_timestamps)
+
+                if self.preview_callback:
+                    self.preview_callback(real_time_images)
+
+        else:
+
+            for frame_idx in tqdm(range(max_frames)):
+                # Use thread safe checking of semaphore to determine whether to stop recording
+                if self.stop_recording.is_set():
+                    self.stop_recording.clear()
+                    print("Stopping recording")
+                    break
+
+                self.set_progress(frame_idx / max_frames)
+
+                # get the image raw data
+                # for each camera, get the current frame and assign it to
+                # the corresponding camera
+                real_times = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+                real_time_images = []
+
+                frame_timestamps = {"real_times": real_times}
+
+                for c in self.cams:
+                    im_ref = c.get_image()
+                    timestamps = im_ref.GetTimeStamp()
+
+                    # store camera timestamps
+                    frame_timestamps[c.DeviceSerialNumber] = timestamps
+
+                    # get the data array
+                    # Using try/except to handle frame tearing
+                    try:
+                        im = im_ref.GetNDArray()
+                        im_ref.Release()
+
+                        if self.preview_callback is not None:
+                            # if preview is enabled, save the size of the first image
+                            # and append the image from each camera to a list
+                            real_time_images.append(im)
+
+                    except Exception as e:
+                        tqdm.write("Bad frame")
+                        continue
+
+                    if self.video_base_file is not None:
+                        # Writing the frame information for the current camera to its queue
+                        self.image_queue_dict[c.DeviceSerialNumber].put(
+                            {"im": im, "real_times": real_times, "timestamps": timestamps}
+                        )
+
+                all_timestamps.append(frame_timestamps)
+
+                if self.preview_callback:
+                    self.preview_callback(real_time_images)
 
         if self.preview_callback:
             self.preview_callback(None)
