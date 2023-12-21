@@ -102,6 +102,8 @@ def init_camera(
     resend_enable: bool = False,
     binning: int = 1,
     exposure_time: int = 15000,
+    line_selector: str = "Line1",
+    line_source: str = "ExposureActive",
 ):
     """
     Initialize camera with settings for recording
@@ -113,6 +115,9 @@ def init_camera(
             throughput_limit (int): Throughput limit for camera.
             resend_enable (bool): Enable packet resend
             binning (int): Factor by which the image resolution is reduced
+            exposure_time (int): Exposure time in microseconds
+            line_selector (str): Line selector for triggering
+            line_source (str): Line source for triggering
 
         Throughput should be limited for multiple cameras but reduces frame rate. Can use 125000000 for maximum
         frame rate or 85000000 when using more cameras with a 10GigE switch.
@@ -168,6 +173,10 @@ def init_camera(
         c.TriggerSelector = "AcquisitionStart"  # Need to select AcquisitionStart for real time clock
         c.TriggerSource = "Action0"
         c.TriggerMode = "On"
+    else: 
+        c.AcquisitionMode = "Continuous"
+        c.LineSelector = line_selector
+        c.LineSource = line_source
 
 
 def write_queue(
@@ -189,7 +198,9 @@ def write_queue(
     This is expected to be called from a standalone thread and will autoamtically terminate when the image_queue is empty.
     """
 
-    vid_file = os.path.splitext(vid_file)[0] + f".{serial}.mp4"
+    chunk_num = 0
+
+    vid_file = os.path.splitext(vid_file)[0] + f".{serial}"+ "_" + str(chunk_num) +".mp4"
 
     print(vid_file)
 
@@ -199,11 +210,15 @@ def write_queue(
 
     out_video = None
 
-    for frame in iter(image_queue.get, None):
+    for frame_num, frame in enumerate(iter(image_queue.get, None)):
         if frame is None:
             break
         timestamps.append(frame["timestamps"])
         real_times.append(frame["real_times"])
+
+        if frame_num % 10000 == 0:
+            chunk_num += 1
+            vid_file = os.path.splitext(vid_file)[0] + f".{serial}"+ "_" + str(chunk_num) +".mp4"
 
         im = frame["im"]
 
@@ -376,6 +391,9 @@ class FlirRecorder:
             # Parse additional parameters from the config file
             exposure_time = self.camera_config["acquisition-settings"]["exposure_time"]
             frame_rate = self.camera_config["acquisition-settings"]["frame_rate"]
+            if self.trigger == False:
+                line_selector = self.camera_config["acquisition-settings"]["lineselector"]
+                line_source = self.camera_config["acquisition-settings"]["linesource"]
         else:
             # If no config file is passed, use default values
             exposure_time = 15000
@@ -388,14 +406,27 @@ class FlirRecorder:
         else:
             binning = 1
 
-        config_params = {
-            "jumbo_packet": True,
-            "triggering": self.trigger,
-            "throughput_limit": 125000000,
-            "resend_enable": False,
-            "binning": binning,
-            "exposure_time": exposure_time,
-        }
+
+        if self.trigger == True:
+            config_params = {
+                "jumbo_packet": True,
+                "triggering": self.trigger,
+                "throughput_limit": 125000000,
+                "resend_enable": False,
+                "binning": binning,
+                "exposure_time": exposure_time, 
+            }
+        else:
+            config_params = {
+                "jumbo_packet": True,
+                "triggering": self.trigger,
+                "throughput_limit": 125000000,
+                "resend_enable": False,
+                "binning": binning,
+                "exposure_time": exposure_time,
+                "line_selector": line_selector,
+                "line_source": line_source,
+            }
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(self.cams)) as executor:
             list(executor.map(lambda c: init_camera(c, **config_params), self.cams))
