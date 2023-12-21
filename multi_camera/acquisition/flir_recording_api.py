@@ -162,6 +162,9 @@ def init_camera(
 
     # c.StreamPacketResendEnable = resend_enable
 
+    c.LineSelector = line_selector
+    c.LineSource = line_source
+
     if triggering:
         # set up masks for triggering
         c.ActionDeviceKey = 0
@@ -175,8 +178,7 @@ def init_camera(
         c.TriggerMode = "On"
     else: 
         c.AcquisitionMode = "Continuous"
-        c.LineSelector = line_selector
-        c.LineSource = line_source
+
 
 
 def write_queue(
@@ -200,7 +202,7 @@ def write_queue(
 
     chunk_num = 0
 
-    vid_file = os.path.splitext(vid_file)[0] + f".{serial}"+ "_" + str(chunk_num) +".mp4"
+    _vid_file = os.path.splitext(vid_file)[0] + f".{serial}"+ "_" + str(chunk_num) +".mp4"
 
     print(vid_file)
 
@@ -216,10 +218,6 @@ def write_queue(
         timestamps.append(frame["timestamps"])
         real_times.append(frame["real_times"])
 
-        if frame_num % 10000 == 0:
-            chunk_num += 1
-            vid_file = os.path.splitext(vid_file)[0] + f".{serial}"+ "_" + str(chunk_num) +".mp4"
-
         im = frame["im"]
 
         if pixel_format == "BayerRG8":
@@ -233,8 +231,20 @@ def write_queue(
             tqdm.write(f"Writing FPS: {acquisition_fps}")
 
             fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-            out_video = cv2.VideoWriter(vid_file, fourcc, acquisition_fps, (im.shape[1], im.shape[0]))
+
+            out_video = cv2.VideoWriter(_vid_file, fourcc, acquisition_fps, (im.shape[1], im.shape[0]))
             out_video.write(last_im)
+
+        elif frame_num % 100 == 0:
+            chunk_num += 1
+            _vid_file = os.path.splitext(vid_file)[0] + f".{serial}"+ "_" + str(chunk_num) +".mp4"
+
+            tqdm.write(f"Writing FPS: {acquisition_fps}")
+
+            fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+            print("writing to", _vid_file)
+            out_video = cv2.VideoWriter(_vid_file, fourcc, acquisition_fps, (im.shape[1], im.shape[0]))
+            out_video.write(im)
 
         else:
             out_video.write(im)
@@ -388,12 +398,21 @@ class FlirRecorder:
             self.cams = [Camera(i, lock=True) for i in self.iface_cameras]
 
         if self.camera_config:
+            print(self.camera_config)
             # Parse additional parameters from the config file
             exposure_time = self.camera_config["acquisition-settings"]["exposure_time"]
             frame_rate = self.camera_config["acquisition-settings"]["frame_rate"]
-            if self.trigger == False:
-                line_selector = self.camera_config["acquisition-settings"]["lineselector"]
-                line_source = self.camera_config["acquisition-settings"]["linesource"]
+            line_selector = self.camera_config["acquisition-settings"]["lineselector"]
+            line_source = self.camera_config["acquisition-settings"]["linesource"]
+            if self.camera_config["acquisition-type"] == "continuous":
+
+                print("CONTINUOUS ACQUISITION")
+                self.trigger = False
+                # line_selector = self.camera_config["acquisition-settings"]["lineselector"]
+                # line_source = self.camera_config["acquisition-settings"]["linesource"]
+            else:
+                print("TRIGGERED ACQUISITION")
+                print(self.trigger)
         else:
             # If no config file is passed, use default values
             exposure_time = 15000
@@ -406,27 +425,16 @@ class FlirRecorder:
         else:
             binning = 1
 
-
-        if self.trigger == True:
-            config_params = {
-                "jumbo_packet": True,
-                "triggering": self.trigger,
-                "throughput_limit": 125000000,
-                "resend_enable": False,
-                "binning": binning,
-                "exposure_time": exposure_time, 
-            }
-        else:
-            config_params = {
-                "jumbo_packet": True,
-                "triggering": self.trigger,
-                "throughput_limit": 125000000,
-                "resend_enable": False,
-                "binning": binning,
-                "exposure_time": exposure_time,
-                "line_selector": line_selector,
-                "line_source": line_source,
-            }
+        config_params = {
+            "jumbo_packet": True,
+            "triggering": self.trigger,
+            "throughput_limit": 125000000,
+            "resend_enable": False,
+            "binning": binning,
+            "exposure_time": exposure_time,
+            "line_selector": line_selector,
+            "line_source": line_source,
+        }
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(self.cams)) as executor:
             list(executor.map(lambda c: init_camera(c, **config_params), self.cams))
