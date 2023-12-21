@@ -93,6 +93,8 @@ class AssistiveDeviceLookup(dj.Lookup):
             "Bilateral Forearm Crutches",
             "Rolling Walker",
             "Harness",
+            "Side Walker"
+            "Standing Walker"
         ]
     )
 
