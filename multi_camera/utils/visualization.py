@@ -507,7 +507,7 @@ def make_reprojection_video(
         conf3d = keypoints3d[..., -1]
     else:
         kp3d = keypoints3d
-        conf3d = np.ones_like
+        conf3d = np.ones_like(keypoints3d[..., 0])
     keypoints2d = np.array([project_distortion(camera_params, i, kp3d) for i in range(camera_params["mtx"].shape[0])])
 
     # handle any bad projections
