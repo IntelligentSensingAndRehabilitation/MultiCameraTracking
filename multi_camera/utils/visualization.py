@@ -12,7 +12,9 @@ from pose_pipeline import OpenPosePerson, TopDownPerson, LiftingPerson
 def center_skeleton(keypoints3d, joints):
     joints = [j.upper() for j in joints]
     pelvis = np.mean(
-        keypoints3d[:, np.array([joints.index("LEFT HIP"), joints.index("RIGHT HIP")])], axis=1, keepdims=True
+        keypoints3d[:, np.array([joints.index("LEFT HIP"), joints.index("RIGHT HIP")])],
+        axis=1,
+        keepdims=True,
     )
     centered = keypoints3d - pelvis
 
@@ -54,8 +56,22 @@ def skeleton_video(keypoints3d, filename, method, fps=30.0):
         ]
     elif method == "MMPose":
         joints = TopDownPerson.joint_names("MMPoseCoco")
-        left = ["Left Ankle", "Left Knee", "Left Hip", "Left Shoulder", "Left Elbow", "Left Wrist"]
-        right = ["Right Ankle", "Right Knee", "Right Hip", "Right Shoulder", "Right Elbow", "Right Wrist"]
+        left = [
+            "Left Ankle",
+            "Left Knee",
+            "Left Hip",
+            "Left Shoulder",
+            "Left Elbow",
+            "Left Wrist",
+        ]
+        right = [
+            "Right Ankle",
+            "Right Knee",
+            "Right Hip",
+            "Right Shoulder",
+            "Right Elbow",
+            "Right Wrist",
+        ]
     elif method == "MMPoseWholebody":
         joints = TopDownPerson.joint_names("MMPoseWholebody")
         left = [
@@ -245,10 +261,20 @@ def skeleton_video(keypoints3d, filename, method, fps=30.0):
             )
         )
         lines.append(
-            plt.plot(centered[frame_idx, left, 0], centered[frame_idx, left, 1], centered[frame_idx, left, 2], "b")
+            plt.plot(
+                centered[frame_idx, left, 0],
+                centered[frame_idx, left, 1],
+                centered[frame_idx, left, 2],
+                "b",
+            )
         )
         lines.append(
-            plt.plot(centered[frame_idx, right, 0], centered[frame_idx, right, 1], centered[frame_idx, right, 2], "r")
+            plt.plot(
+                centered[frame_idx, right, 0],
+                centered[frame_idx, right, 1],
+                centered[frame_idx, right, 2],
+                "r",
+            )
         )
         lines.append(
             plt.plot(
@@ -320,7 +346,12 @@ def skeleton_video(keypoints3d, filename, method, fps=30.0):
     from matplotlib.animation import FuncAnimation, writers
 
     anim = FuncAnimation(
-        fig, update_video, frames=np.arange(0, keypoints3d.shape[0]), interval=1000 / fps, repeat=False, fargs=[lines]
+        fig,
+        update_video,
+        frames=np.arange(0, keypoints3d.shape[0]),
+        interval=1000 / fps,
+        repeat=False,
+        fargs=[lines],
     )
 
     Writer = writers["ffmpeg"]
@@ -416,10 +447,33 @@ def make_reprojection_video(
     detected_keypoint_size=4,
     projected_keypoint_size=6,
     visible_threshold=0.35,
+    keypoints3d=None,
 ):
-    """Create a video showing the cropped individual with the 2D keypoints project from each view"""
+    """
+    Create a video showing the cropped individual with the 2D keypoints project from each view
 
-    from pose_pipeline import PersonBbox, BlurredVideo, TopDownPerson, TopDownMethodLookup, VideoInfo
+    For convenience, the keypoints3d can be overridden and a different set of keypoints can be
+    provided to be projected. The key should still look like a valid PersonKeypointReconstruction
+    with a top down method number in the field to ensure the right detected keypoints are shown.
+
+    Args:
+        key (dict): PersonKeypointReconstruction key
+        portrait_width (int, optional): Width of the portrait video. Defaults to 288.
+        dilate (float, optional): Amount to dilate the bounding box by. Defaults to 1.1.
+        return_results (bool, optional): Whether to return the results as well as the filename. Defaults to False.
+        detected_keypoint_size (int, optional): Size of the detected keypoints. Defaults to 4.
+        projected_keypoint_size (int, optional): Size of the projected keypoints. Defaults to 6.
+        visible_threshold (float, optional): Threshold for showing keypoints. Defaults to 0.35.
+        keypoints3d (np.ndarray, optional): Overriding keypoints3d. Defaults to None.
+    """
+
+    from pose_pipeline import (
+        PersonBbox,
+        BlurredVideo,
+        TopDownPerson,
+        TopDownMethodLookup,
+        VideoInfo,
+    )
     from pose_pipeline.utils.bounding_box import crop_image_bbox
     from multi_camera.datajoint.multi_camera_dj import (
         MultiCameraRecording,
@@ -431,22 +485,29 @@ def make_reprojection_video(
     from pose_pipeline.utils.visualization import video_overlay, draw_keypoints
 
     recording_fn = (MultiCameraRecording & key).fetch1("video_base_filename")
-    videos = TopDownPerson * MultiCameraRecording * PersonKeypointReconstruction * SingleCameraVideo & key
-    video_keys, video_camera_name = (TopDownPerson.proj() * SingleCameraVideo.proj() * videos).fetch(
-        "KEY", "camera_name"
-    )
-    keypoints3d = (PersonKeypointReconstruction & key).fetch1("keypoints3d")
-    camera_params, camera_names = (Calibration & key).fetch1("camera_calibration", "camera_names")
-    assert camera_names == video_camera_name.tolist(), "Videos don't match cameras in calibration"
+    videos = TopDownPerson * MultiCameraRecording * SingleCameraVideo & key
+    video_keys, video_camera_name = (TopDownPerson.proj() * SingleCameraVideo.proj() * videos).fetch("KEY", "camera_name")
 
     # get video parameters
     width = np.unique((VideoInfo & video_keys).fetch("width"))[0]
     height = np.unique((VideoInfo & video_keys).fetch("height"))[0]
     fps = np.unique((VideoInfo & video_keys).fetch("fps"))[0]
 
-    # compute keypoints from reprojection of SMPL fit
-    kp3d = keypoints3d[..., :-1]
-    conf3d = keypoints3d[..., -1]
+    camera_params, camera_names = (Calibration & key).fetch1("camera_calibration", "camera_names")
+
+    if keypoints3d is None:
+        # get 3D keypoints
+        keypoints3d = (PersonKeypointReconstruction & key).fetch1("keypoints3d")
+
+        assert camera_names == video_camera_name.tolist(), "Videos don't match cameras in calibration"
+
+        # compute reprojected keypoints
+    if keypoints3d.shape[-1] == 4:
+        kp3d = keypoints3d[..., :-1]
+        conf3d = keypoints3d[..., -1]
+    else:
+        kp3d = keypoints3d
+        conf3d = np.ones_like
     keypoints2d = np.array([project_distortion(camera_params, i, kp3d) for i in range(camera_params["mtx"].shape[0])])
 
     # handle any bad projections
@@ -530,7 +591,10 @@ def make_reprojection_video(
                         )
             frame = bbox_fn(frame, frame_idx, width=2, color=(0, 0, 255))
             frame = crop_image_bbox(
-                frame, bbox[frame_idx], target_size=(portrait_width, int(portrait_width * 1920 / 1080)), dilate=dilate
+                frame,
+                bbox[frame_idx],
+                target_size=(portrait_width, int(portrait_width * 1920 / 1080)),
+                dilate=dilate,
             )[0]
 
             results.append(frame)
@@ -551,11 +615,18 @@ def make_reprojection_video(
 
     def images_to_grid(images, n_cols=5):
         n_rows = int(np.ceil(len(images) / n_cols))
-        grid = np.zeros((n_rows * images[0].shape[0], n_cols * images[0].shape[1], 3), dtype=np.uint8)
+        grid = np.zeros(
+            (n_rows * images[0].shape[0], n_cols * images[0].shape[1], 3),
+            dtype=np.uint8,
+        )
         for i, img in enumerate(images):
             row = i // n_cols
             col = i % n_cols
-            grid[row * img.shape[0] : (row + 1) * img.shape[0], col * img.shape[1] : (col + 1) * img.shape[1], :] = img
+            grid[
+                row * img.shape[0] : (row + 1) * img.shape[0],
+                col * img.shape[1] : (col + 1) * img.shape[1],
+                :,
+            ] = img
         return grid
 
     # collate the results into a grid
