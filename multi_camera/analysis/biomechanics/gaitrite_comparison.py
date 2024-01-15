@@ -1,7 +1,6 @@
 import numpy as np
 import datajoint as dj
 
-from multi_camera.analysis.biomechanics import bilevel_optimization
 from multi_camera.analysis import gaitrite_comparison as analysis_gaitrite_comparison
 from multi_camera.validation.biomechanics.biomechanics import BiomechanicalReconstruction
 from multi_camera.datajoint import gaitrite_comparison as dj_gaitrite_comparison
@@ -49,6 +48,8 @@ def get_foot_positions(skeleton, poses):
 
 
 def fetch_data(key, skeleton=None):
+    from multi_camera.analysis.biomechanics import bilevel_optimization
+
     df = dj_gaitrite_comparison.fetch_data(key)[-1]
 
     if skeleton is None:
@@ -63,6 +64,8 @@ def fetch_data(key, skeleton=None):
 
 
 def align_trials(key):
+    from multi_camera.analysis.biomechanics import bilevel_optimization
+
     assert len(BiomechanicalReconstruction & key) == 1
 
     model_name, skeleton_def = (BiomechanicalReconstruction & key).fetch1("model_name", "skeleton_definition")
@@ -152,9 +155,7 @@ class BiomechanicsStepLengthError(dj.Computed):
             step_key["step_id"] = i
             step_key["side"] = "Left" if step["Left Foot"] else "Right"
 
-            trace_idx = np.logical_and(
-                dt >= step["First Contact Time"] + t_offset, dt <= step["Last Contact Time"] + t_offset
-            )
+            trace_idx = np.logical_and(dt >= step["First Contact Time"] + t_offset, dt <= step["Last Contact Time"] + t_offset)
             if step_key["side"] == "Left":
                 heel_trace = kp3d[trace_idx, 0, 0]
             else:
@@ -162,12 +163,8 @@ class BiomechanicsStepLengthError(dj.Computed):
 
             if i >= 2 and last_left_heel is not None and last_right_heel is not None:
                 # GaitRite step lengths only defined after first step
-                stride_length = np.abs(
-                    np.median(heel_trace) - (last_left_heel if step_key["side"] == "Left" else last_right_heel)
-                )
-                step_length = np.abs(
-                    np.median(heel_trace) - (last_right_heel if step_key["side"] == "Left" else last_left_heel)
-                )
+                stride_length = np.abs(np.median(heel_trace) - (last_left_heel if step_key["side"] == "Left" else last_right_heel))
+                step_length = np.abs(np.median(heel_trace) - (last_right_heel if step_key["side"] == "Left" else last_left_heel))
                 step_key["step_length_error"] = step_length - step["Step Length"] * 10.0  # convert to mm
                 step_key["stride_length_error"] = stride_length - step["Stride Length"] * 10.0
                 step_key["gaitrite_step_length"] = step["Step Length"] * 10.0
@@ -228,9 +225,7 @@ class BiomechanicsStepWidthError(dj.Computed):
         for i, step in df.iterrows():
             step_key = key.copy()
 
-            trace_idx = np.logical_and(
-                dt >= step["First Contact Time"] + t_offset, dt <= step["Last Contact Time"] + t_offset
-            )
+            trace_idx = np.logical_and(dt >= step["First Contact Time"] + t_offset, dt <= step["Last Contact Time"] + t_offset)
             if step["Left Foot"]:
                 heel_trace = kp3d[trace_idx, 0, :2]
             else:
@@ -251,9 +246,9 @@ class BiomechanicsStepWidthError(dj.Computed):
 
                 # compute distance from last_other_heel to the closets point on the line connecting
                 # current_heel to last_same_heel
-                step_width = np.linalg.norm(
-                    np.cross(current_heel - last_same_heel, last_same_heel - last_other_heel)
-                ) / np.linalg.norm(current_heel - last_same_heel)
+                step_width = np.linalg.norm(np.cross(current_heel - last_same_heel, last_same_heel - last_other_heel)) / np.linalg.norm(
+                    current_heel - last_same_heel
+                )
 
                 # step_width = np.linalg.norm(np.median(heel_trace, axis=0) - last_other_heel)
                 if False:

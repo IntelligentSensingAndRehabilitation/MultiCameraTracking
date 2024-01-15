@@ -66,9 +66,7 @@ class GaitRiteCalibration(dj.Computed):
     """
 
     def make(self, key):
-        recording_keys = (
-            GaitRiteRecording * PersonKeypointReconstruction & key & "reconstruction_method=0 and top_down_method=2"
-        ).fetch("KEY")
+        recording_keys = (GaitRiteRecording * PersonKeypointReconstruction & key & "reconstruction_method=0 and top_down_method=2").fetch("KEY")
         data = [fetch_data(k) for k in recording_keys]
 
         def drop_steps(d):
@@ -85,12 +83,7 @@ class GaitRiteCalibration(dj.Computed):
     @property
     def key_source(self):
         """Only calibrate if all the reconstruction methods are computed"""
-        return (
-            GaitRiteSession
-            - (
-                GaitRiteRecording - (PersonKeypointReconstruction & "reconstruction_method=0 and top_down_method=2")
-            ).proj()
-        )
+        return GaitRiteSession - (GaitRiteRecording - (PersonKeypointReconstruction & "reconstruction_method=0 and top_down_method=2")).proj()
 
 
 @schema
@@ -140,9 +133,7 @@ class GaitRiteRecordingAlignment(dj.Computed):
                 ],
                 axis=0,
             )
-            noise = np.concatenate(
-                [d["left_heel_range"], d["right_heel_range"], d["left_toe_range"], d["right_toe_range"]]
-            )
+            noise = np.concatenate([d["left_heel_range"], d["right_heel_range"], d["left_toe_range"], d["right_toe_range"]])
 
             confidence = np.concatenate(
                 [
@@ -156,9 +147,9 @@ class GaitRiteRecordingAlignment(dj.Computed):
 
             confidence = np.clip(confidence, a_min=0.5, a_max=None)  # want to slightly count all steps
 
-            return np.nansum(np.abs(measurements - gt) * confidence) / (1e-9 + np.nansum(confidence)) + np.nansum(
-                noise * confidence
-            ) / (1e-9 + np.nansum(confidence))
+            return np.nansum(np.abs(measurements - gt) * confidence) / (1e-9 + np.nansum(confidence)) + np.nansum(noise * confidence) / (
+                1e-9 + np.nansum(confidence)
+            )
 
         present = np.mean(kp3d[:, :, 3], axis=1)
         present = scipy.signal.medfilt(present, 9) > 0.3
@@ -172,7 +163,7 @@ class GaitRiteRecordingAlignment(dj.Computed):
         # are returned from the database. however, we didn't store this data in the best
         # format to do this "correctly" and these errors would show up when looking at results.
         offset = [offset for trial, offset in zip(trials, offsets) if trial == match_key]
-        assert len(offset) == 1
+        assert len(offset) == 1, f"Found {len(offset)} offsets for {match_key}"
         offset_range = (offset[0] - 0.5, offset[0] + 0.5)
         # offset_range = get_offset_range(dt[present], df)
 
@@ -236,9 +227,7 @@ class GaitRiteRecordingStepPositionError(dj.Computed):
             step_key["step_id"] = i
             step_key["side"] = "Left" if step["Left Foot"] else "Right"
 
-            trace_idx = np.logical_and(
-                dt >= step["First Contact Time"] + t_offset, dt <= step["Last Contact Time"] + t_offset
-            )
+            trace_idx = np.logical_and(dt >= step["First Contact Time"] + t_offset, dt <= step["Last Contact Time"] + t_offset)
 
             if sum(trace_idx) == 0:
                 continue
@@ -327,9 +316,7 @@ class GaitRiteRecordingStepLengthError(dj.Computed):
             step_key["step_id"] = i
             step_key["side"] = "Left" if step["Left Foot"] else "Right"
 
-            trace_idx = np.logical_and(
-                dt >= step["First Contact Time"] + t_offset, dt <= step["Last Contact Time"] + t_offset
-            )
+            trace_idx = np.logical_and(dt >= step["First Contact Time"] + t_offset, dt <= step["Last Contact Time"] + t_offset)
             if step_key["side"] == "Left":
                 heel_trace = kp3d[trace_idx, 0, 0]
             else:
@@ -337,12 +324,8 @@ class GaitRiteRecordingStepLengthError(dj.Computed):
 
             if i >= 2 and last_left_heel is not None and last_right_heel is not None:
                 # GaitRite step lengths only defined after first step
-                stride_length = np.abs(
-                    np.median(heel_trace) - (last_left_heel if step_key["side"] == "Left" else last_right_heel)
-                )
-                step_length = np.abs(
-                    np.median(heel_trace) - (last_right_heel if step_key["side"] == "Left" else last_left_heel)
-                )
+                stride_length = np.abs(np.median(heel_trace) - (last_left_heel if step_key["side"] == "Left" else last_right_heel))
+                step_length = np.abs(np.median(heel_trace) - (last_right_heel if step_key["side"] == "Left" else last_left_heel))
                 step_key["step_length_error"] = step_length - step["Step Length"] * 10.0  # convert to mm
                 step_key["stride_length_error"] = stride_length - step["Stride Length"] * 10.0
                 step_key["gaitrite_step_length"] = step["Step Length"] * 10.0
@@ -402,9 +385,7 @@ class GaitRiteRecordingStepWidthError(dj.Computed):
         for i, step in df.iterrows():
             step_key = key.copy()
 
-            trace_idx = np.logical_and(
-                dt >= step["First Contact Time"] + t_offset, dt <= step["Last Contact Time"] + t_offset
-            )
+            trace_idx = np.logical_and(dt >= step["First Contact Time"] + t_offset, dt <= step["Last Contact Time"] + t_offset)
             if step["Left Foot"]:
                 heel_trace = kp3d[trace_idx, 0, :2]
             else:
@@ -425,9 +406,9 @@ class GaitRiteRecordingStepWidthError(dj.Computed):
 
                 # compute distance from last_other_heel to the closets point on the line connecting
                 # current_heel to last_same_heel
-                step_width = np.linalg.norm(
-                    np.cross(current_heel - last_same_heel, last_same_heel - last_other_heel)
-                ) / np.linalg.norm(current_heel - last_same_heel)
+                step_width = np.linalg.norm(np.cross(current_heel - last_same_heel, last_same_heel - last_other_heel)) / np.linalg.norm(
+                    current_heel - last_same_heel
+                )
 
                 # step_width = np.linalg.norm(np.median(heel_trace, axis=0) - last_other_heel)
                 if False:
@@ -624,9 +605,7 @@ def import_gaitrite_files(subject_id: int, filenames: List[str]):
         dfs.append(df)
     t0s = np.array(t0s)
 
-    possible_matches = (
-        MultiCameraRecording & f'ABS(TIMESTAMP(recording_timestamps) - TIMESTAMP("{t0s[len(t0s) // 2]}")) < 60*90'
-    )
+    possible_matches = MultiCameraRecording & f'ABS(TIMESTAMP(recording_timestamps) - TIMESTAMP("{t0s[len(t0s) // 2]}")) < 60*90'
     keys, recording_times = possible_matches.fetch("KEY", "recording_timestamps")
 
     from IPython.display import display

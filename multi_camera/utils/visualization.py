@@ -447,6 +447,7 @@ def make_reprojection_video(
     detected_keypoint_size=4,
     projected_keypoint_size=6,
     visible_threshold=0.35,
+    keypoints2d_detected=None,
     keypoints3d=None,
 ):
     """
@@ -464,6 +465,7 @@ def make_reprojection_video(
         detected_keypoint_size (int, optional): Size of the detected keypoints. Defaults to 4.
         projected_keypoint_size (int, optional): Size of the projected keypoints. Defaults to 6.
         visible_threshold (float, optional): Threshold for showing keypoints. Defaults to 0.35.
+        keypoints2d_detected (np.ndarray, optional): Overriding keypoints2d. Defaults to None.
         keypoints3d (np.ndarray, optional): Overriding keypoints3d. Defaults to None.
     """
 
@@ -541,7 +543,10 @@ def make_reprojection_video(
 
     bboxes = [cast((PersonBbox & v).fetch1("bbox")) for v in video_keys]
 
-    kp2d_detected = np.array([(TopDownPerson & v).fetch1("keypoints")[:total_frames] for v in video_keys])
+    if keypoints2d_detected is not None:
+        kp2d_detected = keypoints2d_detected
+    else:
+        kp2d_detected = np.array([(TopDownPerson & v).fetch1("keypoints")[:total_frames] for v in video_keys])
 
     bml_movi_87 = (TopDownMethodLookup & key).fetch1("top_down_method_name") == "Bridging_bml_movi_87"
 
