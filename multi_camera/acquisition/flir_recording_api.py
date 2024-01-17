@@ -182,7 +182,7 @@ def init_camera(
 
 
 def write_queue(
-    vid_file: str, image_queue: Queue, json_queue: Queue, serial, pixel_format: str, acquisition_fps: float
+    vid_file: str, image_queue: Queue, json_queue: Queue, serial, pixel_format: str, acquisition_fps: float, acquisition_type: str, chunk_size: int
 ):
     """
     Write images from the queue to a video file
@@ -194,17 +194,23 @@ def write_queue(
         serial (str): Camera serial number
         pixel_format (str): Pixel format of the camera
         acquisition_fps (float): Frame rate of camera in Hz
+        acquisition_type (str): Type of acquisition (continuous or max_frames)
+        chunk_size (int): Number of frames to write to each video file
 
     Filename is determined by the vid_file and time_str. The serial number is appended to the end of the filename.
 
-    This is expected to be called from a standalone thread and will autoamtically terminate when the image_queue is empty.
+    This is expected to be called from a standalone thread and will automatically terminate when the image_queue is empty.
     """
 
-    chunk_num = 0
+    if acquisition_type == "continuous":
+        chunk_num = 0
 
-    _vid_file = os.path.splitext(vid_file)[0] + f".{serial}"+ "_" + str(chunk_num) +".mp4"
+        _vid_file = os.path.splitext(vid_file)[0] + f".{serial}" + "_" + str(chunk_num) + ".mp4"
+    else:
+        _vid_file = os.path.splitext(vid_file)[0] + f".{serial}.mp4"
 
     print(vid_file)
+    print(_vid_file)
 
     timestamps = []
     real_times = []
@@ -235,7 +241,7 @@ def write_queue(
             out_video = cv2.VideoWriter(_vid_file, fourcc, acquisition_fps, (im.shape[1], im.shape[0]))
             out_video.write(last_im)
 
-        elif frame_num % 100 == 0:
+        elif frame_num % chunk_size == 0 and acquisition_type == "continuous":
             chunk_num += 1
             _vid_file = os.path.splitext(vid_file)[0] + f".{serial}"+ "_" + str(chunk_num) +".mp4"
 
@@ -504,6 +510,8 @@ class FlirRecorder:
                         "serial": serial,
                         "pixel_format": self.pixel_format,
                         "acquisition_fps": c.AcquisitionFrameRate,
+                        "acquisition_type": self.camera_config["acquisition-type"],
+                        "chunk_size": self.camera_config["acquisition-settings"]["chunk_size"],
                     },
                 ).start()
 
