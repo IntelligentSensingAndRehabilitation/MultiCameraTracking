@@ -2,7 +2,6 @@
 Tools for a camera model implementation in Jax
 """
 
-from lib2to3 import pytree
 import numpy as np
 import jax
 from jax import numpy as jnp
@@ -149,18 +148,8 @@ def undistort_points(points: jnp.array, K: jnp.array, dist: jnp.array, num_iters
         inv_rad_poly = (1 + dist[..., 5:6] * r2 + dist[..., 6:7] * r2 * r2 + dist[..., 7:8] * r2**3) / (
             1 + dist[..., 0:1] * r2 + dist[..., 1:2] * r2 * r2 + dist[..., 4:5] * r2**3
         )
-        deltaX = (
-            2 * dist[..., 2:3] * x * y
-            + dist[..., 3:4] * (r2 + 2 * x * x)
-            + dist[..., 8:9] * r2
-            + dist[..., 9:10] * r2 * r2
-        )
-        deltaY = (
-            dist[..., 2:3] * (r2 + 2 * y * y)
-            + 2 * dist[..., 3:4] * x * y
-            + dist[..., 10:11] * r2
-            + dist[..., 11:12] * r2 * r2
-        )
+        deltaX = 2 * dist[..., 2:3] * x * y + dist[..., 3:4] * (r2 + 2 * x * x) + dist[..., 8:9] * r2 + dist[..., 9:10] * r2 * r2
+        deltaY = dist[..., 2:3] * (r2 + 2 * y * y) + 2 * dist[..., 3:4] * x * y + dist[..., 10:11] * r2 + dist[..., 11:12] * r2 * r2
 
         x = (x0 - deltaX) * inv_rad_poly
         y = (y0 - deltaY) * inv_rad_poly
@@ -247,9 +236,7 @@ def triangulate_point(camera_params, points2d, return_confidence=False):
     else:
         weight = np.ones((*points2d.shape[:-1], 1))
 
-    points2d = jnp.array(
-        [undistort_points(points2d[i], get_intrinsic(camera_params, i), camera_params["dist"][i]) for i in range(N)]
-    )
+    points2d = jnp.array([undistort_points(points2d[i], get_intrinsic(camera_params, i), camera_params["dist"][i]) for i in range(N)])
 
     # use broadcasting to build a DLT matrix. this will have a shape
     # number of cameras X 2 x (point dimensions) x 4 and then gets reshaped
@@ -394,9 +381,7 @@ def weiszfeld_geometric_median(points, max_iter=100, epsilon=1e-2):
     return jax.lax.while_loop(cond_fun, update, (0, median, median * 0.0))[1]
 
 
-def robust_triangulate_points(
-    camera_params, points2d, sigma=150, threshold=0.5, return_weights=False, return_all=False
-):
+def robust_triangulate_points(camera_params, points2d, sigma=150, threshold=0.5, return_weights=False, return_all=False):
     r"""Triangulate points robustly accounting for agreement
 
     This algorithm is based http://arxiv.org/abs/2203.15865
