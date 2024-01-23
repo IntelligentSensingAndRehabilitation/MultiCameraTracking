@@ -160,6 +160,11 @@ def init_camera(
     c.DeviceLinkThroughputLimit = throughput_limit
     c.GevSCPD = 25000
 
+    c.ChunkModeActive = True
+    c.ChunkSelector = "FrameID"
+    # c.ChunkSelector = "ExposureTime"
+    c.ChunkEnable = True
+
     # c.StreamPacketResendEnable = resend_enable
 
     c.LineSelector = line_selector
@@ -262,7 +267,7 @@ def write_queue(
                 buffer_fps = acquisition_fps * 1.2
                 if spread > buffer_fps:
                     print(f"Warning | {serial} Timestamp spread: {spread} {acquisition_fps} {buffer_fps}")
-                    print(timestamps[-1], timestamps[-2])
+                    print("Timestamps: ",timestamps[-1], timestamps[-2])
                     # frame_spreads.append((timestamps[-1] - timestamps[-2]) * 1e-6)
 
         image_queue.task_done()
@@ -562,6 +567,10 @@ class FlirRecorder:
 
                 for c in self.cams:
                     im_ref = c.get_image()
+                    chunk_data = im_ref.GetChunkData()
+                    
+                    print(f"Serial: {c.DeviceSerialNumber}, Frame ID: {im_ref.GetFrameID()} , {chunk_data.GetFrameID()}")#, {chunk_data.GetExposureTime()}")
+
                     timestamps = im_ref.GetTimeStamp()
 
                     # store camera timestamps
