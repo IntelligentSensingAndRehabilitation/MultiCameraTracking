@@ -555,7 +555,13 @@ class FlirRecorder:
                 break
 
             # Update progress for max frame recording
-            if max_frames is not None:
+            if self.camera_config["acquisition-type"] == "continuous":
+
+                self.set_progress(frame_idx / self.camera_config["acquisition-settings"]["chunk_size"])
+                
+                if frame_idx % self.camera_config["acquisition-settings"]["chunk_size"] == 0:
+                    frame_idx = 0
+            else:
                 self.set_progress(frame_idx / max_frames)
 
             # get the image raw data
