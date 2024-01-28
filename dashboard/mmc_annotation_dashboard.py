@@ -216,7 +216,8 @@ with tab1:
 
 with tab2:
     # choose which subjects/sessions
-    st.write("# MMC Annotations")
+    st.write("# View MMC Annotations")
+    st.write("No editing here, just viewing")
     res = Recording & (MultiCameraRecording & 'video_project NOT LIKE "CUET"' & 'video_project NOT LIKE "h36m"')
     participant_id_options= np.unique((Session & res).fetch("participant_id"))
     participant_id = st.selectbox("Participant ID", participant_id_options, key='participant_id2')
@@ -232,13 +233,33 @@ with tab2:
     # get filenames for video display
     base_filenames = [x["video_base_filename"] for x in df]
 
+    # add VideoActivity col to df
+    df = pd.DataFrame(df)
+    df["Video Activity"] = None
+    df["Walking Type"] = None
+    df["Assistive Device"] = None
+    for row in df.iterrows():
+        try:
+            va = (MMCVideoActivity & {'recording_timestamps':row[1]['recording_timestamps']}).fetch1("video_activity")
+            df.loc[row[0], "Video Activity"] = va
+
+            if va == "Overground Walking":
+                wt = (MMCWalkingType & {'recording_timestamps':row[1]['recording_timestamps']}).fetch1("walking_type")
+                df.loc[row[0], "Walking Type"] = wt
+            
+            ad = (MMCAssistiveDevice & {'recording_timestamps':row[1]['recording_timestamps']}).fetch1("assistive_device")
+            df.loc[row[0], "Assistive Device"] = ad
+        except Exception as e:
+            pass
+
     my_column_config = {
         "camera_config_hash": None,
         "session_date": None,
-        "recording_timestamps": None,
+        # "recording_timestamps": None,
         "video_project": None,
+        "participant_id": None,
     }
-    st.dataframe(pd.DataFrame(df))
+    st.dataframe(df,hide_index=True,column_config=my_column_config)
 
     selected_recording = st.selectbox("Select Recording", base_filenames)
 
