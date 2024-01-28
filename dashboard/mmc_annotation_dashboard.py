@@ -215,4 +215,53 @@ with tab1:
             st.write("No PDF available for this recording")
 
 with tab2:
-    st.write("In Progress")
+    # choose which subjects/sessions
+    st.write("# MMC Annotations")
+    res = Recording & (MultiCameraRecording & 'video_project NOT LIKE "CUET"' & 'video_project NOT LIKE "h36m"')
+    participant_id_options= np.unique((Session & res).fetch("participant_id"))
+    participant_id = st.selectbox("Participant ID", participant_id_options, key='participant_id2')
+    date_options  = (Session & ((Recording & {"participant_id":  participant_id}))).fetch('session_date')
+    session_date = st.selectbox("Session Date", date_options)
+
+    # construct dataframe
+    df = (
+        MultiCameraRecording
+        * (Recording & ({"participant_id": participant_id, "session_date": session_date}))
+    ).fetch(as_dict=True)
+
+    # get filenames for video display
+    base_filenames = [x["video_base_filename"] for x in df]
+
+    my_column_config = {
+        "camera_config_hash": None,
+        "session_date": None,
+        "recording_timestamps": None,
+        "video_project": None,
+    }
+    st.dataframe(pd.DataFrame(df))
+
+    selected_recording = st.selectbox("Select Recording", base_filenames)
+
+    generate = st.button(" Generate Blurred Videos")
+    if generate:
+        if len(BlurredVideo & (SingleCameraVideo & (MultiCameraRecording & {"video_base_filename": selected_recording}))) < 1:
+            with st.spinner("Generating blurred videos..."):
+                print(selected_recording)
+                BlurredVideo.populate(SingleCameraVideo & ((SingleCameraVideo & (MultiCameraRecording & {"video_base_filename": selected_recording})) - BlurredVideo).fetch('KEY',limit=1))
+
+    single_camera_vids = (BlurredVideo & (
+        SingleCameraVideo
+        & (MultiCameraRecording & {"video_base_filename": selected_recording})
+    )).fetch("output_video", limit=2)
+
+    col1, col2 = st.columns(2)
+    with col1:
+        try:
+            st.video(single_camera_vids[0])
+        except:
+            st.write("No videos available for this recording")
+    with col2:
+        try:
+            displayPDF(f'/home/jd/projects/experiment_sheets/{participant_id}_{session_date.strftime("%Y%m%d")}.pdf')
+        except Exception as e:
+            st.write("No PDF available for this recording")
