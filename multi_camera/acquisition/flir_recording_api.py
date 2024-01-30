@@ -546,6 +546,13 @@ class FlirRecorder:
 
         frame_idx = 0
 
+        if self.camera_config["acquisition-type"] == "continuous":
+            total_frames = self.camera_config["acquisition-settings"]["chunk_size"]
+        else:
+            total_frames = max_frames
+        
+        prog = tqdm(total=total_frames)
+
         while self.camera_config["acquisition-type"] == "continuous" or frame_idx < max_frames:
 
             # Use thread safe checking of semaphore to determine whether to stop recording
@@ -558,11 +565,14 @@ class FlirRecorder:
             if self.camera_config["acquisition-type"] == "continuous":
 
                 self.set_progress(frame_idx / self.camera_config["acquisition-settings"]["chunk_size"])
+                prog.update(1)
                 
                 if frame_idx % self.camera_config["acquisition-settings"]["chunk_size"] == 0:
+                    prog = tqdm(total=total_frames)
                     frame_idx = 0
             else:
                 self.set_progress(frame_idx / max_frames)
+                prog.update(1)
 
             # get the image raw data
             # for each camera, get the current frame and assign it to
