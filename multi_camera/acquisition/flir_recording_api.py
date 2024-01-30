@@ -575,17 +575,12 @@ class FlirRecorder:
             for c in self.cams:
                 im_ref = c.get_image()
                 chunk_data = im_ref.GetChunkData()
-                
-                print(f"Serial: {c.DeviceSerialNumber}, Frame ID: {im_ref.GetFrameID()} , {chunk_data.GetFrameID()}")#, {chunk_data.GetExposureTime()}")
-
                 timestamps = im_ref.GetTimeStamp()
-
-                # store camera timestamps
-                frame_timestamps[c.DeviceSerialNumber] = {'timestamps':timestamps}
-                print(frame_timestamps)
                 frame_id = im_ref.GetFrameID()
                 frame_id_abs = chunk_data.GetFrameID()
 
+                # store camera timestamps
+                frame_timestamps[c.DeviceSerialNumber] = {'timestamps':timestamps}
                 frame_timestamps[c.DeviceSerialNumber]['frame_id'] = frame_id
                 frame_timestamps[c.DeviceSerialNumber]['frame_id_abs'] = frame_id_abs
 
@@ -617,8 +612,6 @@ class FlirRecorder:
 
             frame_idx += 1
 
-        print(all_timestamps)
-        print(all_timestamps[0])
         if self.preview_callback:
             self.preview_callback(None)
 
@@ -640,37 +633,25 @@ class FlirRecorder:
 
         # convert list of dicts to dict of lists
         all_timestamps = {k: [dic[k] for dic in all_timestamps] for k in all_timestamps[0]}
-        print("$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$")
-        print(all_timestamps)
-
 
         output_json["real_times"] = all_timestamps.pop("real_times")
         output_json["serials"] = []  # list(all_timestamps.keys())
-        output_json["timestamps"] = []  # all_timestamps
+
         ts = []
         all_frame_ids = []
         all_frame_ids_abs = []
-        output_json["frame_id"] = []
-        output_json["frame_id_abs"] = []
+
         for k, v in all_timestamps.items():
-            print("#####################################")
-            print(k,v)
             output_json["serials"].append(k)
 
             ts.append([f['timestamps'] for f in v])
             all_frame_ids.append([f['frame_id'] for f in v])
             all_frame_ids_abs.append([f['frame_id_abs'] for f in v])
-            
-            # output_json["timestamps"].append(v['timestamps'])
-            # output_json["frame_id"].append(v['frame_id'])
-            # output_json["frame_id_abs"].append(v['frame_id_abs'])
 
         output_json["timestamps"] = list(map(list, zip(*ts)))
         output_json["frame_id"] = list(map(list, zip(*all_frame_ids)))
         output_json["frame_id_abs"] = list(map(list, zip(*all_frame_ids_abs)))
 
-        print(output_json)
-        # output_json["timestamps"] = np.array(output_json["timestamps"]).T.tolist()
         print(np.array(output_json["timestamps"]).shape)
 
         if self.camera_config:
