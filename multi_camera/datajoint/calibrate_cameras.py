@@ -26,7 +26,7 @@ class Calibration(dj.Manual):
     """
 
 
-def run_calibration(vid_base, vid_path=None):
+def run_calibration(vid_base, vid_path=None, checkerboard_size=110.0, checkerboard_dim=(4, 6)):
     from ..analysis.calibration import run_calibration
 
     if vid_path is None:
@@ -36,16 +36,20 @@ def run_calibration(vid_base, vid_path=None):
 
     print(vid_path, vid_base)
 
-    entry = run_calibration(vid_base, vid_path, jax_cal=False)
+    entry = run_calibration(
+        vid_base,
+        vid_path,
+        checkerboard_size=checkerboard_size,
+        checkerboard_dim=checkerboard_dim,
+        jax_cal=False,
+    )
 
     if np.isnan(entry["reprojection_error"]):
         raise Exception(f"Calibration failed: {entry}")
 
     if entry["reprojection_error"] > 0.3:
         print(entry)
-        print(
-            f'The error was {entry["reprojection_error"]}. Are you sure you would like to store this in the database? [Yes/No]'
-        )
+        print(f'The error was {entry["reprojection_error"]}. Are you sure you would like to store this in the database? [Yes/No]')
 
         response = input()
         if response[0].upper() != "Y":
@@ -63,8 +67,26 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Compute calibration from specified videos and insert into database")
     parser.add_argument("vid_base", help="Base filenames to use for calibration")
     parser.add_argument("--vid_path", help="Path to files", default=None)
+    # checkerboard_size=110.0, checkerboard_dim=(4, 6)
+    parser.add_argument(
+        "--checkerboard_size",
+        help="Size of checkerboard squares",
+        default=110.0,
+        type=float,
+    )
+    parser.add_argument(
+        "--checkerboard_dim",
+        help="Number of squares in checkerboard (rows, columns)",
+        default=(4, 6),
+        type=lambda x: tuple(map(int, x.split(","))),
+    )
     args = parser.parse_args()
 
-    run_calibration(vid_base=args.vid_base, vid_path=args.vid_path)
+    run_calibration(
+        vid_base=args.vid_base,
+        vid_path=args.vid_path,
+        checkerboard_size=args.checkerboard_size,
+        checkerboard_dim=args.checkerboard_dim,
+    )
 
     print("Complete")
