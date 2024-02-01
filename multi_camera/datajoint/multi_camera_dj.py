@@ -11,7 +11,7 @@ schema = dj.schema("multicamera_tracking")
 class MultiCameraRecording(dj.Manual):
     definition = """
     # Recording from multiple synchronized cameras
-    recording_timestamp : timestamp
+    recording_timestamps : timestamp
     camera_config_hash  : varchar(50)    # camera configuration
     video_project       : varchar(50)    # video project, which should match pose pipeline
     ---
