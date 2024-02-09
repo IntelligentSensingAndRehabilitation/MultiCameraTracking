@@ -181,9 +181,6 @@ def init_camera(
         c.TriggerSelector = "AcquisitionStart"  # Need to select AcquisitionStart for real time clock
         c.TriggerSource = "Action0"
         c.TriggerMode = "On"
-    else: 
-        c.AcquisitionMode = "Continuous"
-
 
 
 def write_queue(
@@ -415,15 +412,7 @@ class FlirRecorder:
             frame_rate = self.camera_config["acquisition-settings"]["frame_rate"]
             line_selector = self.camera_config["acquisition-settings"]["lineselector"]
             line_source = self.camera_config["acquisition-settings"]["linesource"]
-            if self.camera_config["acquisition-type"] == "continuous":
 
-                print("CONTINUOUS ACQUISITION")
-                self.trigger = False
-                # line_selector = self.camera_config["acquisition-settings"]["lineselector"]
-                # line_source = self.camera_config["acquisition-settings"]["linesource"]
-            else:
-                print("TRIGGERED ACQUISITION")
-                print(self.trigger)
         else:
             # If no config file is passed, use default values
             exposure_time = 15000
