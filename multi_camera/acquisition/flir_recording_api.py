@@ -184,7 +184,7 @@ def init_camera(
 
 
 def write_queue(
-    vid_file: str, image_queue: Queue, json_queue: Queue, serial, pixel_format: str, acquisition_fps: float, acquisition_type: str, chunk_size: int
+    vid_file: str, image_queue: Queue, json_queue: Queue, serial, pixel_format: str, acquisition_fps: float, acquisition_type: str, video_segment_len: int
 ):
     """
     Write images from the queue to a video file
@@ -197,7 +197,7 @@ def write_queue(
         pixel_format (str): Pixel format of the camera
         acquisition_fps (float): Frame rate of camera in Hz
         acquisition_type (str): Type of acquisition (continuous or max_frames)
-        chunk_size (int): Number of frames to write to each video file
+        video_segment_len (int): Number of frames to write to each video file
 
     Filename is determined by the vid_file and time_str. The serial number is appended to the end of the filename.
 
@@ -205,9 +205,9 @@ def write_queue(
     """
 
     if acquisition_type == "continuous":
-        chunk_num = 0
+        video_segment_num = 0
 
-        _vid_file = os.path.splitext(vid_file)[0] + f".{serial}" + "_" + str(chunk_num) + ".mp4"
+        _vid_file = os.path.splitext(vid_file)[0] + f".{serial}" + "_" + str(video_segment_num) + ".mp4"
     else:
         _vid_file = os.path.splitext(vid_file)[0] + f".{serial}.mp4"
 
@@ -243,9 +243,9 @@ def write_queue(
             out_video = cv2.VideoWriter(_vid_file, fourcc, acquisition_fps, (im.shape[1], im.shape[0]))
             out_video.write(last_im)
 
-        elif frame_num % chunk_size == 0 and acquisition_type == "continuous":
-            chunk_num += 1
-            _vid_file = os.path.splitext(vid_file)[0] + f".{serial}"+ "_" + str(chunk_num) +".mp4"
+        elif frame_num % video_segment_len == 0 and acquisition_type == "continuous":
+            video_segment_num += 1
+            _vid_file = os.path.splitext(vid_file)[0] + f".{serial}"+ "_" + str(video_segment_num) +".mp4"
 
             tqdm.write(f"Writing FPS: {acquisition_fps}")
 
@@ -505,7 +505,7 @@ class FlirRecorder:
                         "pixel_format": self.pixel_format,
                         "acquisition_fps": c.AcquisitionFrameRate,
                         "acquisition_type": self.camera_config["acquisition-type"],
-                        "chunk_size": self.camera_config["acquisition-settings"]["chunk_size"],
+                        "video_segment_len": self.camera_config["acquisition-settings"]["video_segment_len"],
                     },
                 ).start()
 
@@ -536,7 +536,7 @@ class FlirRecorder:
         frame_idx = 0
 
         if self.camera_config["acquisition-type"] == "continuous":
-            total_frames = self.camera_config["acquisition-settings"]["chunk_size"]
+            total_frames = self.camera_config["acquisition-settings"]["video_segment_len"]
         else:
             total_frames = max_frames
         
@@ -553,10 +553,10 @@ class FlirRecorder:
             # Update progress for max frame recording
             if self.camera_config["acquisition-type"] == "continuous":
 
-                self.set_progress(frame_idx / self.camera_config["acquisition-settings"]["chunk_size"])
+                self.set_progress(frame_idx / total_frames)
                 prog.update(1)
                 
-                if frame_idx % self.camera_config["acquisition-settings"]["chunk_size"] == 0:
+                if frame_idx % total_frames == 0:
                     prog = tqdm(total=total_frames)
                     frame_idx = 0
             else:
