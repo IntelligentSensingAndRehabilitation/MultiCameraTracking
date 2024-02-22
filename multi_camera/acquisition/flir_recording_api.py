@@ -102,6 +102,8 @@ def init_camera(
     resend_enable: bool = False,
     binning: int = 1,
     exposure_time: int = 15000,
+    line_selector: str = "Line1",
+    line_source: str = "ExposureActive",
 ):
     """
     Initialize camera with settings for recording
@@ -113,6 +115,9 @@ def init_camera(
             throughput_limit (int): Throughput limit for camera.
             resend_enable (bool): Enable packet resend
             binning (int): Factor by which the image resolution is reduced
+            exposure_time (int): Exposure time in microseconds
+            line_selector (str): Line selector for triggering
+            line_source (str): Line source for triggering
 
         Throughput should be limited for multiple cameras but reduces frame rate. Can use 125000000 for maximum
         frame rate or 85000000 when using more cameras with a 10GigE switch.
@@ -155,7 +160,15 @@ def init_camera(
     c.DeviceLinkThroughputLimit = throughput_limit
     c.GevSCPD = 25000
 
+    c.ChunkModeActive = True
+    c.ChunkSelector = "FrameID"
+    # c.ChunkSelector = "ExposureTime"
+    c.ChunkEnable = True
+
     # c.StreamPacketResendEnable = resend_enable
+
+    c.LineSelector = line_selector
+    c.LineSource = line_source
 
     if triggering:
         # set up masks for triggering
@@ -171,7 +184,7 @@ def init_camera(
 
 
 def write_queue(
-    vid_file: str, image_queue: Queue, json_queue: Queue, serial, pixel_format: str, acquisition_fps: float
+    vid_file: str, image_queue: Queue, json_queue: Queue, serial, pixel_format: str, acquisition_fps: float, acquisition_type: str, video_segment_len: int
 ):
     """
     Write images from the queue to a video file
@@ -183,15 +196,23 @@ def write_queue(
         serial (str): Camera serial number
         pixel_format (str): Pixel format of the camera
         acquisition_fps (float): Frame rate of camera in Hz
+        acquisition_type (str): Type of acquisition (continuous or max_frames)
+        video_segment_len (int): Number of frames to write to each video file
 
     Filename is determined by the vid_file and time_str. The serial number is appended to the end of the filename.
 
-    This is expected to be called from a standalone thread and will autoamtically terminate when the image_queue is empty.
+    This is expected to be called from a standalone thread and will automatically terminate when the image_queue is empty.
     """
 
-    vid_file = os.path.splitext(vid_file)[0] + f".{serial}.mp4"
+    if acquisition_type == "continuous":
+        video_segment_num = 0
+
+        _vid_file = os.path.splitext(vid_file)[0] + f".{serial}" + "_" + str(video_segment_num) + ".mp4"
+    else:
+        _vid_file = os.path.splitext(vid_file)[0] + f".{serial}.mp4"
 
     print(vid_file)
+    print(_vid_file)
 
     timestamps = []
     real_times = []
@@ -199,7 +220,7 @@ def write_queue(
 
     out_video = None
 
-    for frame in iter(image_queue.get, None):
+    for frame_num, frame in enumerate(iter(image_queue.get, None)):
         if frame is None:
             break
         timestamps.append(frame["timestamps"])
@@ -218,8 +239,20 @@ def write_queue(
             tqdm.write(f"Writing FPS: {acquisition_fps}")
 
             fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-            out_video = cv2.VideoWriter(vid_file, fourcc, acquisition_fps, (im.shape[1], im.shape[0]))
+
+            out_video = cv2.VideoWriter(_vid_file, fourcc, acquisition_fps, (im.shape[1], im.shape[0]))
             out_video.write(last_im)
+
+        elif frame_num % video_segment_len == 0 and acquisition_type == "continuous":
+            video_segment_num += 1
+            _vid_file = os.path.splitext(vid_file)[0] + f".{serial}"+ "_" + str(video_segment_num) +".mp4"
+
+            tqdm.write(f"Writing FPS: {acquisition_fps}")
+
+            fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+            print("writing to", _vid_file)
+            out_video = cv2.VideoWriter(_vid_file, fourcc, acquisition_fps, (im.shape[1], im.shape[0]))
+            out_video.write(im)
 
         else:
             out_video.write(im)
@@ -231,7 +264,7 @@ def write_queue(
                 buffer_fps = acquisition_fps * 1.2
                 if spread > buffer_fps:
                     print(f"Warning | {serial} Timestamp spread: {spread} {acquisition_fps} {buffer_fps}")
-                    print(timestamps[-1], timestamps[-2])
+                    print("Timestamps: ",timestamps[-1], timestamps[-2])
                     # frame_spreads.append((timestamps[-1] - timestamps[-2]) * 1e-6)
 
         image_queue.task_done()
@@ -373,9 +406,13 @@ class FlirRecorder:
             self.cams = [Camera(i, lock=True) for i in self.iface_cameras]
 
         if self.camera_config:
+            print(self.camera_config)
             # Parse additional parameters from the config file
             exposure_time = self.camera_config["acquisition-settings"]["exposure_time"]
             frame_rate = self.camera_config["acquisition-settings"]["frame_rate"]
+            line_selector = self.camera_config["acquisition-settings"]["lineselector"]
+            line_source = self.camera_config["acquisition-settings"]["linesource"]
+
         else:
             # If no config file is passed, use default values
             exposure_time = 15000
@@ -395,6 +432,8 @@ class FlirRecorder:
             "resend_enable": False,
             "binning": binning,
             "exposure_time": exposure_time,
+            "line_selector": line_selector,
+            "line_source": line_source,
         }
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(self.cams)) as executor:
@@ -465,6 +504,8 @@ class FlirRecorder:
                         "serial": serial,
                         "pixel_format": self.pixel_format,
                         "acquisition_fps": c.AcquisitionFrameRate,
+                        "acquisition_type": self.camera_config["acquisition-type"],
+                        "video_segment_len": self.camera_config["acquisition-settings"]["video_segment_len"],
                     },
                 ).start()
 
@@ -492,14 +533,35 @@ class FlirRecorder:
 
         all_timestamps = []
 
-        for frame_idx in tqdm(range(max_frames)):
+        frame_idx = 0
+
+        if self.camera_config["acquisition-type"] == "continuous":
+            total_frames = self.camera_config["acquisition-settings"]["video_segment_len"]
+        else:
+            total_frames = max_frames
+        
+        prog = tqdm(total=total_frames)
+
+        while self.camera_config["acquisition-type"] == "continuous" or frame_idx < max_frames:
+
             # Use thread safe checking of semaphore to determine whether to stop recording
             if self.stop_recording.is_set():
                 self.stop_recording.clear()
                 print("Stopping recording")
                 break
 
-            self.set_progress(frame_idx / max_frames)
+            # Update progress for max frame recording
+            if self.camera_config["acquisition-type"] == "continuous":
+
+                self.set_progress(frame_idx / total_frames)
+                prog.update(1)
+                
+                if frame_idx % total_frames == 0:
+                    prog = tqdm(total=total_frames)
+                    frame_idx = 0
+            else:
+                self.set_progress(frame_idx / max_frames)
+                prog.update(1)
 
             # get the image raw data
             # for each camera, get the current frame and assign it to
@@ -511,10 +573,15 @@ class FlirRecorder:
 
             for c in self.cams:
                 im_ref = c.get_image()
+                chunk_data = im_ref.GetChunkData()
                 timestamps = im_ref.GetTimeStamp()
+                frame_id = im_ref.GetFrameID()
+                frame_id_abs = chunk_data.GetFrameID()
 
                 # store camera timestamps
-                frame_timestamps[c.DeviceSerialNumber] = timestamps
+                frame_timestamps[c.DeviceSerialNumber] = {'timestamps':timestamps}
+                frame_timestamps[c.DeviceSerialNumber]['frame_id'] = frame_id
+                frame_timestamps[c.DeviceSerialNumber]['frame_id_abs'] = frame_id_abs
 
                 # get the data array
                 # Using try/except to handle frame tearing
@@ -542,6 +609,8 @@ class FlirRecorder:
             if self.preview_callback:
                 self.preview_callback(real_time_images)
 
+            frame_idx += 1
+
         if self.preview_callback:
             self.preview_callback(None)
 
@@ -566,11 +635,22 @@ class FlirRecorder:
 
         output_json["real_times"] = all_timestamps.pop("real_times")
         output_json["serials"] = []  # list(all_timestamps.keys())
-        output_json["timestamps"] = []  # all_timestamps
+
+        ts = []
+        all_frame_ids = []
+        all_frame_ids_abs = []
+
         for k, v in all_timestamps.items():
             output_json["serials"].append(k)
-            output_json["timestamps"].append(v)
-        output_json["timestamps"] = np.array(output_json["timestamps"]).T.tolist()
+
+            ts.append([f['timestamps'] for f in v])
+            all_frame_ids.append([f['frame_id'] for f in v])
+            all_frame_ids_abs.append([f['frame_id_abs'] for f in v])
+
+        output_json["timestamps"] = list(map(list, zip(*ts)))
+        output_json["frame_id"] = list(map(list, zip(*all_frame_ids)))
+        output_json["frame_id_abs"] = list(map(list, zip(*all_frame_ids_abs)))
+
         print(np.array(output_json["timestamps"]).shape)
 
         if self.camera_config:
