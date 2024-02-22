@@ -520,6 +520,8 @@ class FlirRecorder:
         for c in self.cams:
             print(f"{c.DeviceSerialNumber}: {c.AcquisitionFrameRate}, {c.AcquisitionResultingFrameRate}, {c.ExposureTime}, {c.DeviceLinkThroughputLimit} ")
             print(f"Frame Size: {c.Width} {c.Height}")
+            c.LineSelector = 'Line2'
+            c.V3_3Enable = True
 
         # schedule a command to start in 250 ms in the future
         self.cams[0].TimestampLatch()
@@ -624,6 +626,9 @@ class FlirRecorder:
             frame_rates.append(c.BinningHorizontal * 30)
 
             camera_ids.append(c.DeviceSerialNumber)
+
+            c.LineSelector = 'Line2'
+            c.V3_3Enable = False
             # Stopping each camera
             c.stop()
 
