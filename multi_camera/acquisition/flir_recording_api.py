@@ -596,19 +596,23 @@ class FlirRecorder:
                 frame_id = im_ref.GetFrameID()
                 frame_id_abs = chunk_data.GetFrameID()
                 # print(type(c.ChunkSerialData))
-                print("###########################")
+                # print("###########################")
                 # print(chunk_data.ChunkSerialData)
-                print(chunk_data.GetSerialDataLength())
-                print(c.ChunkSerialDataLength)
+                # print(chunk_data.GetSerialDataLength())
+                # print(c.ChunkSerialDataLength)
                 # print(c.ChunkSerialData.decode('utf8'))
+                chunk_serial_data = -1
                 if c.ChunkSerialDataLength > 0:
-                    print(ord(c.ChunkSerialData))
-                    
+                    # print(ord(c.ChunkSerialData))
+                    chunk_serial_data = ord(c.ChunkSerialData)
+
 
                 # store camera timestamps
                 frame_timestamps[c.DeviceSerialNumber] = {'timestamps':timestamps}
                 frame_timestamps[c.DeviceSerialNumber]['frame_id'] = frame_id
                 frame_timestamps[c.DeviceSerialNumber]['frame_id_abs'] = frame_id_abs
+
+                frame_timestamps[c.DeviceSerialNumber]['chunk_serial_data'] = chunk_serial_data
 
                 # get the data array
                 # Using try/except to handle frame tearing
@@ -669,6 +673,7 @@ class FlirRecorder:
         ts = []
         all_frame_ids = []
         all_frame_ids_abs = []
+        all_serial_data = []
 
         for k, v in all_timestamps.items():
             output_json["serials"].append(k)
@@ -676,10 +681,12 @@ class FlirRecorder:
             ts.append([f['timestamps'] for f in v])
             all_frame_ids.append([f['frame_id'] for f in v])
             all_frame_ids_abs.append([f['frame_id_abs'] for f in v])
+            all_serial_data.append([f['chunk_serial_data'] for f in v])
 
         output_json["timestamps"] = list(map(list, zip(*ts)))
         output_json["frame_id"] = list(map(list, zip(*all_frame_ids)))
         output_json["frame_id_abs"] = list(map(list, zip(*all_frame_ids_abs)))
+        output_json["chunk_serial_data"] = list(map(list, zip(*all_serial_data)))
 
         print(np.array(output_json["timestamps"]).shape)
 
