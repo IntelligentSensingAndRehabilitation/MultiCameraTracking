@@ -160,13 +160,25 @@ def init_camera(
     c.DeviceLinkThroughputLimit = throughput_limit
     c.GevSCPD = 25000
 
+    # Set up the serial line
+    # c.LineSelector = "Line0"
+    # c.LineSource = "SerialPort0"
+
+    c.SerialPortSelector = "SerialPort0"
+    c.SerialPortSource = "Line0"
+    c.SerialPortBaudRate = "Baud9600"
+    c.SerialPortDataBits = 8
+    c.SerialPortStopBits = "Bits1"
+    c.SerialPortParity = "None"
+
     c.ChunkModeActive = True
     c.ChunkSelector = "FrameID"
-    # c.ChunkSelector = "ExposureTime"
+    c.ChunkSelector = "SerialData"
     c.ChunkEnable = True
 
     # c.StreamPacketResendEnable = resend_enable
 
+    # Set up the triggering line
     c.LineSelector = line_selector
     c.LineSource = line_source
 
@@ -522,6 +534,10 @@ class FlirRecorder:
             print(f"Frame Size: {c.Width} {c.Height}")
             c.LineSelector = 'Line2'
             c.V3_3Enable = True
+            print(c.SerialReceiveQueueCurrentCharacterCount)
+            print(c.SerialReceiveQueueMaxCharacterCount)
+            c.SerialReceiveQueueClear()
+            print(c.SerialReceiveQueueCurrentCharacterCount)
 
         # schedule a command to start in 250 ms in the future
         self.cams[0].TimestampLatch()
@@ -579,6 +595,15 @@ class FlirRecorder:
                 timestamps = im_ref.GetTimeStamp()
                 frame_id = im_ref.GetFrameID()
                 frame_id_abs = chunk_data.GetFrameID()
+                # print(type(c.ChunkSerialData))
+                print("###########################")
+                # print(chunk_data.ChunkSerialData)
+                print(chunk_data.GetSerialDataLength())
+                print(c.ChunkSerialDataLength)
+                # print(c.ChunkSerialData.decode('utf8'))
+                if c.ChunkSerialDataLength > 0:
+                    print(ord(c.ChunkSerialData))
+                    
 
                 # store camera timestamps
                 frame_timestamps[c.DeviceSerialNumber] = {'timestamps':timestamps}
