@@ -564,10 +564,12 @@ class FlirRecorder:
 
         frame_idx = 0
 
-        if self.camera_config["acquisition-type"] == "continuous":
-            total_frames = self.camera_config["acquisition-settings"]["video_segment_len"]
-        else:
-            total_frames = max_frames
+        # if self.camera_config["acquisition-type"] == "continuous":
+        #     total_frames = self.camera_config["acquisition-settings"]["video_segment_len"]
+        # else:
+        #     total_frames = max_frames
+
+        total_frames = max_frames
         
         prog = tqdm(total=total_frames)
 
@@ -609,7 +611,7 @@ class FlirRecorder:
                 
                 timestamps = im_ref.GetTimeStamp()
                 frame_id = im_ref.GetFrameID()
-                # frame_id_abs = chunk_data.GetFrameID()
+                frame_id_abs = chunk_data.GetFrameID()
                 
                 frame_count = -1
                 # We expect only 5 bytes to be sent
@@ -626,7 +628,7 @@ class FlirRecorder:
                 # store camera timestamps
                 frame_timestamps[c.DeviceSerialNumber] = {'timestamps':timestamps}
                 frame_timestamps[c.DeviceSerialNumber]['frame_id'] = frame_id
-                # frame_timestamps[c.DeviceSerialNumber]['frame_id_abs'] = frame_id_abs
+                frame_timestamps[c.DeviceSerialNumber]['frame_id_abs'] = frame_id_abs
 
                 frame_timestamps[c.DeviceSerialNumber]['chunk_serial_data'] = frame_count
 
@@ -688,7 +690,7 @@ class FlirRecorder:
 
         ts = []
         all_frame_ids = []
-        # all_frame_ids_abs = []
+        all_frame_ids_abs = []
         all_serial_data = []
 
         for k, v in all_timestamps.items():
@@ -696,12 +698,12 @@ class FlirRecorder:
 
             ts.append([f['timestamps'] for f in v])
             all_frame_ids.append([f['frame_id'] for f in v])
-            # all_frame_ids_abs.append([f['frame_id_abs'] for f in v])
+            all_frame_ids_abs.append([f['frame_id_abs'] for f in v])
             all_serial_data.append([f['chunk_serial_data'] for f in v])
 
         output_json["timestamps"] = list(map(list, zip(*ts)))
         output_json["frame_id"] = list(map(list, zip(*all_frame_ids)))
-        # output_json["frame_id_abs"] = list(map(list, zip(*all_frame_ids_abs)))
+        output_json["frame_id_abs"] = list(map(list, zip(*all_frame_ids_abs)))
         output_json["chunk_serial_data"] = list(map(list, zip(*all_serial_data)))
 
         print(np.array(output_json["timestamps"]).shape)
