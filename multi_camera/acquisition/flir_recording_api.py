@@ -609,44 +609,26 @@ class FlirRecorder:
                 
                 timestamps = im_ref.GetTimeStamp()
                 frame_id = im_ref.GetFrameID()
-                frame_id_abs = chunk_data.GetFrameID()
-                # print(type(c.ChunkSerialData))
-                # print("###########################")
-                # print(dir(c))
-                # print(vars(c))
-                # print(chunk_data.GetSerialDataLength())
-                print(f"Data len: {c.ChunkSerialDataLength}")
-                # print(c.camera_attributes)
+                # frame_id_abs = chunk_data.GetFrameID()
                 
-                # print(c.ChunkSerialData.decode('utf8'))
-                chunk_serial_data = -1
+                frame_count = -1
+                # We expect only 5 bytes to be sent
                 if c.ChunkSerialDataLength == 5:
-                    print(f"Data len: {c.ChunkSerialDataLength}")
-                #     print(type(c.ChunkSerialData))
-                    # print(c.ChunkSerialData)
-                    # print(str(c.ChunkSerialData))
                     chunk_serial_data = c.ChunkSerialData
-
-                    split_str = str(chunk_serial_data).split()
-                    # print(split_str)
                     split_chunk = [ord(c) for c in chunk_serial_data]
-                    # print([ord(c) for c in chunk_serial_data])
-                    # print([ord(c) for c in split_str])
 
                     # Reconstruct the current count from the chunk serial data
-                    count_value = 0
+                    frame_count = 0
                     for i, b in enumerate(split_chunk):
-                        count_value |= (b & 0x7F) << (7 * i)
-
-                    print(f"count: {count_value}")
+                        frame_count |= (b & 0x7F) << (7 * i)
 
 
                 # store camera timestamps
                 frame_timestamps[c.DeviceSerialNumber] = {'timestamps':timestamps}
                 frame_timestamps[c.DeviceSerialNumber]['frame_id'] = frame_id
-                frame_timestamps[c.DeviceSerialNumber]['frame_id_abs'] = frame_id_abs
+                # frame_timestamps[c.DeviceSerialNumber]['frame_id_abs'] = frame_id_abs
 
-                frame_timestamps[c.DeviceSerialNumber]['chunk_serial_data'] = chunk_serial_data
+                frame_timestamps[c.DeviceSerialNumber]['chunk_serial_data'] = frame_count
 
                 # get the data array
                 # Using try/except to handle frame tearing
@@ -706,7 +688,7 @@ class FlirRecorder:
 
         ts = []
         all_frame_ids = []
-        all_frame_ids_abs = []
+        # all_frame_ids_abs = []
         all_serial_data = []
 
         for k, v in all_timestamps.items():
@@ -714,12 +696,12 @@ class FlirRecorder:
 
             ts.append([f['timestamps'] for f in v])
             all_frame_ids.append([f['frame_id'] for f in v])
-            all_frame_ids_abs.append([f['frame_id_abs'] for f in v])
+            # all_frame_ids_abs.append([f['frame_id_abs'] for f in v])
             all_serial_data.append([f['chunk_serial_data'] for f in v])
 
         output_json["timestamps"] = list(map(list, zip(*ts)))
         output_json["frame_id"] = list(map(list, zip(*all_frame_ids)))
-        output_json["frame_id_abs"] = list(map(list, zip(*all_frame_ids_abs)))
+        # output_json["frame_id_abs"] = list(map(list, zip(*all_frame_ids_abs)))
         output_json["chunk_serial_data"] = list(map(list, zip(*all_serial_data)))
 
         print(np.array(output_json["timestamps"]).shape)
