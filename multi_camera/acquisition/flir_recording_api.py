@@ -164,12 +164,7 @@ def init_camera(
     # c.LineSelector = "Line0"
     # c.LineSource = "SerialPort0"
 
-    c.SerialPortSelector = "SerialPort0"
-    c.SerialPortSource = "Line0"
-    c.SerialPortBaudRate = "Baud9600"
-    c.SerialPortDataBits = 8
-    c.SerialPortStopBits = "Bits1"
-    c.SerialPortParity = "None"
+
 
     c.ChunkModeActive = True
     c.ChunkSelector = "FrameID"
@@ -179,8 +174,8 @@ def init_camera(
     # c.StreamPacketResendEnable = resend_enable
 
     # Set up the triggering line
-    c.LineSelector = line_selector
-    c.LineSource = line_source
+    # c.LineSelector = line_selector
+    # c.LineSource = line_source
 
     if triggering:
         # set up masks for triggering
@@ -189,10 +184,26 @@ def init_camera(
         c.ActionGroupMask = 1
 
         # set up trigger setting
+        # c.TriggerMode = "Off"
+        # c.TriggerSelector = "AcquisitionStart"  # Need to select AcquisitionStart for real time clock
+        # c.TriggerSource = "Action0"
+        # c.TriggerMode = "On"
+
         c.TriggerMode = "Off"
-        c.TriggerSelector = "AcquisitionStart"  # Need to select AcquisitionStart for real time clock
-        c.TriggerSource = "Action0"
+        c.TriggerSelector = "FrameStart"
+        c.TriggerSource = "Line0"
+        c.TriggerActivation = "RisingEdge"
+        c.TriggerOverlap = "ReadOut"
         c.TriggerMode = "On"
+
+        c.SerialPortSelector = "SerialPort0"
+        c.SerialPortSource = "Line3"
+        c.SerialPortBaudRate = "Baud115200"
+        # c.SerialPortBaudRate = "Baud9600"
+        c.SerialPortDataBits = 8
+        c.SerialPortStopBits = "Bits1"
+        c.SerialPortParity = "None"
+    
 
 
 def write_queue(
@@ -592,19 +603,42 @@ class FlirRecorder:
             for c in self.cams:
                 im_ref = c.get_image()
                 chunk_data = im_ref.GetChunkData()
+                # print(type(chunk_data))
+                # print(dir(chunk_data))
+                # print(vars(chunk_data))
+                
                 timestamps = im_ref.GetTimeStamp()
                 frame_id = im_ref.GetFrameID()
                 frame_id_abs = chunk_data.GetFrameID()
                 # print(type(c.ChunkSerialData))
                 # print("###########################")
-                # print(chunk_data.ChunkSerialData)
+                # print(dir(c))
+                # print(vars(c))
                 # print(chunk_data.GetSerialDataLength())
-                # print(c.ChunkSerialDataLength)
+                print(f"Data len: {c.ChunkSerialDataLength}")
+                # print(c.camera_attributes)
+                
                 # print(c.ChunkSerialData.decode('utf8'))
                 chunk_serial_data = -1
-                if c.ChunkSerialDataLength > 0:
-                    # print(ord(c.ChunkSerialData))
-                    chunk_serial_data = ord(c.ChunkSerialData)
+                if c.ChunkSerialDataLength == 5:
+                    print(f"Data len: {c.ChunkSerialDataLength}")
+                #     print(type(c.ChunkSerialData))
+                    # print(c.ChunkSerialData)
+                    # print(str(c.ChunkSerialData))
+                    chunk_serial_data = c.ChunkSerialData
+
+                    split_str = str(chunk_serial_data).split()
+                    # print(split_str)
+                    split_chunk = [ord(c) for c in chunk_serial_data]
+                    # print([ord(c) for c in chunk_serial_data])
+                    # print([ord(c) for c in split_str])
+
+                    # Reconstruct the current count from the chunk serial data
+                    count_value = 0
+                    for i, b in enumerate(split_chunk):
+                        count_value |= (b & 0x7F) << (7 * i)
+
+                    print(f"count: {count_value}")
 
 
                 # store camera timestamps
