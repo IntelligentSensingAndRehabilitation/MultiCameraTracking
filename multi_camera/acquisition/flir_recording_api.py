@@ -163,6 +163,8 @@ def init_camera(
     # Set up the serial line
     # c.LineSelector = "Line0"
     # c.LineSource = "SerialPort0"
+    c.LineSelector = 'Line2'
+    c.LineMode = 'Output'
 
 
 
@@ -544,6 +546,7 @@ class FlirRecorder:
             print(f"{c.DeviceSerialNumber}: {c.AcquisitionFrameRate}, {c.AcquisitionResultingFrameRate}, {c.ExposureTime}, {c.DeviceLinkThroughputLimit} ")
             print(f"Frame Size: {c.Width} {c.Height}")
             c.LineSelector = 'Line2'
+            c.LineMode = 'Input'
             c.V3_3Enable = True
             print(c.SerialReceiveQueueCurrentCharacterCount)
             print(c.SerialReceiveQueueMaxCharacterCount)
@@ -676,6 +679,7 @@ class FlirRecorder:
 
             c.LineSelector = 'Line2'
             c.V3_3Enable = False
+            c.LineMode = 'Output'
             # Stopping each camera
             c.stop()
 
