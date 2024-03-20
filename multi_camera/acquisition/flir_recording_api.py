@@ -102,8 +102,7 @@ def init_camera(
     resend_enable: bool = False,
     binning: int = 1,
     exposure_time: int = 15000,
-    line_selector: str = "Line1",
-    line_source: str = "ExposureActive",
+    gpio_settings: dict = {},
 ):
     """
     Initialize camera with settings for recording
@@ -116,8 +115,7 @@ def init_camera(
             resend_enable (bool): Enable packet resend
             binning (int): Factor by which the image resolution is reduced
             exposure_time (int): Exposure time in microseconds
-            line_selector (str): Line selector for triggering
-            line_source (str): Line source for triggering
+            gpio_settings (dict): Dictionary of GPIO settings
 
         Throughput should be limited for multiple cameras but reduces frame rate. Can use 125000000 for maximum
         frame rate or 85000000 when using more cameras with a 10GigE switch.
@@ -160,24 +158,17 @@ def init_camera(
     c.DeviceLinkThroughputLimit = throughput_limit
     c.GevSCPD = 25000
 
-    # Set up the serial line
-    # c.LineSelector = "Line0"
-    # c.LineSource = "SerialPort0"
-    c.LineSelector = 'Line2'
-    c.LineMode = 'Output'
+    line0 = gpio_settings['line0']
+    #line1 = gpio_settings['line1'] line1 currently unused
+    line2 = gpio_settings['line2']
+    line3 = gpio_settings['line3']
 
-
-
-    c.ChunkModeActive = True
-    c.ChunkSelector = "FrameID"
-    c.ChunkSelector = "SerialData"
-    c.ChunkEnable = True
-
-    # c.StreamPacketResendEnable = resend_enable
-
-    # Set up the triggering line
-    # c.LineSelector = line_selector
-    # c.LineSource = line_source
+    if line2 == '3V3_Enable':
+        c.LineSelector = 'Line2'
+        c.LineMode = 'Output'
+    else:
+        if line2 != 'Off':
+            print(f"{line2} is not valid for line2. Setting to 'Off'")
 
     if triggering:
         # set up masks for triggering
@@ -185,27 +176,34 @@ def init_camera(
         c.ActionGroupKey = 1
         c.ActionGroupMask = 1
 
-        # set up trigger setting
-        # c.TriggerMode = "Off"
-        # c.TriggerSelector = "AcquisitionStart"  # Need to select AcquisitionStart for real time clock
-        # c.TriggerSource = "Action0"
-        # c.TriggerMode = "On"
+        # Check the gpio settings
+        if line0 == 'ArduinoTrigger':
+            c.TriggerMode = "Off"
+            c.TriggerSelector = "FrameStart"
+            c.TriggerSource = "Line0"
+            c.TriggerActivation = "RisingEdge"
+            c.TriggerOverlap = "ReadOut"
+            c.TriggerMode = "On"
+        else:
+            if line0 != 'Off':
+                print(f"{line0} is not valid for line0. Setting to 'Off'")
+            c.TriggerMode = "Off"
+            c.TriggerSelector = "AcquisitionStart"  # Need to select AcquisitionStart for real time clock
+            c.TriggerSource = "Action0"
+            c.TriggerMode = "On"
 
-        c.TriggerMode = "Off"
-        c.TriggerSelector = "FrameStart"
-        c.TriggerSource = "Line0"
-        c.TriggerActivation = "RisingEdge"
-        c.TriggerOverlap = "ReadOut"
-        c.TriggerMode = "On"
+        if line3 == 'SerialOn':
+            c.SerialPortSelector = "SerialPort0"
+            c.SerialPortSource = "Line3"
+            c.SerialPortBaudRate = "Baud115200"
+            c.SerialPortDataBits = 8
+            c.SerialPortStopBits = "Bits1"
+            c.SerialPortParity = "None"
 
-        c.SerialPortSelector = "SerialPort0"
-        c.SerialPortSource = "Line3"
-        c.SerialPortBaudRate = "Baud115200"
-        # c.SerialPortBaudRate = "Baud9600"
-        c.SerialPortDataBits = 8
-        c.SerialPortStopBits = "Bits1"
-        c.SerialPortParity = "None"
-    
+            c.ChunkModeActive = True
+            # c.ChunkSelector = "FrameID"
+            c.ChunkSelector = "SerialData"
+            c.ChunkEnable = True
 
 
 def write_queue(
@@ -435,8 +433,8 @@ class FlirRecorder:
             # Parse additional parameters from the config file
             exposure_time = self.camera_config["acquisition-settings"]["exposure_time"]
             frame_rate = self.camera_config["acquisition-settings"]["frame_rate"]
-            line_selector = self.camera_config["acquisition-settings"]["lineselector"]
-            line_source = self.camera_config["acquisition-settings"]["linesource"]
+            acquisition_type = self.camera_config["acquisition-type"]
+            self.gpio_settings = self.camera_config["gpio-settings"]
 
         else:
             # If no config file is passed, use default values
@@ -457,8 +455,7 @@ class FlirRecorder:
             "resend_enable": False,
             "binning": binning,
             "exposure_time": exposure_time,
-            "line_selector": line_selector,
-            "line_source": line_source,
+            "gpio_settings": self.gpio_settings,
         }
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(self.cams)) as executor:
@@ -545,13 +542,16 @@ class FlirRecorder:
         for c in self.cams:
             print(f"{c.DeviceSerialNumber}: {c.AcquisitionFrameRate}, {c.AcquisitionResultingFrameRate}, {c.ExposureTime}, {c.DeviceLinkThroughputLimit} ")
             print(f"Frame Size: {c.Width} {c.Height}")
-            c.LineSelector = 'Line2'
-            c.LineMode = 'Input'
-            c.V3_3Enable = True
-            print(c.SerialReceiveQueueCurrentCharacterCount)
-            print(c.SerialReceiveQueueMaxCharacterCount)
-            c.SerialReceiveQueueClear()
-            print(c.SerialReceiveQueueCurrentCharacterCount)
+
+            if self.gpio_settings['line2'] == '3V3_Enable':
+                c.LineSelector = 'Line2'
+                c.LineMode = 'Input'
+                c.V3_3Enable = True
+            if self.gpio_settings['line3'] == 'SerialOn':
+                print(c.SerialReceiveQueueCurrentCharacterCount)
+                print(c.SerialReceiveQueueMaxCharacterCount)
+                c.SerialReceiveQueueClear()
+                print(c.SerialReceiveQueueCurrentCharacterCount)
 
         # schedule a command to start in 250 ms in the future
         self.cams[0].TimestampLatch()
@@ -608,25 +608,22 @@ class FlirRecorder:
             for c in self.cams:
                 im_ref = c.get_image()
                 chunk_data = im_ref.GetChunkData()
-                # print(type(chunk_data))
-                # print(dir(chunk_data))
-                # print(vars(chunk_data))
                 
                 timestamps = im_ref.GetTimeStamp()
                 frame_id = im_ref.GetFrameID()
                 frame_id_abs = chunk_data.GetFrameID()
                 
                 frame_count = -1
-                # We expect only 5 bytes to be sent
-                if c.ChunkSerialDataLength == 5:
-                    chunk_serial_data = c.ChunkSerialData
-                    split_chunk = [ord(c) for c in chunk_serial_data]
+                if self.gpio_settings['line3'] == 'SerialOn':
+                    # We expect only 5 bytes to be sent
+                    if c.ChunkSerialDataLength == 5:
+                        chunk_serial_data = c.ChunkSerialData
+                        split_chunk = [ord(c) for c in chunk_serial_data]
 
-                    # Reconstruct the current count from the chunk serial data
-                    frame_count = 0
-                    for i, b in enumerate(split_chunk):
-                        frame_count |= (b & 0x7F) << (7 * i)
-
+                        # Reconstruct the current count from the chunk serial data
+                        frame_count = 0
+                        for i, b in enumerate(split_chunk):
+                            frame_count |= (b & 0x7F) << (7 * i)
 
                 # store camera timestamps
                 frame_timestamps[c.DeviceSerialNumber] = {'timestamps':timestamps}
@@ -677,9 +674,10 @@ class FlirRecorder:
 
             camera_ids.append(c.DeviceSerialNumber)
 
-            c.LineSelector = 'Line2'
-            c.V3_3Enable = False
-            c.LineMode = 'Output'
+            if self.gpio_settings['line2'] == '3V3_Enable':
+                c.LineSelector = 'Line2'
+                c.V3_3Enable = False
+                c.LineMode = 'Output'
             # Stopping each camera
             c.stop()
 
