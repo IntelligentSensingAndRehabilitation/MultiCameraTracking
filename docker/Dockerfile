@@ -62,7 +62,7 @@ COPY requirements.txt .
 RUN pip3 install -r requirements.txt
 COPY setup.py README.md /Mocap/
 COPY multi_camera /Mocap/multi_camera
-COPY model_data /Mocap/model_data
+# COPY model_data /Mocap/model_data
 RUN pip3 install -e /Mocap/
 
 COPY docker/start_acquisition_gui.sh /Mocap/start_acquisition_gui.sh
