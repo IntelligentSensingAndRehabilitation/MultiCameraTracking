@@ -103,6 +103,7 @@ def init_camera(
     binning: int = 1,
     exposure_time: int = 15000,
     gpio_settings: dict = {},
+    chunk_data: list = [],
 ):
     """
     Initialize camera with settings for recording
@@ -116,6 +117,7 @@ def init_camera(
             binning (int): Factor by which the image resolution is reduced
             exposure_time (int): Exposure time in microseconds
             gpio_settings (dict): Dictionary of GPIO settings
+            chunk_data (list): List of chunk data to be enabled
 
         Throughput should be limited for multiple cameras but reduces frame rate. Can use 125000000 for maximum
         frame rate or 85000000 when using more cameras with a 10GigE switch.
@@ -170,6 +172,12 @@ def init_camera(
         if line2 != 'Off':
             print(f"{line2} is not valid for line2. Setting to 'Off'")
 
+    if chunk_data:
+        c.ChunkModeActive = True
+        for chunk_var in chunk_data:
+            c.ChunkSelector = chunk_var
+            c.ChunkEnable = True
+
     if triggering:
         # set up masks for triggering
         c.ActionDeviceKey = 0
@@ -199,11 +207,6 @@ def init_camera(
             c.SerialPortDataBits = 8
             c.SerialPortStopBits = "Bits1"
             c.SerialPortParity = "None"
-
-            c.ChunkModeActive = True
-            # c.ChunkSelector = "FrameID"
-            c.ChunkSelector = "SerialData"
-            c.ChunkEnable = True
 
 
 def write_queue(
@@ -456,6 +459,7 @@ class FlirRecorder:
             "binning": binning,
             "exposure_time": exposure_time,
             "gpio_settings": self.gpio_settings,
+            "chunk_data": self.camera_config["acquisition-settings"]["chunk_data"]
         }
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(self.cams)) as executor:

@@ -108,21 +108,14 @@ the SMPLReconstruction results
 ```
 ---
  camera-info:
-   23106516:
+   camera_serial_number (ex: 23336091):
      lens_info: "F1.4/6mm"
-   23106528:
+   camera_serial_number:
      lens_info: "F1.4/6mm"
-   23106529:
-     lens_info: "F1.4/6mm"
-   23106530:
-     lens_info: "F1.4/6mm"
-   23297516:
-     lens_info: "F1.4/6mm"
-   23336091:
-     lens_info: "F1.4/6mm"
-   23106533:
-     lens_info: "F1.4/6mm"
-   23280537:
+   .
+   .
+   .
+   camera_serial_number:
      lens_info: "F1.4/6mm"
 
  acquisition-type: 'continuous' # 'max-frame' or 'continuous'
@@ -131,6 +124,7 @@ the SMPLReconstruction results
     exposure_time: 15000 # in microseconds
     frame_rate: 30
     video_segment_len: 1000 # if acquisition-type is 'continuous', this is the number of frames to record before starting a new file
+    chunk_data: ['FrameID','SerialData']
 
 # To do max-frame recording or continuous recording with a single start trigger, set line0 to 'Off'
 # To do continuous recording, with each frame triggered, set line0 to 'ArduinoTrigger'
