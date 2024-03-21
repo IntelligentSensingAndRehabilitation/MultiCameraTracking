@@ -207,6 +207,9 @@ def init_camera(
             c.SerialPortDataBits = 8
             c.SerialPortStopBits = "Bits1"
             c.SerialPortParity = "None"
+        else:
+            if line3 != 'Off':
+                print(f"{line3} is not valid for line3. Setting to 'Off'")
 
 
 def write_queue(
@@ -436,7 +439,6 @@ class FlirRecorder:
             # Parse additional parameters from the config file
             exposure_time = self.camera_config["acquisition-settings"]["exposure_time"]
             frame_rate = self.camera_config["acquisition-settings"]["frame_rate"]
-            acquisition_type = self.camera_config["acquisition-type"]
             self.gpio_settings = self.camera_config["gpio-settings"]
 
         else:
@@ -575,8 +577,6 @@ class FlirRecorder:
             total_frames = self.camera_config["acquisition-settings"]["video_segment_len"]
         else:
             total_frames = max_frames
-
-        total_frames = max_frames
         
         prog = tqdm(total=total_frames)
 
