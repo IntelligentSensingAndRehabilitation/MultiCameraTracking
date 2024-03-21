@@ -571,10 +571,10 @@ class FlirRecorder:
 
         frame_idx = 0
 
-        # if self.camera_config["acquisition-type"] == "continuous":
-        #     total_frames = self.camera_config["acquisition-settings"]["video_segment_len"]
-        # else:
-        #     total_frames = max_frames
+        if self.camera_config["acquisition-type"] == "continuous":
+            total_frames = self.camera_config["acquisition-settings"]["video_segment_len"]
+        else:
+            total_frames = max_frames
 
         total_frames = max_frames
         
