@@ -657,7 +657,7 @@ class FlirRecorder:
                         {"im": im, "real_times": real_times, "timestamps": timestamps}
                     )
 
-            all_timestamps.append(frame_timestamps)
+            # all_timestamps.append(frame_timestamps)
 
             if self.preview_callback:
                 self.preview_callback(real_time_images)
@@ -689,7 +689,7 @@ class FlirRecorder:
         # output_json = {}
 
         # convert list of dicts to dict of lists
-        all_timestamps = {k: [dic[k] for dic in all_timestamps] for k in all_timestamps[0]}
+        # all_timestamps = {k: [dic[k] for dic in all_timestamps] for k in all_timestamps[0]}
 
         # output_json["real_times"] = all_timestamps.pop("real_times")
         # output_json["serials"] = []  # list(all_timestamps.keys())
@@ -699,13 +699,13 @@ class FlirRecorder:
         all_frame_ids_abs = []
         all_serial_data = []
 
-        for k, v in all_timestamps.items():
+        # for k, v in all_timestamps.items():
             # output_json["serials"].append(k)
 
-            ts.append([f['timestamps'] for f in v])
-            all_frame_ids.append([f['frame_id'] for f in v])
-            all_frame_ids_abs.append([f['frame_id_abs'] for f in v])
-            all_serial_data.append([f['chunk_serial_data'] for f in v])
+            # ts.append([f['timestamps'] for f in v])
+            # all_frame_ids.append([f['frame_id'] for f in v])
+            # all_frame_ids_abs.append([f['frame_id_abs'] for f in v])
+            # all_serial_data.append([f['chunk_serial_data'] for f in v])
 
         # output_json["timestamps"] = list(map(list, zip(*ts)))
         # output_json["frame_id"] = list(map(list, zip(*all_frame_ids)))
