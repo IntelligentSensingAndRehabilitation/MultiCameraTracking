@@ -611,30 +611,30 @@ class FlirRecorder:
 
             for c in self.cams:
                 im_ref = c.get_image()
-                chunk_data = im_ref.GetChunkData()
+                # chunk_data = im_ref.GetChunkData()
                 
                 timestamps = im_ref.GetTimeStamp()
-                frame_id = im_ref.GetFrameID()
-                frame_id_abs = chunk_data.GetFrameID()
+                # frame_id = im_ref.GetFrameID()
+                # frame_id_abs = chunk_data.GetFrameID()
                 
-                frame_count = -1
-                if self.gpio_settings['line3'] == 'SerialOn':
+                # frame_count = -1
+                # if self.gpio_settings['line3'] == 'SerialOn':
                     # We expect only 5 bytes to be sent
-                    if c.ChunkSerialDataLength == 5:
-                        chunk_serial_data = c.ChunkSerialData
-                        split_chunk = [ord(c) for c in chunk_serial_data]
+                    # if c.ChunkSerialDataLength == 5:
+                    #     chunk_serial_data = c.ChunkSerialData
+                    #     split_chunk = [ord(c) for c in chunk_serial_data]
 
-                        # Reconstruct the current count from the chunk serial data
-                        frame_count = 0
-                        for i, b in enumerate(split_chunk):
-                            frame_count |= (b & 0x7F) << (7 * i)
+                    #     # Reconstruct the current count from the chunk serial data
+                    #     frame_count = 0
+                    #     for i, b in enumerate(split_chunk):
+                    #         frame_count |= (b & 0x7F) << (7 * i)
 
                 # store camera timestamps
-                frame_timestamps[c.DeviceSerialNumber] = {'timestamps':timestamps}
-                frame_timestamps[c.DeviceSerialNumber]['frame_id'] = frame_id
-                frame_timestamps[c.DeviceSerialNumber]['frame_id_abs'] = frame_id_abs
+                # frame_timestamps[c.DeviceSerialNumber] = {'timestamps':timestamps}
+                # frame_timestamps[c.DeviceSerialNumber]['frame_id'] = frame_id
+                # frame_timestamps[c.DeviceSerialNumber]['frame_id_abs'] = frame_id_abs
 
-                frame_timestamps[c.DeviceSerialNumber]['chunk_serial_data'] = frame_count
+                # frame_timestamps[c.DeviceSerialNumber]['chunk_serial_data'] = frame_count
 
                 # get the data array
                 # Using try/except to handle frame tearing
