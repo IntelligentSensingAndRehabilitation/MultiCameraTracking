@@ -9,5 +9,4 @@ build:
 	docker build -t peabody124/mocap -f ./docker/Dockerfile .
 
 run:
-	docker run  -it --network=host -e REACT_APP_BASE_URL="jc-compute02.ric.org" -v /data:/data -v /camera_configs:/configs -v /etc/localtime:/etc/localtime:ro -v /datajoint_external:/datajoint_external peabody124/mocap 
-
+	docker run  -it --network=host -e REACT_APP_BASE_URL="localhost" -v /home/acadia/Documents/247cam/data/YFADatafile/VIDEO/:/data -v /home/acadia/Documents/247cam/camera_configs:/configs -v /etc/localtime:/etc/localtime:ro -v /home/acadia/Documents/247cam/datajoint_external:/datajoint_external peabody124/mocap 
