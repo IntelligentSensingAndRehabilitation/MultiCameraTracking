@@ -249,6 +249,9 @@ def write_queue(
 
     out_video = None
 
+    for frame_num, meta_info in enumerate(iter(json_queue.get, None)):
+        print(meta_info)
+
     for frame_num, frame in enumerate(iter(image_queue.get, None)):
         if frame is None:
             break
@@ -514,21 +517,21 @@ class FlirRecorder:
         # Initializing an image queue for each camera
         self.image_queue_dict = {c.DeviceSerialNumber: Queue(max_frames) for c in self.cams}
 
+        # Initializing a json queue for each camera
+        self.json_queue_dict = {c.DeviceSerialNumber: Queue(max_frames) for c in self.cams}
+
         # set up the threads to write videos to disk, if requested
         if self.video_base_file is not None:
-            json_queue = {}
 
             # Start a writing thread for each camera
             for c in self.cams:
                 serial = c.DeviceSerialNumber
-                # Initializing queue to store json info for each camera
-                json_queue[c.DeviceSerialNumber] = Queue(max_frames)
                 threading.Thread(
                     target=write_queue,
                     kwargs={
                         "vid_file": self.video_base_file,
                         "image_queue": self.image_queue_dict[serial],
-                        "json_queue": json_queue[c.DeviceSerialNumber],
+                        "json_queue": self.json_queue_dict[serial],
                         "serial": serial,
                         "pixel_format": self.pixel_format,
                         "acquisition_fps": c.AcquisitionFrameRate,
@@ -569,7 +572,7 @@ class FlirRecorder:
         self.iface.TLInterface.GevActionDeviceKey.SetValue(0)
         self.iface.TLInterface.ActionCommand()
 
-        all_timestamps = []
+        # all_timestamps = []
 
         frame_idx = 0
 
@@ -607,13 +610,14 @@ class FlirRecorder:
             real_times = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
             real_time_images = []
 
-            frame_timestamps = {"real_times": real_times}
+            # frame_timestamps = {"real_times": real_times}
 
             for c in self.cams:
                 im_ref = c.get_image()
-                chunk_data = im_ref.GetChunkData()
-                
                 timestamps = im_ref.GetTimeStamp()
+
+
+                chunk_data = im_ref.GetChunkData()
                 frame_id = im_ref.GetFrameID()
                 frame_id_abs = chunk_data.GetFrameID()
                 
@@ -630,11 +634,11 @@ class FlirRecorder:
                             frame_count |= (b & 0x7F) << (7 * i)
 
                 # store camera timestamps
-                frame_timestamps[c.DeviceSerialNumber] = {'timestamps':timestamps}
-                frame_timestamps[c.DeviceSerialNumber]['frame_id'] = frame_id
-                frame_timestamps[c.DeviceSerialNumber]['frame_id_abs'] = frame_id_abs
+                # frame_timestamps[c.DeviceSerialNumber] = {'timestamps':timestamps}
+                # frame_timestamps[c.DeviceSerialNumber]['frame_id'] = frame_id
+                # frame_timestamps[c.DeviceSerialNumber]['frame_id_abs'] = frame_id_abs
 
-                frame_timestamps[c.DeviceSerialNumber]['chunk_serial_data'] = frame_count
+                # frame_timestamps[c.DeviceSerialNumber]['chunk_serial_data'] = frame_count
 
                 # get the data array
                 # Using try/except to handle frame tearing
@@ -657,7 +661,12 @@ class FlirRecorder:
                         {"im": im, "real_times": real_times, "timestamps": timestamps}
                     )
 
-            all_timestamps.append(frame_timestamps)
+                    # Writing the meta information for the current camera to its queue
+                    self.json_queue_dict[c.DeviceSerialNumber].put(
+                        {"timestamps": timestamps, "real_times": real_times, "frame_id": frame_id, "frame_id_abs": frame_id_abs, "chunk_serial_data": frame_count}
+                    )
+
+            # all_timestamps.append(frame_timestamps)
 
             if self.preview_callback:
                 self.preview_callback(real_time_images)
