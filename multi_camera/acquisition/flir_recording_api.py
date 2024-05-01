@@ -324,21 +324,18 @@ def write_metadata_queue(json_queue: Queue, json_file: str):
     This is expected to be called from a standalone thread and will automatically terminate when the json_queue is empty.
     """
 
-    all_timestamps = []
+    for frame_num, frame in enumerate(iter(json_queue.get, None)):
+        if frame is None:
+            break
 
-    # for frame_num, frame in enumerate(iter(json_queue.get, None)):
-    #     print(frame)
-    #     if frame is None:
-    #         break
+        # get the filename for the current json file
+        json_file = frame["base_filename"] + ".json"
 
-    #     all_timestamps.append(frame)
-
-    #     json_queue.task_done()
-
-    # json.dump(all_timestamps, open(json_file, "w"))
-
-    # # indicate the last None event is handled
-    # json_queue.task_done()
+        # open the json file and write the frame metadata
+        with open(json_file, "a") as f:
+            json.dump(frame, f)
+            f.write("\n")
+            json_queue.task_done()
 
 
 class FlirRecorder:
