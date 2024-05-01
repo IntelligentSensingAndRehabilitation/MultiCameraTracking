@@ -324,18 +324,58 @@ def write_metadata_queue(json_queue: Queue, json_file: str):
     This is expected to be called from a standalone thread and will automatically terminate when the json_queue is empty.
     """
 
-    for frame_num, frame in enumerate(iter(json_queue.get, None)):
+    current_filename = json_file
+
+    json_data = {}
+    json_data["real_times"] = []
+    json_data["timestamps"] = []
+    json_data["frame_id"] = []
+    json_data["frame_id_abs"] = []
+    json_data["chunk_serial_data"] = []
+    json_data["serial_msg"] = []
+    json_data["camera_serials"] = []
+
+    while True:
+        frame = json_queue.get()
+        print("Frame: ", frame)
         if frame is None:
             break
 
-        # get the filename for the current json file
-        json_file = frame["base_filename"] + ".json"
+        if current_filename != frame["base_filename"]:
+            print("Current filename: ", current_filename)
+            print("Frame filename: ", frame["base_filename"])
+            # This means a new file should be started
+            json_file = current_filename + ".json"
 
-        # open the json file and write the frame metadata
-        with open(json_file, "a") as f:
-            json.dump(frame, f)
-            f.write("\n")
-            json_queue.task_done()
+            with open(json_file, "w") as f:
+                json.dump(json_data, f)
+                f.write("\n")
+
+            current_filename = frame["base_filename"]
+
+            # reset the json_data
+            json_data = {}
+            json_data["real_times"] = []
+            json_data["timestamps"] = []
+            json_data["frame_id"] = []
+            json_data["frame_id_abs"] = []
+            json_data["chunk_serial_data"] = []
+            json_data["serial_msg"] = []
+            json_data["camera_serials"] = []
+        else:
+            # This means we are still writing to the same json file
+            json_data["real_times"].append(frame["real_times"])
+            json_data["timestamps"].append(frame["timestamps"])
+            json_data["frame_id"].append(frame["frame_id"])
+            json_data["frame_id_abs"].append(frame["frame_id_abs"])
+            json_data["chunk_serial_data"].append(frame["chunk_serial_data"])
+            json_data["serial_msg"].append(frame["serial_msg"])
+            json_data["camera_serials"].append(frame["camera_serials"])
+
+            print(json_data)
+
+        json_queue.task_done()
+
 
 
 class FlirRecorder:
