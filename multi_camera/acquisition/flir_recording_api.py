@@ -232,15 +232,15 @@ def write_image_queue(
     This is expected to be called from a standalone thread and will automatically terminate when the image_queue is empty.
     """
 
-    if acquisition_type == "continuous":
-        video_segment_num = 0
+    # if acquisition_type == "continuous":
+    #     video_segment_num = 0
 
-        _vid_file = os.path.splitext(vid_file)[0] + f".{serial}" + "_" + str(video_segment_num) + ".mp4"
-    else:
-        _vid_file = os.path.splitext(vid_file)[0] + f".{serial}.mp4"
+    #     _vid_file = os.path.splitext(vid_file)[0] + f".{serial}" + "_" + str(video_segment_num) + ".mp4"
+    # else:
+    #     _vid_file = os.path.splitext(vid_file)[0] + f".{serial}.mp4"
 
-    print(vid_file)
-    print(_vid_file)
+    # print(vid_file)
+    # print(_vid_file)
 
     timestamps = []
     real_times = []
@@ -251,6 +251,10 @@ def write_image_queue(
     for frame_num, frame in enumerate(iter(image_queue.get, None)):
         if frame is None:
             break
+
+        # Get the video file for the current frame
+        vid_file = frame["base_filename"] + f".{serial}.mp4"
+
         timestamps.append(frame["timestamps"])
         real_times.append(frame["real_times"])
 
@@ -268,18 +272,18 @@ def write_image_queue(
 
             fourcc = cv2.VideoWriter_fourcc(*"mp4v")
 
-            out_video = cv2.VideoWriter(_vid_file, fourcc, acquisition_fps, (im.shape[1], im.shape[0]))
+            out_video = cv2.VideoWriter(vid_file, fourcc, acquisition_fps, (im.shape[1], im.shape[0]))
             out_video.write(last_im)
 
         elif frame_num % video_segment_len == 0 and acquisition_type == "continuous":
-            video_segment_num += 1
-            _vid_file = os.path.splitext(vid_file)[0] + f".{serial}"+ "_" + str(video_segment_num) +".mp4"
+            # video_segment_num += 1
+            # _vid_file = os.path.splitext(vid_file)[0] + f".{serial}"+ "_" + str(video_segment_num) +".mp4"
 
             tqdm.write(f"Writing FPS: {acquisition_fps}")
 
             fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-            print("writing to", _vid_file)
-            out_video = cv2.VideoWriter(_vid_file, fourcc, acquisition_fps, (im.shape[1], im.shape[0]))
+            print("writing to", vid_file)
+            out_video = cv2.VideoWriter(vid_file, fourcc, acquisition_fps, (im.shape[1], im.shape[0]))
             out_video.write(im)
 
         else:
@@ -322,8 +326,8 @@ def write_metadata_queue(json_queue: Queue, json_file: str):
 
     all_timestamps = []
 
-    for frame_num, frame in enumerate(iter(json_queue.get, None)):
-        print(frame)
+    # for frame_num, frame in enumerate(iter(json_queue.get, None)):
+    #     print(frame)
     #     if frame is None:
     #         break
 
