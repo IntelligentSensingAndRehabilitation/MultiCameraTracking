@@ -232,16 +232,6 @@ def write_image_queue(
     This is expected to be called from a standalone thread and will automatically terminate when the image_queue is empty.
     """
 
-    # if acquisition_type == "continuous":
-    #     video_segment_num = 0
-
-    #     _vid_file = os.path.splitext(vid_file)[0] + f".{serial}" + "_" + str(video_segment_num) + ".mp4"
-    # else:
-    #     _vid_file = os.path.splitext(vid_file)[0] + f".{serial}.mp4"
-
-    # print(vid_file)
-    # print(_vid_file)
-
     timestamps = []
     real_times = []
     frame_spreads = []
@@ -277,7 +267,6 @@ def write_image_queue(
 
         elif frame_num % video_segment_len == 0 and acquisition_type == "continuous":
             # video_segment_num += 1
-            # _vid_file = os.path.splitext(vid_file)[0] + f".{serial}"+ "_" + str(video_segment_num) +".mp4"
 
             out_video.release()
 
@@ -360,19 +349,12 @@ def write_metadata_queue(json_queue: Queue, records_queue: Queue, json_file: str
     json_data["frame_id_abs"] = []
     json_data["chunk_serial_data"] = []
     json_data["serial_msg"] = []
-    # json_data["camera_serials"] = []
 
     for frame_num, frame in enumerate(iter(json_queue.get, None)):
         if frame is None:
             break
 
-        print("******************Frame number: ", frame_num)
-        print(frame["frame_id"], frame["frame_id_abs"])
-
-
         if current_filename != frame["base_filename"]:
-            print("Current filename: ", current_filename)
-            print("Frame filename: ", frame["base_filename"])
             
             # This means a new file should be started
             json_file = current_filename + ".json"
@@ -408,7 +390,7 @@ def write_metadata_queue(json_queue: Queue, records_queue: Queue, json_file: str
             json_data["frame_id_abs"] = [frame["frame_id_abs"]]
             json_data["chunk_serial_data"] = [frame["chunk_serial_data"]]
             json_data["serial_msg"] = [frame["serial_msg"]]
-            # json_data["camera_serials"] = []
+
         else:
             # This means we are still writing to the same json file
             json_data["real_times"].append(frame["real_times"])
@@ -418,13 +400,8 @@ def write_metadata_queue(json_queue: Queue, records_queue: Queue, json_file: str
             json_data["frame_id_abs"].append(frame["frame_id_abs"])
             json_data["chunk_serial_data"].append(frame["chunk_serial_data"])
             json_data["serial_msg"].append(frame["serial_msg"])
-            # json_data["camera_serials"].append(frame["camera_serials"])
-
-            # print(json_data)
 
         json_queue.task_done()
-
-    print(json_data)
 
     # write the last json file with the remaining data
     json_file = current_filename + ".json"
@@ -446,7 +423,6 @@ def write_metadata_queue(json_queue: Queue, records_queue: Queue, json_file: str
     max_timespread = calculate_timespread_drift(json_data["timestamps"])
 
     records_queue.put({"filename": current_filename, "timestamp_spread": max_timespread, "recording_timestamp": local_times[0]})
-
 
     json_queue.task_done()
 
@@ -659,8 +635,6 @@ class FlirRecorder:
         if self.camera_config:
             config_metadata["meta_info"] = self.camera_config["meta-info"]
             config_metadata["camera_info"] = self.camera_config["camera-info"]
-            # config_metadata["exposure_times"] = exposure_times
-            # config_metadata["frame_rate_requested"] = frame_rates
             camera_config_hash = self.get_config_hash(self.camera_config)
             print("CONFIG HASH",camera_config_hash)
             config_metadata["camera_config_hash"] = camera_config_hash
@@ -745,8 +719,6 @@ class FlirRecorder:
         self.iface.TLInterface.GevActionDeviceKey.SetValue(0)
         self.iface.TLInterface.ActionCommand()
 
-        # all_timestamps = []
-
         frame_idx = 0
 
         if self.camera_config["acquisition-type"] == "continuous":
@@ -817,7 +789,6 @@ class FlirRecorder:
                 im_ref = c.get_image()
                 timestamp = im_ref.GetTimeStamp()
 
-
                 chunk_data = im_ref.GetChunkData()
                 frame_id = im_ref.GetFrameID()
                 frame_id_abs = chunk_data.GetFrameID()
@@ -837,12 +808,6 @@ class FlirRecorder:
                         for i, b in enumerate(split_chunk):
                             frame_count |= (b & 0x7F) << (7 * i)
 
-                # store camera timestamps
-                # frame_timestamps[c.DeviceSerialNumber] = {'timestamps':timestamps}
-                # frame_timestamps[c.DeviceSerialNumber]['frame_id'] = frame_id
-                # frame_timestamps[c.DeviceSerialNumber]['frame_id_abs'] = frame_id_abs
-
-                # frame_timestamps[c.DeviceSerialNumber]['chunk_serial_data'] = frame_count
                 frame_metadata["timestamps"].append(timestamp)
                 frame_metadata["frame_id"].append(frame_id)
                 frame_metadata["frame_id_abs"].append(frame_id_abs)
@@ -873,8 +838,6 @@ class FlirRecorder:
                     self.image_queue_dict[c.DeviceSerialNumber].put(
                         {"im": im, "real_times": real_time, "timestamps": timestamp,  "base_filename": self.video_base_file}
                     )
-
-                # print(frame_metadata)
 
             # put the frame metadata into the json queue
             self.json_queue.put(frame_metadata)
@@ -907,51 +870,6 @@ class FlirRecorder:
             # Stopping each camera
             c.stop()
 
-        # # Creating a dictionary to hold the contents of each camera's json queue
-        # output_json = {}
-
-        # # convert list of dicts to dict of lists
-        # all_timestamps = {k: [dic[k] for dic in all_timestamps] for k in all_timestamps[0]}
-
-        # output_json["real_times"] = all_timestamps.pop("real_times")
-        # output_json["serials"] = []  # list(all_timestamps.keys())
-
-        # ts = []
-        # all_frame_ids = []
-        # all_frame_ids_abs = []
-        # all_serial_data = []
-
-        # for k, v in all_timestamps.items():
-        #     output_json["serials"].append(k)
-
-        #     ts.append([f['timestamps'] for f in v])
-        #     all_frame_ids.append([f['frame_id'] for f in v])
-        #     all_frame_ids_abs.append([f['frame_id_abs'] for f in v])
-        #     all_serial_data.append([f['chunk_serial_data'] for f in v])
-
-        # output_json["timestamps"] = list(map(list, zip(*ts)))
-        # output_json["frame_id"] = list(map(list, zip(*all_frame_ids)))
-        # output_json["frame_id_abs"] = list(map(list, zip(*all_frame_ids_abs)))
-        # output_json["chunk_serial_data"] = list(map(list, zip(*all_serial_data)))
-
-        # print(np.array(output_json["timestamps"]).shape)
-
-        # if self.camera_config:
-        #     output_json["meta_info"] = self.camera_config["meta-info"]
-        #     output_json["camera_info"] = self.camera_config["camera-info"]
-        #     output_json["exposure_times"] = exposure_times
-        #     output_json["frame_rate_requested"] = frame_rates
-        #     camera_config_hash = self.get_config_hash(self.camera_config)
-        #     print("CONFIG HASH",camera_config_hash)
-        #     output_json["camera_config_hash"] = camera_config_hash
-        # else:
-        #     output_json["meta_info"] = "No Config"
-        #     output_json["camera_info"] = camera_ids
-        #     output_json["exposure_times"] = exposure_times
-        #     output_json["frame_rate_requested"] = frame_rates
-        #     output_json["camera_config_hash"] = None
-
-        print("before joining threads")
         if self.video_base_file is not None:
             # stop video writing threads and output json file
 
@@ -960,12 +878,9 @@ class FlirRecorder:
                 self.image_queue_dict[c.DeviceSerialNumber].put(None)
                 self.image_queue_dict[c.DeviceSerialNumber].join()
 
-                print(f"Camera {c.DeviceSerialNumber} queue joined")
-            print("Joining json queue")
             # to allow the json queue to be processed before moving on
             self.json_queue.put(None)
             self.json_queue.join()
-            print("Json queue joined")
 
         # go through the records queue and add the records to a list
         records = []
@@ -975,31 +890,9 @@ class FlirRecorder:
 
         self.records_queue.join()
 
-        print("RECORDS", records)  
-        print("Joining threads")
-
-        # # Calculating metrics to determine drift
-        # ts = pd.DataFrame(output_json["timestamps"])
-
-        # # interpolating any timestamps that are 0s
-        # ts.replace(0, np.nan, inplace=True)
-        # ts.interpolate(method='linear', axis=0, limit=1, limit_direction='both', inplace=True)
-        # initial_ts = ts.iloc[0,0]
-        # dt = (ts - initial_ts) / 1e9
-        # spread = dt.max(axis=1) - dt.min(axis=1)
-
-        # ts['std'] = ts.std(axis=1) / 1e6
-        # if np.all(spread < 1e-6):
-        #     print("Timestamps well aligned and clean")
-        # else:
-        #     print(f"Timestamps showed a maximum spread of {np.max(spread) * 1000} ms")
-        #     print(f"Timestamp standard deviation {ts['std'].max() -  ts['std'].min()} ms")
-
         self.set_status("Idle")
 
         return records
-
-        # return {"timestamp_spread": np.max(spread) * 1000, "recording_timestamp": output_json["real_times"][0]}
 
     def stop_acquisition(self):
         self.stop_recording.set()
