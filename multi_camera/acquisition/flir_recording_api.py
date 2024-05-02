@@ -366,6 +366,10 @@ def write_metadata_queue(json_queue: Queue, records_queue: Queue, json_file: str
         if frame is None:
             break
 
+        print("******************Frame number: ", frame_num)
+        print(frame["frame_id"], frame["frame_id_abs"])
+
+
         if current_filename != frame["base_filename"]:
             print("Current filename: ", current_filename)
             print("Frame filename: ", frame["base_filename"])
@@ -395,15 +399,15 @@ def write_metadata_queue(json_queue: Queue, records_queue: Queue, json_file: str
 
             current_filename = frame["base_filename"]
 
-            # reset the json_data
+            # reset the json_lists
             json_data = {}
-            json_data["real_times"] = []
-            local_times = []
-            json_data["timestamps"] = []
-            json_data["frame_id"] = []
-            json_data["frame_id_abs"] = []
-            json_data["chunk_serial_data"] = []
-            json_data["serial_msg"] = []
+            json_data["real_times"] = [frame["real_times"]]
+            local_times = [frame["local_times"]]
+            json_data["timestamps"] = [frame["timestamps"]]
+            json_data["frame_id"] = [frame["frame_id"]]
+            json_data["frame_id_abs"] = [frame["frame_id_abs"]]
+            json_data["chunk_serial_data"] = [frame["chunk_serial_data"]]
+            json_data["serial_msg"] = [frame["serial_msg"]]
             # json_data["camera_serials"] = []
         else:
             # This means we are still writing to the same json file
