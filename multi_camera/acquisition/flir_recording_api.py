@@ -336,7 +336,9 @@ def calculate_timespread_drift(timestamps):
         print(f"Timestamps showed a maximum spread of {np.max(spread) * 1000} ms")
         print(f"Timestamp standard deviation {ts['std'].max() -  ts['std'].min()} ms")
 
-def write_metadata_queue(json_queue: Queue, json_file: str, config_metadata: dict):
+    return np.max(spread) * 1000
+
+def write_metadata_queue(json_queue: Queue, records_queue: Queue, json_file: str, config_metadata: dict):
     """
     Write metadata from the queue to a json file
 
@@ -348,6 +350,8 @@ def write_metadata_queue(json_queue: Queue, json_file: str, config_metadata: dic
     """
 
     current_filename = json_file
+
+    local_times = []
 
     json_data = {}
     json_data["real_times"] = []
@@ -365,6 +369,7 @@ def write_metadata_queue(json_queue: Queue, json_file: str, config_metadata: dic
         if current_filename != frame["base_filename"]:
             print("Current filename: ", current_filename)
             print("Frame filename: ", frame["base_filename"])
+            
             # This means a new file should be started
             json_file = current_filename + ".json"
 
@@ -374,13 +379,17 @@ def write_metadata_queue(json_queue: Queue, json_file: str, config_metadata: dic
                 json.dump(json_data, f)
                 f.write("\n")
 
-            calculate_timespread_drift(json_data["timestamps"])
+            max_timespread = calculate_timespread_drift(json_data["timestamps"])
+
+            # add the current filename, max timespread, first of the local_times to the records queue
+            records_queue.put({"filename": current_filename, "timestamp_spread": max_timespread, "recording_timestamp": local_times[0]})
 
             current_filename = frame["base_filename"]
 
             # reset the json_data
             json_data = {}
             json_data["real_times"] = []
+            local_times = []
             json_data["timestamps"] = []
             json_data["frame_id"] = []
             json_data["frame_id_abs"] = []
@@ -390,6 +399,7 @@ def write_metadata_queue(json_queue: Queue, json_file: str, config_metadata: dic
         else:
             # This means we are still writing to the same json file
             json_data["real_times"].append(frame["real_times"])
+            local_times.append(frame["local_times"])
             json_data["timestamps"].append(frame["timestamps"])
             json_data["frame_id"].append(frame["frame_id"])
             json_data["frame_id_abs"].append(frame["frame_id_abs"])
@@ -411,6 +421,10 @@ def write_metadata_queue(json_queue: Queue, json_file: str, config_metadata: dic
     with open(json_file, "w") as f:
         json.dump(json_data, f)
         f.write("\n")
+
+    max_timespread = calculate_timespread_drift(json_data["timestamps"])
+
+    records_queue.put({"filename": current_filename, "timestamp_spread": max_timespread, "recording_timestamp": local_times[0]})
 
 
     json_queue.task_done()
@@ -640,7 +654,9 @@ class FlirRecorder:
         self.image_queue_dict = {c.DeviceSerialNumber: Queue(max_frames) for c in self.cams}
 
         # Initializing a json queue for each camera
-        self.json_queue_dict = Queue(max_frames)
+        self.json_queue = Queue(max_frames)
+
+        self.records_queue = Queue(max_frames)
 
         # set up the threads to write videos to disk, if requested
         if self.video_base_file is not None:
@@ -669,7 +685,8 @@ class FlirRecorder:
                 target=write_metadata_queue,
                 kwargs={
                     "json_file": self.video_base_file,
-                    "json_queue": self.json_queue_dict,
+                    "json_queue": self.json_queue,
+                    "records_queue": self.records_queue,
                     "config_metadata": config_metadata,
                 },
             ).start()
@@ -722,6 +739,7 @@ class FlirRecorder:
 
             # Get the current real time
             real_time = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+            local_time = datetime.now()
 
             # Use thread safe checking of semaphore to determine whether to stop recording
             if self.stop_recording.is_set():
@@ -762,7 +780,7 @@ class FlirRecorder:
             # the corresponding camera
             real_time_images = []
 
-            frame_metadata = {"real_times": real_time, "base_filename": self.video_base_file}
+            frame_metadata = {"real_times": real_time, "local_times": local_time, "base_filename": self.video_base_file}
 
             frame_metadata["timestamps"] = []
             frame_metadata["frame_id"] = []
@@ -832,7 +850,7 @@ class FlirRecorder:
                 # print(frame_metadata)
 
             # put the frame metadata into the json queue
-            self.json_queue_dict.put(frame_metadata)
+            self.json_queue.put(frame_metadata)
 
             if self.preview_callback:
                 self.preview_callback(real_time_images)
@@ -918,10 +936,19 @@ class FlirRecorder:
                 print(f"Camera {c.DeviceSerialNumber} queue joined")
             print("Joining json queue")
             # to allow the json queue to be processed before moving on
-            self.json_queue_dict.put(None)
-            self.json_queue_dict.join()
+            self.json_queue.put(None)
+            self.json_queue.join()
             print("Json queue joined")
 
+        # go through the records queue and add the records to a list
+        records = []
+        for i in range(self.records_queue.qsize()):
+            records.append(self.records_queue.get())
+            self.records_queue.task_done()
+
+        self.records_queue.join()
+
+        print("RECORDS", records)  
         print("Joining threads")
 
         # # Calculating metrics to determine drift
@@ -942,6 +969,8 @@ class FlirRecorder:
         #     print(f"Timestamp standard deviation {ts['std'].max() -  ts['std'].min()} ms")
 
         self.set_status("Idle")
+
+        return records
 
         # return {"timestamp_spread": np.max(spread) * 1000, "recording_timestamp": output_json["real_times"][0]}
 
