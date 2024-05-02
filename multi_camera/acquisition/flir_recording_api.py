@@ -360,7 +360,7 @@ def write_metadata_queue(json_queue: Queue, records_queue: Queue, json_file: str
     json_data["frame_id_abs"] = []
     json_data["chunk_serial_data"] = []
     json_data["serial_msg"] = []
-    json_data["camera_serials"] = []
+    # json_data["camera_serials"] = []
 
     for frame_num, frame in enumerate(iter(json_queue.get, None)):
         if frame is None:
@@ -373,7 +373,16 @@ def write_metadata_queue(json_queue: Queue, records_queue: Queue, json_file: str
             # This means a new file should be started
             json_file = current_filename + ".json"
 
-            json_data["meta_info"] = config_metadata
+            # Get the camera serial IDs
+            json_data["serials"] = frame["camera_serials"]
+            json_data["camera_config_hash"] = config_metadata["camera_config_hash"]
+            json_data["camera_info"] = config_metadata["camera_info"]
+            json_data["meta_info"] = config_metadata["meta_info"]
+            # Get the current camera settings for each camera before writing
+            json_data["exposure_times"] = frame["exposure_times"]
+            json_data["frame_rates_requested"] = frame["frame_rates_requested"]
+            json_data["frame_rates_binning"] = frame["frame_rates_binning"]
+
 
             with open(json_file, "w") as f:
                 json.dump(json_data, f)
@@ -395,7 +404,7 @@ def write_metadata_queue(json_queue: Queue, records_queue: Queue, json_file: str
             json_data["frame_id_abs"] = []
             json_data["chunk_serial_data"] = []
             json_data["serial_msg"] = []
-            json_data["camera_serials"] = []
+            # json_data["camera_serials"] = []
         else:
             # This means we are still writing to the same json file
             json_data["real_times"].append(frame["real_times"])
@@ -405,7 +414,7 @@ def write_metadata_queue(json_queue: Queue, records_queue: Queue, json_file: str
             json_data["frame_id_abs"].append(frame["frame_id_abs"])
             json_data["chunk_serial_data"].append(frame["chunk_serial_data"])
             json_data["serial_msg"].append(frame["serial_msg"])
-            json_data["camera_serials"].append(frame["camera_serials"])
+            # json_data["camera_serials"].append(frame["camera_serials"])
 
             # print(json_data)
 
@@ -416,7 +425,15 @@ def write_metadata_queue(json_queue: Queue, records_queue: Queue, json_file: str
     # write the last json file with the remaining data
     json_file = current_filename + ".json"
 
-    json_data["meta_info"] = config_metadata
+    # Get the information from the config file
+    json_data["serials"] = frame["camera_serials"]
+    json_data["camera_config_hash"] = config_metadata["camera_config_hash"]
+    json_data["camera_info"] = config_metadata["camera_info"]
+    json_data["meta_info"] = config_metadata["meta_info"]
+    # Get the current camera settings for each camera before writing
+    json_data["exposure_times"] = frame["exposure_times"]
+    json_data["frame_rates_requested"] = frame["frame_rates_requested"]
+    json_data["frame_rates_binning"] = frame["frame_rates_binning"]
 
     with open(json_file, "w") as f:
         json.dump(json_data, f)
@@ -788,6 +805,9 @@ class FlirRecorder:
             frame_metadata["chunk_serial_data"] = []
             frame_metadata["serial_msg"] = []
             frame_metadata["camera_serials"] = []
+            frame_metadata["exposure_times"] = []
+            frame_metadata["frame_rates_requested"] = []
+            frame_metadata["frame_rates_binning"] = []
 
             for c in self.cams:
                 im_ref = c.get_image()
@@ -825,6 +845,9 @@ class FlirRecorder:
                 frame_metadata["chunk_serial_data"].append(frame_count)
                 frame_metadata["serial_msg"].append(serial_msg)
                 frame_metadata["camera_serials"].append(c.DeviceSerialNumber)
+                frame_metadata["exposure_times"].append(c.ExposureTime)
+                frame_metadata["frame_rates_binning"].append(c.BinningHorizontal * 30)
+                frame_metadata["frame_rates_requested"].append(c.AcquisitionFrameRate)
 
                 # get the data array
                 # Using try/except to handle frame tearing
