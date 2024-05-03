@@ -873,6 +873,7 @@ class FlirRecorder:
             # Stopping each camera
             c.stop()
 
+        records = []
         if self.video_base_file is not None:
             # stop video writing threads and output json file
 
@@ -886,7 +887,6 @@ class FlirRecorder:
             self.json_queue.join()
 
             # go through the records queue and add the records to a list
-            records = []
             for i in range(self.records_queue.qsize()):
                 records.append(self.records_queue.get())
                 self.records_queue.task_done()
