@@ -624,12 +624,14 @@ class FlirRecorder:
 
         self.preview_callback = preview_callback
         self.video_base_file = recording_path
-        self.video_base_name = self.video_base_file.split("/")[-1]
-        self.video_path = "/".join(self.video_base_file.split("/")[:-1])
 
-        # Split the video_base_name to get the root and the date
-        # self.video_datetime = "_".join(self.video_base_name.split("_")[-2:])
-        self.video_root = "_".join(self.video_base_name.split("_")[:-2])
+        if self.video_base_file is not None:
+            self.video_base_name = self.video_base_file.split("/")[-1]
+            self.video_path = "/".join(self.video_base_file.split("/")[:-1])
+
+            # Split the video_base_name to get the root and the date
+            # self.video_datetime = "_".join(self.video_base_name.split("_")[-2:])
+            self.video_root = "_".join(self.video_base_name.split("_")[:-2])
 
         config_metadata = {}
         if self.camera_config:
@@ -751,18 +753,19 @@ class FlirRecorder:
                     prog = tqdm(total=total_frames)
                     frame_idx = 0
 
-                    # Create a new video_base_filename for the new video segment
-                    # video_base_name looks like 'data/t111/20240501/t111_20240501_130531'
-                    # we just need to replace the date and time parts of the filename
-                    # First get the current date and time
-                    now = datetime.now()
-                    time_str = now.strftime("%Y%m%d_%H%M%S")
+                    if self.video_base_file is not None:
+                        # Create a new video_base_filename for the new video segment
+                        # video_base_name looks like 'data/t111/20240501/t111_20240501_130531'
+                        # we just need to replace the date and time parts of the filename
+                        # First get the current date and time
+                        now = datetime.now()
+                        time_str = now.strftime("%Y%m%d_%H%M%S")
 
-                    # Update the video_base_name with the new time_str
-                    self.video_base_name = "_".join([self.video_root, time_str])
+                        # Update the video_base_name with the new time_str
+                        self.video_base_name = "_".join([self.video_root, time_str])
 
-                    # Update the video_base_file with the new filename
-                    self.video_base_file = os.path.join(self.video_path, self.video_base_name)
+                        # Update the video_base_file with the new filename
+                        self.video_base_file = os.path.join(self.video_path, self.video_base_name)
 
             else:
                 self.set_progress(frame_idx / max_frames)
@@ -838,9 +841,9 @@ class FlirRecorder:
                     self.image_queue_dict[c.DeviceSerialNumber].put(
                         {"im": im, "real_times": real_time, "timestamps": timestamp,  "base_filename": self.video_base_file}
                     )
-
-            # put the frame metadata into the json queue
-            self.json_queue.put(frame_metadata)
+            if self.video_base_file is not None:
+                # put the frame metadata into the json queue
+                self.json_queue.put(frame_metadata)
 
             if self.preview_callback:
                 self.preview_callback(real_time_images)
@@ -882,13 +885,13 @@ class FlirRecorder:
             self.json_queue.put(None)
             self.json_queue.join()
 
-        # go through the records queue and add the records to a list
-        records = []
-        for i in range(self.records_queue.qsize()):
-            records.append(self.records_queue.get())
-            self.records_queue.task_done()
+            # go through the records queue and add the records to a list
+            records = []
+            for i in range(self.records_queue.qsize()):
+                records.append(self.records_queue.get())
+                self.records_queue.task_done()
 
-        self.records_queue.join()
+            self.records_queue.join()
 
         self.set_status("Idle")
 
