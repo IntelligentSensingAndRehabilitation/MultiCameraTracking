@@ -16,6 +16,268 @@ from multi_camera.analysis.camera import (
     get_checkboard_3d,
 )
 
+class ChArucoAccumulator:
+    """
+    Helper class to detect and store the checkerboards in a
+    video.
+    """
+
+    def __init__(
+        self,
+        checkerboard_size=110.0,
+        checkerboard_dim=(4, 6),
+        downsample=1,
+        save_images=False,
+    ):
+        self.rows, self.cols = checkerboard_dim
+        self.square_size = checkerboard_size
+        self.marker_size = checkerboard_size*0.8
+        self.marker_bits = 6
+        self.ARUCO_DICT = cv2.aruco.DICT_6X6_250
+        self.DICT = cv2.aruco.getPredefinedDictionary(self.ARUCO_DICT)
+
+        self.board = cv2.aruco.CharucoBoard_create(self.cols, self.rows, self.square_size, self.marker_size, self.DICT)
+        # prepare object points, like (0,0,0), (1,0,0), (2,0,0) ....,(6,5,0)
+        self.objp = np.zeros(((self.cols-1) * (self.rows-1), 3), np.float32)
+        self.objp[:, :2] = np.mgrid[0 : self.cols-1, 0 : self.rows-1].T.reshape(-1, 2) * checkerboard_size  # cm
+
+        self.frames = []
+        self.calibrated_frames = []
+        self.corners = []
+        self.images = []
+        self.ids=[]
+        self.last_image = None
+
+        self.shape = None
+
+        self.save_images = save_images
+        self.downsample = downsample
+
+    def recreate(self, checkerboard_detections, checkerboard_shape=None, height=1536, width=2048):
+        if checkerboard_shape is not None:
+            self.objp = checkerboard_shape
+
+        self.shape = (height, width, 3)
+
+        # now iterate through checkerboard detections and keep frames and corners not NaN
+        self.frames = []
+        self.corners = []
+        self.ids=[]
+
+        for i in range(len(checkerboard_detections)):
+            if np.all(~np.isnan(checkerboard_detections[i])):
+                self.frames.append(i)
+                self.corners.append(checkerboard_detections[i, :, None].astype(np.float32))
+
+        keep = self.filter_corners()
+        print("Keeping {} frames".format(np.mean(keep)))
+        self.frames = list(np.array(self.frames)[keep])
+        self.corners = list(np.array(self.corners)[keep])
+        self.ids = list(np.array(self.ids)[keep])
+        return self
+
+    def process_frame(self, idx, img):
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+        # chessboard_flags = cv2.CALIB_CB_ADAPTIVE_THRESH + cv2.CALIB_CB_NORMALIZE_IMAGE  # + cv2.CALIB_CB_FAST_CHECK
+
+        gray_ds = cv2.resize(gray, (img.shape[1] // self.downsample, img.shape[0] // self.downsample))
+        params = cv2.aruco.DetectorParameters_create()
+        corners, ids, rejectedImgPoints = cv2.aruco.detectMarkers(gray_ds, self.DICT, parameters=params)
+        corners, ids, _, _ = cv2.aruco.refineDetectedMarkers(gray_ds, self.board, corners, ids, rejectedImgPoints)
+
+        if not self.shape:
+            self.shape = img.shape
+        if len(corners) > 0:
+            corners = corners * self.downsample
+
+            criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
+
+            # cv2.aruco.drawDetectedMarkers(gray, corners, ids)
+            
+            for corner in corners:
+                cv2.cornerSubPix(gray, corner,
+                                 winSize = (3,3),
+                                 zeroZone = (-1,-1),
+                                 criteria = criteria)
+            # corners2 , ids2, charuco_retval = corners, ids, 0
+            charuco_retval, corners2, ids2 = cv2.aruco.interpolateCornersCharuco(corners, ids, gray, self.board)
+            if corners2 is not None and  ids2 is not None :
+                if corners2.shape[0]==(self.rows-1)*(self.cols-1):
+                    self.corners.append(corners2)
+                    self.ids.append(ids2)
+                    self.frames.append(idx)
+                else:
+                    print(f'\rcorners2 {corners2.shape}', end='')
+
+            # corners2 = cv2.cornerSubPix(gray, corners, (11, 11), (-1, -1), criteria)
+            # self.corners.append(corners2)
+            if self.save_images:
+                self.images.append(img)
+        else:
+            charuco_retval = 0
+
+        if self.save_images:
+            self.last_image = img
+
+        return charuco_retval
+
+    def get_rvecs_tvecs(self, mtx, dist, corners=None):
+        if corners is None:
+            corners = self.corners
+
+        rvecs = []
+        tvecs = []
+        for imgpoint in corners:
+            retval, rvec, tvec, inliers = cv2.solvePnPRansac(self.objp, imgpoint, mtx, dist, confidence=0.9, reprojectionError=30)
+            rvecs.append(rvec)
+            tvecs.append(tvec)
+
+        return rvecs, tvecs
+
+    def filter_corners(self, thresh=10.0, return_errors=False, update_self=False):
+        N = len(self.frames)
+        objpoints = [self.objp] * N
+        imgpoints = self.corners
+
+        h, w, _ = self.shape
+        mtx = cv2.initCameraMatrix2D(objpoints, imgpoints, (w, h))
+        dist = np.zeros((5,))
+
+        corners = self.corners
+        rvecs, tvecs = self.get_rvecs_tvecs(mtx, dist, self.corners)
+
+        print(len(rvecs), len(tvecs), len(corners))
+        errors = []
+        for i in range(len(rvecs)):
+            imgpoints2, _ = cv2.projectPoints(self.objp, rvecs[i], tvecs[i], mtx, dist)
+            error = cv2.norm(corners[i], imgpoints2, cv2.NORM_L2)
+
+            errors.append(error)
+
+        if update_self:
+            keep = np.array(errors) < thresh
+            print("Keeping {} frames".format(np.mean(keep)))
+            self.frames = list(np.array(self.frames)[keep])
+            self.corners = list(np.array(self.corners)[keep])
+
+        if return_errors:
+            return np.array(errors)
+        else:
+            return np.array(errors) < thresh
+
+    def calibrate_camera(self, flags=None, max_frames=100, filter=False):
+        frames = self.frames
+        N = len(frames)
+        objpoints = [self.objp] * N
+        imgpoints = self.corners
+
+        if filter:
+            keep = self.filter_corners()
+            objpoints = list(np.array(objpoints)[keep])
+            imgpoints = list(np.array(imgpoints)[keep])
+            frames = list(np.array(frames)[keep])
+            N = len(frames)
+
+        # if N > max_frames take an approximately evently space subset of both lists
+        # to make the total max_frames. cv2 calibration starts taking excessively long
+        # much beyond this
+        if N > max_frames:
+            idx = np.linspace(0, N - 1, max_frames).astype(int)
+            # randomly sample a set of frames
+            # idx = np.random.choice(N, max_frames, replace=False)
+            objpoints = list(np.array(objpoints)[idx])
+            imgpoints = list(np.array(imgpoints)[idx])
+            self.calibrated_frames = [self.frames[i] for i in idx.tolist()]
+        else:
+            self.calibrated_frames = self.frames
+
+        h, w, _ = self.shape
+
+        if True:
+            if flags is None:
+                flags = (
+                    cv2.CALIB_FIX_K2
+                    | cv2.CALIB_FIX_K3
+                    | cv2.CALIB_FIX_K4
+                    | cv2.CALIB_FIX_K5
+                    | cv2.CALIB_ZERO_TANGENT_DIST
+                    | cv2.CALIB_FIX_PRINCIPAL_POINT
+                    | cv2.CALIB_FIX_ASPECT_RATIO
+                    | cv2.CALIB_RATIONAL_MODEL
+                    | cv2.CALIB_USE_INTRINSIC_GUESS
+                )
+            initial_matrix = np.array([[1950, 0, w / 2], [0, 1950, h / 2], [0, 0, 1]])
+            (ret, mtx, dist,
+                rvecs, tvecs,
+                stdDeviationsIntrinsics, stdDeviationsExtrinsics,
+                perViewErrors) = cv2.aruco.calibrateCameraCharucoExtended(
+                      charucoCorners=imgpoints,
+                      charucoIds=self.ids,
+                      board=self.board,
+                      imageSize=(h, w),
+                      cameraMatrix=initial_matrix,
+                      distCoeffs=np.zeros((5,1)),
+                      flags=flags,
+                      criteria=(cv2.TERM_CRITERIA_EPS & cv2.TERM_CRITERIA_COUNT, 10000, 1e-9))
+
+            # _, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(
+            #     objpoints,
+            #     imgpoints,
+            #     (w, h),
+            #     initial_matrix,
+            #     np.zeros((5,)),
+            #     flags=flags,
+            # )
+
+            if dist[0] > 0:
+                print("Warning: distortion is positive")
+                flags = flags | cv2.CALIB_FIX_K1
+                (ret, mtx, dist,
+                rvecs, tvecs,
+                stdDeviationsIntrinsics, stdDeviationsExtrinsics,
+                perViewErrors) = cv2.aruco.calibrateCameraCharucoExtended(
+                      charucoCorners=imgpoints,
+                      charucoIds=self.ids,
+                      board=self.board,
+                      imageSize=self.shape,
+                      cameraMatrix=initial_matrix,
+                      distCoeffs=np.zeros((5,1)),
+                      flags=flags,
+                      criteria=(cv2.TERM_CRITERIA_EPS & cv2.TERM_CRITERIA_COUNT, 10000, 1e-9))
+
+
+            # print(mtx.astype(int))
+            # print(dist)
+            # newcameramtx, roi = cv2.getOptimalNewCameraMatrix(mtx, dist, (w, h), 1, (w, h))
+
+        else:
+            mtx = cv2.initCameraMatrix2D(objpoints, imgpoints, (w, h))
+            dist = np.zeros((5,))
+
+            print(mtx.astype(int))
+
+        # rvecs = []
+        # tvecs = []
+        # for imgpoint in self.corners:
+        #     retval, rvec, tvec, inliers = cv2.solvePnPRansac(self.objp, imgpoint, mtx, dist, confidence=0.9, reprojectionError=30)
+        #     rvecs.append(rvec)
+        #     tvecs.append(tvec)
+
+        self.calibrated_frames = self.frames
+        return {
+            "mtx": mtx,
+            "dist": dist,
+            "rvecs": rvecs,
+            "tvecs": tvecs,
+            "frames": self.calibrated_frames,
+            "objpoints": objpoints,
+            "imgpoints": imgpoints,
+        }
+
+    def get_points(self, idx):
+        return [self.objp] * len(idx), list(np.array(self.corners)[idx])
+
 
 class CheckerboardAccumulator:
     """
@@ -238,7 +500,7 @@ class CheckerboardAccumulator:
         return [self.objp] * len(idx), list(np.array(self.corners)[idx])
 
 
-def get_checkerboards(filenames, max_frames=None, skip=1, multithread=False, filter_frames=True, **kwargs):
+def get_checkerboards(filenames, max_frames=None, skip=1, multithread=False, filter_frames=True, charuco=True, **kwargs):
     """
     Detect checkboards in a list of videos.
 
@@ -256,11 +518,18 @@ def get_checkerboards(filenames, max_frames=None, skip=1, multithread=False, fil
     num_views = len(filenames)
 
     caps = [cv2.VideoCapture(f) for f in filenames]
+    if charuco:
+        print("Running ChAruco Calibration")
+        parsers = [ChArucoAccumulator(**kwargs) for _ in range(num_views)]
+    else:
     parsers = [CheckerboardAccumulator(**kwargs) for _ in range(num_views)]
+    parsers = [CheckerboardAccumulator(**kwargs) for _ in range(num_views)]
+
+        parsers = [CheckerboardAccumulator(**kwargs) for _ in range(num_views)]
 
     frames = int(caps[0].get(cv2.CAP_PROP_FRAME_COUNT))
     frames = min(max_frames or frames, frames)
-
+    
     if multithread == False:
         for i in trange(0, frames, skip):
             for c, p in zip(caps, parsers):
@@ -292,7 +561,7 @@ def get_checkerboards(filenames, max_frames=None, skip=1, multithread=False, fil
                     break
 
                 parser.process_frame(i, img)
-
+            print(idx, 'number of frames' ,len(parser.frames))
             return parser
 
         parsers = pool.map(process_video, zip(caps, parsers, range(num_views)))
@@ -313,7 +582,7 @@ def get_checkerboard_points(parsers: List[CheckerboardAccumulator]):
 
     frames = np.sort(np.unique(np.concatenate([p.frames for p in parsers])))
     N = parsers[0].objp.shape[0]  # number of coordinates in pattern
-
+    # N = (parsers[0].rows-1)*(parsers[0].cols-1)
     checkerboard_points = np.zeros((len(parsers), len(frames), N, 2)) * np.nan
 
     # convert format from the parser to a matrix of observations with nan for missing
@@ -321,6 +590,7 @@ def get_checkerboard_points(parsers: List[CheckerboardAccumulator]):
         for j, f in enumerate(frames):
             idx = np.where(p.frames == f)[0]
             if len(idx) == 1:
+                # print(f, idx,checkerboard_points[i, j, :, :].shape, p.corners[idx[0]].shape)
                 checkerboard_points[i, j, :, :] = p.corners[idx[0]][:, 0, :]
 
     N, frames, _, _ = checkerboard_points.shape
@@ -776,6 +1046,7 @@ def calibrate_bundle(
     extra_dist=False,
     both_focal=True,
     bundle_adjust=True,
+    charuco = False,
     **kwargs,
 ):
     """
@@ -798,7 +1069,7 @@ def calibrate_bundle(
     """
 
     from aniposelib.cameras import CameraGroup
-    from aniposelib.boards import Checkerboard
+    from aniposelib.boards import Checkerboard,CharucoBoard
     from aniposelib.utils import (
         get_initial_extrinsics,
         make_M,
@@ -816,7 +1087,10 @@ def calibrate_bundle(
     rows = p.rows
 
     cgroup = CameraGroup.from_names(camera_names, fisheye=fisheye)
-    board = Checkerboard(cols, rows, square_length=square_length)
+    if charuco:
+        board = CharucoBoard(cols, rows, square_length=p.square_size, marker_length=p.marker_size,marker_bits = p.marker_bits,dict_size=250)
+    else:
+        board = Checkerboard(cols, rows, square_length=square_length)
 
     for c in cgroup.cameras:
         c.extra_dist = extra_dist
@@ -833,20 +1107,41 @@ def calibrate_bundle(
     all_rows = []
     for p in parsers:
         rows = []
-        for frame_num, corner in zip(p.frames, p.corners):
-            row = {"framenum": frame_num, "corners": corner, "ids": None}
-            row["filled"] = board.fill_points(row["corners"], row["ids"])
-            rows.append(row)
+        if charuco:
+            for frame_num, corner, ids in zip(p.frames, p.corners,p.ids):
+                row = {"framenum": frame_num, "corners": corner, "ids": ids}
+                row["filled"] = board.fill_points(row["corners"], row["ids"])
+                rows.append(row)
+        else:
+            for frame_num, corner in zip(p.frames, p.corners):
+                row = {"framenum": frame_num, "corners": corner, "ids": None}
+                row["filled"] = board.fill_points(row["corners"], row["ids"])
+                rows.append(row)
+            # if p.ids is not None:
+            #     row["ids"] = p.ids[frame_num]
+            # # iis = row["ids"].ravel()
+            # for i, cxs in enumerate(row["corners"]):
+            #         # print("EXCITING",i,cxs.shape)
+            #         if cxs.shape[0] == 1:
+            #             row["corners"][i] = np.expand_dims(cxs[0][0],axis=0)
+            # # for i, cxs in zip(iis,row["corners"]):
+            #         print(cxs.shape)
+            # print(frame_num, iis)
+            # if any(x >((p.cols-1)*(p.rows-1)) for x in iis):
+            #     print("Skipping frame",frame_num,"because of ids",iis)
+            #     row["filled"] = row["corners"]
+            #     continue
         all_rows.append(rows)
 
     for rows, camera, parser in zip(all_rows, cgroup.cameras, parsers):
         size = camera.get_size()
 
         assert size is not None, "Camera with name {} has no specified frame size".format(camera.get_name())
-
+        # print(board.get_all_calibration_points(rows),rows)
         if not extra_dist or fisheye:
             objp, imgp = board.get_all_calibration_points(rows)
             mixed = [(o, i) for (o, i) in zip(objp, imgp) if len(o) >= 7]
+            # if len(mixed) > 0:
             objp, imgp = zip(*mixed)
             matrix = cv2.initCameraMatrix2D(objp, imgp, tuple(size))
             camera.set_camera_matrix(matrix)
@@ -857,8 +1152,11 @@ def calibrate_bundle(
 
     for i, (row, cam) in enumerate(zip(all_rows, cgroup.cameras)):
         all_rows[i] = board.estimate_pose_rows(cam, row)
-
+    if charuco:
+        all_rows = [[r for r in rows if r['ids'].size >= 8] for rows in all_rows]
+    
     merged = merge_rows(all_rows)
+    # merged = merge_rows(all_rows)
     imgp, extra = extract_points(merged, board, min_cameras=2)
 
     rtvecs = extract_rtvecs(merged)
@@ -891,6 +1189,7 @@ def run_calibration(
     jax_cal=False,
     checkerboard_size=110.0,
     checkerboard_dim=(4, 6),
+    charuco = False,
     **kwargs,
 ):
     """
@@ -932,6 +1231,7 @@ def run_calibration(
     print(f"Cam names: {cam_names} camera config hash: {config_hash}")
 
     print(f"Found {len(vids)} videos. Now detecting checkerboards.")
+
     parsers = get_checkerboards(
         vids,
         max_frames=5000,
@@ -941,6 +1241,7 @@ def run_calibration(
         multithread=True,
         checkerboard_size=checkerboard_size,
         checkerboard_dim=checkerboard_dim,
+        charuco=charuco,
     )
     objp = parsers[0].objp
 
@@ -955,7 +1256,7 @@ def run_calibration(
                 checkerboard_points,
             ) = initialize_group_calibration(parsers)
         else:
-            error, cgroup = calibrate_bundle(parsers, bundle_adjust=False, return_error=True)
+            error, cgroup = calibrate_bundle(parsers, bundle_adjust=False, return_error=True, charuco=charuco)
 
             init_camera_params = {
                 "mtx": np.array(
@@ -983,7 +1284,7 @@ def run_calibration(
         )
 
     else:
-        error, cgroup = calibrate_bundle(parsers, n_samp_iter=2000, n_samp_full=2500)
+        error, cgroup = calibrate_bundle(parsers, n_samp_iter=2000, n_samp_full=2500, charuco=charuco)
 
         camera_params = {
             "mtx": np.array(
