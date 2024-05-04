@@ -522,9 +522,6 @@ def get_checkerboards(filenames, max_frames=None, skip=1, multithread=False, fil
         print("Running ChAruco Calibration")
         parsers = [ChArucoAccumulator(**kwargs) for _ in range(num_views)]
     else:
-    parsers = [CheckerboardAccumulator(**kwargs) for _ in range(num_views)]
-    parsers = [CheckerboardAccumulator(**kwargs) for _ in range(num_views)]
-
         parsers = [CheckerboardAccumulator(**kwargs) for _ in range(num_views)]
 
     frames = int(caps[0].get(cv2.CAP_PROP_FRAME_COUNT))
