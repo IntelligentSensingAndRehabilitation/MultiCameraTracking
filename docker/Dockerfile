@@ -43,6 +43,7 @@ RUN apt-get install -y net-tools
 ### Install EasyMocap
 WORKDIR /
 RUN git clone https://github.com/peabody124/EasyMocap
+RUN pip install --upgrade pip
 RUN pip install -e /EasyMocap
 
 ### Install for biomechanical visualization
@@ -60,9 +61,9 @@ RUN pip3 install numba
 WORKDIR /Mocap
 COPY requirements.txt .
 RUN pip3 install -r requirements.txt
-COPY setup.py README.md /Mocap/
+COPY pyproject.toml README.md /Mocap/
 COPY multi_camera /Mocap/multi_camera
-# COPY model_data /Mocap/model_data
+COPY model_data /Mocap/model_data
 RUN pip3 install -e /Mocap/
 
 COPY docker/start_acquisition_gui.sh /Mocap/start_acquisition_gui.sh
