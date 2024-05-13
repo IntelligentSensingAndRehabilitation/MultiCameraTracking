@@ -280,6 +280,21 @@ def synchronize_to_datajoint(db: Session):
             db.delete(imported)
             db.commit()
 
+def check_datajoint_external_mounted(mount_path, sentinel_file_name=".multi_cam_mount_check"):
+    import os
+    """Check if the external drive is mounted and has the sentinel file"""
+
+    # Sentinel file can be used for other checks like comparing the files last modified date
+    # or checking the contents of the sentinel file
+
+    if not os.path.exists(mount_path):
+        raise ValueError(f"External drive not mounted at {mount_path}. Please mount the external drive before starting the Multi Camera System.")
+
+    sentinel_file = os.path.join(mount_path, sentinel_file_name)
+    if not os.path.exists(sentinel_file):
+        raise ValueError(f"{sentinel_file} not found. Please ensure the external drive is mounted before starting the Multi Camera System.")
+
+    print("External drive mounted and sentinel file found.")
 
 def push_to_datajoint(db: Session, participant_id: str, session_date: date, video_project: str):
     from multi_camera.datajoint.sessions import import_session
@@ -301,6 +316,8 @@ def push_to_datajoint(db: Session, participant_id: str, session_date: date, vide
     ]
 
     print("Processing recordings: ", recordings)
+
+    check_datajoint_external_mounted()
 
     # TODO: confirm calibration has been performed
 
