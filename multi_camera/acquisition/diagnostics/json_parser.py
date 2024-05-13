@@ -10,22 +10,27 @@ def parse_json(data_path):
     # get list of each json file in data path
     json_list = [file for file in os.listdir(data_path) if file.endswith('.json')]
 
-    fig_name = data_path.split('\\')[-2]
+    # fig_name = data_path.split('\\')[-2]
 
     # print(data_path.split('\\'))
 
     delta_from_main_all = []
     end_delta_list = []
 
+    frame_id_delta_all = []
+    serial_data_delta_all = []
+
     # load each json file
     for json_file in json_list:
+        print(f"Processing {json_file}")
         current_json = open(data_path+json_file)
         current_data = json.load(current_json)
 
         camera_ids = current_data["serials"]
         id_map = {id:i for i,id in enumerate(camera_ids)}
         # print(id_map)
-
+        frame_id = np.array(current_data["frame_id"])
+        serial_data = np.array(current_data["chunk_serial_data"])
         ts = np.array(current_data["timestamps"])
         # print(ts)
         dt = (ts - ts[0, 0]) / 1e9
@@ -44,6 +49,15 @@ def parse_json(data_path):
         dt_df = dt_df.diff(1)
         dt_df = dt_df - np.mean(dt_df)
         max_min_df = pd.DataFrame()
+
+        print(frame_id)
+        frame_id_delta = pd.DataFrame(frame_id[:, 1:] - frame_id[:, :1], columns=camera_ids[1:])
+
+        # serial_data_delta = pd.DataFrame(serial_data[:, 1:] - serial_data[:, :1], columns=camera_ids[1:])
+        serial_data_delta = pd.DataFrame(serial_data[:, 1:] - serial_data[:, :1], columns=camera_ids[1:])
+        frame_id_delta_all.extend(frame_id_delta.values)
+        serial_data_delta_all.extend(serial_data_delta.values)
+
         #cur_max = dt_df.idxmax(axis=1)
         #cur_min = dt_df.idxmin(axis=1)
         #max_min_df['max'] = cur_max
@@ -78,6 +92,15 @@ def parse_json(data_path):
     pd.DataFrame(delta_from_main_all,columns=camera_ids[1:]).plot.line(figsize=(10, 5))
     plt.title(f'delta_from_main')
     plt.ylabel('Time Spread (ms)')
+
+    pd.DataFrame(frame_id_delta_all,columns=camera_ids[1:]).plot.line(figsize=(10, 5))
+    plt.title(f'frame_id_delta')
+    plt.ylabel('Frame ID Spread')
+
+    pd.DataFrame(serial_data_delta_all,columns=camera_ids[1:]).plot.line(figsize=(10, 5))
+    plt.title(f'serial_data_delta')
+    plt.ylabel('Serial Data Spread')
+
     # pd.DataFrame(delta_from_main_all, columns=camera_ids[1:]).abs().plot.line(figsize=(10, 5))
     # plt.title(f'delta_from_main log')
     # plt.ylabel('Log Time Spread (ms)')
