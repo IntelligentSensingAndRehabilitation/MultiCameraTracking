@@ -280,6 +280,11 @@ def synchronize_to_datajoint(db: Session):
             db.delete(imported)
             db.commit()
 
+def get_datajoint_external_path():
+    import datajoint as dj
+
+    return dj.config['stores']['localattach']['location']
+
 def check_datajoint_external_mounted(mount_path, sentinel_file_name=".multi_cam_mount_check"):
     import os
     """Check if the external drive is mounted and has the sentinel file"""
@@ -317,7 +322,8 @@ def push_to_datajoint(db: Session, participant_id: str, session_date: date, vide
 
     print("Processing recordings: ", recordings)
 
-    check_datajoint_external_mounted()
+    datajoint_external_path = get_datajoint_external_path()
+    check_datajoint_external_mounted(datajoint_external_path)
 
     # TODO: confirm calibration has been performed
 
