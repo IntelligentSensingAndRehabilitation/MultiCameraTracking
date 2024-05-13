@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=MultiCameraLauncher
+Exec=/home/cbm/Desktop/multi_camera_launcher.sh
+Icon=/home/cbm/Pictures/flir_cameras.png
+Terminal=false
+
