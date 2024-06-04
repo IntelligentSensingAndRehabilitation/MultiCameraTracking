@@ -6,8 +6,7 @@
 DIR := ${CURDIR}
 
 build:
-	docker build -t peabody124/mocap -f ./docker/Dockerfile .
+	docker compose build
 
 run:
-	docker run  -it --network=host -e REACT_APP_BASE_URL="jc-compute02.ric.org" -v /data:/data -v /camera_configs:/configs -v /etc/localtime:/etc/localtime:ro -v /datajoint_external:/datajoint_external peabody124/mocap 
-
+	docker compose run mocap
