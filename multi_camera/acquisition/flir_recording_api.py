@@ -982,6 +982,8 @@ class FlirRecorder:
 
 
 if __name__ == "__main__":
+    with open("/home/acadia/Documents/247cam/main_pid.log", "w") as f:
+        f.write(f"Main PID: {os.getpid()}")
     import argparse
     import signal
 
