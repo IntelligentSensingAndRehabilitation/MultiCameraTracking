@@ -17,6 +17,97 @@ import os
 import yaml
 import pandas as pd
 import hashlib
+from memory_profiler import memory_usage
+import logging
+import psutil
+from functools import wraps
+
+# Memory profiling decorator
+# def profile_memory(func):
+#     def wrapper(*args, **kwargs):
+#         mem_usage_before = psutil.Process(os.getpid()).memory_info().rss / 1024 ** 2
+#         result = func(*args, **kwargs)
+#         mem_usage_after = psutil.Process(os.getpid()).memory_info().rss / 1024 ** 2
+#         logging.info(f"Memory usage of {func.__name__}: Before={mem_usage_before:.2f}MB, After={mem_usage_after:.2f}MB, Increase={mem_usage_after - mem_usage_before:.2f}MB")
+#         return result
+#     return wrapper
+
+# Set up logging
+logging.basicConfig(filename="memory_usage.log", level=logging.INFO, format="%(asctime)s %(message)s")
+
+
+# Memory profiling decorator with periodic logging
+def profile_memory(interval=10):
+    def decorator(func):
+        @wraps(func)
+        def sync_wrapper(*args, **kwargs):
+            process = psutil.Process(os.getpid())
+
+            def log_memory_usage():
+                while True:
+                    mem_info = process.memory_info()
+                    logging.info(
+                        f"{func.__name__} - Periodic RSS Memory: {mem_info.rss / 1024 ** 2:.2f} MB, VMS Memory: {mem_info.vms / 1024 ** 2:.2f} MB"
+                    )
+                    time.sleep(interval)
+
+            # Start memory logging in a separate thread
+            memory_logging_thread = threading.Thread(target=log_memory_usage, daemon=True)
+            memory_logging_thread.start()
+
+            mem_usage_before = process.memory_info().rss / 1024**2
+            result = func(*args, **kwargs)
+            mem_usage_after = process.memory_info().rss / 1024**2
+            logging.info(
+                f"Memory usage of {func.__name__}: Before={mem_usage_before:.2f}MB, After={mem_usage_after:.2f}MB, Increase={mem_usage_after - mem_usage_before:.2f}MB"
+            )
+            return result
+
+        @wraps(func)
+        async def async_wrapper(*args, **kwargs):
+            process = psutil.Process(os.getpid())
+
+            def log_memory_usage():
+                while True:
+                    mem_info = process.memory_info()
+                    logging.info(
+                        f"{func.__name__} - Periodic RSS Memory: {mem_info.rss / 1024 ** 2:.2f} MB, VMS Memory: {mem_info.vms / 1024 ** 2:.2f} MB"
+                    )
+                    time.sleep(interval)
+
+            # Start memory logging in a separate thread
+            memory_logging_thread = threading.Thread(target=log_memory_usage, daemon=True)
+            memory_logging_thread.start()
+
+            mem_usage_before = process.memory_info().rss / 1024**2
+            result = await func(*args, **kwargs)
+            mem_usage_after = process.memory_info().rss / 1024**2
+            logging.info(
+                f"Memory usage of {func.__name__}: Before={mem_usage_before:.2f}MB, After={mem_usage_after:.2f}MB, Increase={mem_usage_after - mem_usage_before:.2f}MB"
+            )
+            return result
+
+        if asyncio.iscoroutinefunction(func):
+            return async_wrapper
+        else:
+            return sync_wrapper
+
+    return decorator
+
+
+# # Periodic memory logging function
+# def log_periodic_memory_usage(interval=10):
+#     process = psutil.Process(os.getpid())
+#     while True:
+#         mem_info = process.memory_info()
+#         rss = mem_info.rss / 1024 ** 2  # Convert bytes to MB
+#         vms = mem_info.vms / 1024 ** 2  # Convert bytes to MB
+#         logging.info(f"Periodic Memory Check: RSS Memory: {rss:.2f} MB, VMS Memory: {vms:.2f} MB")
+#         time.sleep(interval)
+
+# # Start periodic memory logging in a separate thread
+# memory_logging_thread = threading.Thread(target=log_periodic_memory_usage, daemon=True)
+# memory_logging_thread.start()
 
 
 # Data structures we will expose outside this library
@@ -33,6 +124,7 @@ class CameraStatus(BaseModel):
     SyncOffset: float = 0.0
 
 
+@profile_memory(interval=10)
 def select_interface(interface, cameras):
     # This method takes in an interface and list of cameras (if a config
     # file is provided) or number of cameras. It checks if the current
@@ -94,6 +186,7 @@ def select_interface(interface, cameras):
     return retval
 
 
+@profile_memory(interval=10)
 def init_camera(
     c: Camera,
     jumbo_packet: bool = True,
@@ -135,7 +228,7 @@ def init_camera(
     c.Height = c.HeightMax
 
     c.PixelFormat = "BayerRG8"  # BGR8 Mono8
-    
+
     # Now applying desired binning to maximum frame size
     c.BinningHorizontal = binning
     c.BinningVertical = binning
@@ -160,16 +253,16 @@ def init_camera(
     c.DeviceLinkThroughputLimit = throughput_limit
     c.GevSCPD = 25000
 
-    line0 = gpio_settings['line0']
-    #line1 = gpio_settings['line1'] line1 currently unused
-    line2 = gpio_settings['line2']
-    line3 = gpio_settings['line3']
+    line0 = gpio_settings["line0"]
+    # line1 = gpio_settings['line1'] line1 currently unused
+    line2 = gpio_settings["line2"]
+    line3 = gpio_settings["line3"]
 
-    if line2 == '3V3_Enable':
-        c.LineSelector = 'Line2'
-        c.LineMode = 'Output'
+    if line2 == "3V3_Enable":
+        c.LineSelector = "Line2"
+        c.LineMode = "Output"
     else:
-        if line2 != 'Off':
+        if line2 != "Off":
             print(f"{line2} is not valid for line2. Setting to 'Off'")
 
     if chunk_data:
@@ -185,7 +278,7 @@ def init_camera(
         c.ActionGroupMask = 1
 
         # Check the gpio settings
-        if line0 == 'ArduinoTrigger':
+        if line0 == "ArduinoTrigger":
             c.TriggerMode = "Off"
             c.TriggerSelector = "FrameStart"
             c.TriggerSource = "Line0"
@@ -193,14 +286,14 @@ def init_camera(
             c.TriggerOverlap = "ReadOut"
             c.TriggerMode = "On"
         else:
-            if line0 != 'Off':
+            if line0 != "Off":
                 print(f"{line0} is not valid for line0. Setting to 'Off'")
             c.TriggerMode = "Off"
             c.TriggerSelector = "AcquisitionStart"  # Need to select AcquisitionStart for real time clock
             c.TriggerSource = "Action0"
             c.TriggerMode = "On"
 
-        if line3 == 'SerialOn':
+        if line3 == "SerialOn":
             c.SerialPortSelector = "SerialPort0"
             c.SerialPortSource = "Line3"
             c.SerialPortBaudRate = "Baud115200"
@@ -208,12 +301,19 @@ def init_camera(
             c.SerialPortStopBits = "Bits1"
             c.SerialPortParity = "None"
         else:
-            if line3 != 'Off':
+            if line3 != "Off":
                 print(f"{line3} is not valid for line3. Setting to 'Off'")
 
 
+@profile_memory(interval=10)
 def write_image_queue(
-    vid_file: str, image_queue: Queue, serial, pixel_format: str, acquisition_fps: float, acquisition_type: str, video_segment_len: int
+    vid_file: str,
+    image_queue: Queue,
+    serial,
+    pixel_format: str,
+    acquisition_fps: float,
+    acquisition_type: str,
+    video_segment_len: int,
 ):
     """
     Write images from the queue to a video file
@@ -290,7 +390,7 @@ def write_image_queue(
                 buffer_fps = acquisition_fps * 1.2
                 if spread > buffer_fps:
                     print(f"Warning | {serial} Timestamp spread: {spread} {acquisition_fps} {buffer_fps}")
-                    print("Timestamps: ",timestamps[-1], timestamps[-2])
+                    print("Timestamps: ", timestamps[-1], timestamps[-2])
                     # frame_spreads.append((timestamps[-1] - timestamps[-2]) * 1e-6)
 
         image_queue.task_done()
@@ -307,18 +407,19 @@ def write_image_queue(
     # indicate the last None event is handled
     image_queue.task_done()
 
+
 def calculate_timespread_drift(timestamps):
     # Calculating metrics to determine drift
     ts = pd.DataFrame(timestamps)
 
     # interpolating any timestamps that are 0s
     ts.replace(0, np.nan, inplace=True)
-    ts.interpolate(method='linear', axis=0, limit=1, limit_direction='both', inplace=True)
-    initial_ts = ts.iloc[0,0]
+    ts.interpolate(method="linear", axis=0, limit=1, limit_direction="both", inplace=True)
+    initial_ts = ts.iloc[0, 0]
     dt = (ts - initial_ts) / 1e9
     spread = dt.max(axis=1) - dt.min(axis=1)
 
-    ts['std'] = ts.std(axis=1) / 1e6
+    ts["std"] = ts.std(axis=1) / 1e6
     if np.all(spread < 1e-6):
         print("Timestamps well aligned and clean")
     else:
@@ -327,6 +428,8 @@ def calculate_timespread_drift(timestamps):
 
     return np.max(spread) * 1000
 
+
+@profile_memory(interval=10)
 def write_metadata_queue(json_queue: Queue, records_queue: Queue, json_file: str, config_metadata: dict):
     """
     Write metadata from the queue to a json file
@@ -355,7 +458,7 @@ def write_metadata_queue(json_queue: Queue, records_queue: Queue, json_file: str
             break
 
         if current_filename != frame["base_filename"]:
-            
+
             # This means a new file should be started
             json_file = current_filename + ".json"
 
@@ -369,7 +472,6 @@ def write_metadata_queue(json_queue: Queue, records_queue: Queue, json_file: str
             json_data["frame_rates_requested"] = frame["frame_rates_requested"]
             json_data["frame_rates_binning"] = frame["frame_rates_binning"]
 
-
             with open(json_file, "w") as f:
                 json.dump(json_data, f)
                 f.write("\n")
@@ -377,7 +479,13 @@ def write_metadata_queue(json_queue: Queue, records_queue: Queue, json_file: str
             max_timespread = calculate_timespread_drift(json_data["timestamps"])
 
             # add the current filename, max timespread, first of the local_times to the records queue
-            records_queue.put({"filename": current_filename, "timestamp_spread": max_timespread, "recording_timestamp": local_times[0]})
+            records_queue.put(
+                {
+                    "filename": current_filename,
+                    "timestamp_spread": max_timespread,
+                    "recording_timestamp": local_times[0],
+                }
+            )
 
             current_filename = frame["base_filename"]
 
@@ -422,10 +530,11 @@ def write_metadata_queue(json_queue: Queue, records_queue: Queue, json_file: str
 
     max_timespread = calculate_timespread_drift(json_data["timestamps"])
 
-    records_queue.put({"filename": current_filename, "timestamp_spread": max_timespread, "recording_timestamp": local_times[0]})
+    records_queue.put(
+        {"filename": current_filename, "timestamp_spread": max_timespread, "recording_timestamp": local_times[0]}
+    )
 
     json_queue.task_done()
-
 
 
 class FlirRecorder:
@@ -446,11 +555,11 @@ class FlirRecorder:
         self.status_callback = status_callback
         self.set_status("Uninitialized")
 
-    def get_config_hash(self,yaml_content,hash_len=10):
+    def get_config_hash(self, yaml_content, hash_len=10):
 
         # Sorting keys to ensure consistent hashing
-        file_str = json.dumps(yaml_content,sort_keys=True)
-        encoded_config = file_str.encode('utf-8')
+        file_str = json.dumps(yaml_content, sort_keys=True)
+        encoded_config = file_str.encode("utf-8")
 
         # Create hash of encoded config file and return
         return hashlib.sha256(encoded_config).hexdigest()[:hash_len]
@@ -473,6 +582,7 @@ class FlirRecorder:
         if self.status_callback is not None:
             self.status_callback(self.status, progress=progress)
 
+    @profile_memory(interval=10)
     async def synchronize_cameras(self):
         if not all([c.GevIEEE1588 for c in self.cams]):
             self.set_status("Synchronizing")
@@ -485,6 +595,7 @@ class FlirRecorder:
 
         self.set_status("Synchronized")
 
+    @profile_memory(interval=10)
     async def configure_cameras(
         self, config_file: str = None, num_cams: int = None, trigger: bool = True
     ) -> Awaitable[List[CameraStatus]]:
@@ -560,7 +671,7 @@ class FlirRecorder:
             exposure_time = 15000
             frame_rate = 30
 
-        # Updating the binning needed to run at 60 Hz. 
+        # Updating the binning needed to run at 60 Hz.
         # TODO: make this check more robust in the future
         if frame_rate == 60:
             binning = 2
@@ -575,7 +686,7 @@ class FlirRecorder:
             "binning": binning,
             "exposure_time": exposure_time,
             "gpio_settings": self.gpio_settings,
-            "chunk_data": self.camera_config["acquisition-settings"]["chunk_data"]
+            "chunk_data": self.camera_config["acquisition-settings"]["chunk_data"],
         }
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(self.cams)) as executor:
@@ -588,6 +699,7 @@ class FlirRecorder:
 
         self.set_status("Idle")
 
+    @profile_memory(interval=10)
     async def get_camera_status(self) -> List[CameraStatus]:
         status = [
             CameraStatus(
@@ -619,6 +731,7 @@ class FlirRecorder:
 
         return status
 
+    @profile_memory(interval=10)
     def start_acquisition(self, recording_path=None, preview_callback: callable = None, max_frames: int = 1000):
         self.set_status("Recording")
 
@@ -638,7 +751,7 @@ class FlirRecorder:
             config_metadata["meta_info"] = self.camera_config["meta-info"]
             config_metadata["camera_info"] = self.camera_config["camera-info"]
             camera_config_hash = self.get_config_hash(self.camera_config)
-            print("CONFIG HASH",camera_config_hash)
+            print("CONFIG HASH", camera_config_hash)
             config_metadata["camera_config_hash"] = camera_config_hash
         else:
             config_metadata["meta_info"] = "No Config"
@@ -688,7 +801,6 @@ class FlirRecorder:
                 },
             ).start()
 
-
         def start_cam(i):
             # this won't truly start them until command is send below
             self.cams[i].start()
@@ -698,14 +810,16 @@ class FlirRecorder:
 
         print("Acquisition, Resulting, Exposure, DeviceLinkThroughputLimit:")
         for c in self.cams:
-            print(f"{c.DeviceSerialNumber}: {c.AcquisitionFrameRate}, {c.AcquisitionResultingFrameRate}, {c.ExposureTime}, {c.DeviceLinkThroughputLimit} ")
+            print(
+                f"{c.DeviceSerialNumber}: {c.AcquisitionFrameRate}, {c.AcquisitionResultingFrameRate}, {c.ExposureTime}, {c.DeviceLinkThroughputLimit} "
+            )
             print(f"Frame Size: {c.Width} {c.Height}")
 
-            if self.gpio_settings['line2'] == '3V3_Enable':
-                c.LineSelector = 'Line2'
-                c.LineMode = 'Input'
+            if self.gpio_settings["line2"] == "3V3_Enable":
+                c.LineSelector = "Line2"
+                c.LineMode = "Input"
                 c.V3_3Enable = True
-            if self.gpio_settings['line3'] == 'SerialOn':
+            if self.gpio_settings["line3"] == "SerialOn":
                 print(c.SerialReceiveQueueCurrentCharacterCount)
                 print(c.SerialReceiveQueueMaxCharacterCount)
                 c.SerialReceiveQueueClear()
@@ -727,7 +841,7 @@ class FlirRecorder:
             total_frames = self.camera_config["acquisition-settings"]["video_segment_len"]
         else:
             total_frames = max_frames
-        
+
         prog = tqdm(total=total_frames)
 
         while self.camera_config["acquisition-type"] == "continuous" or frame_idx < max_frames:
@@ -747,7 +861,7 @@ class FlirRecorder:
 
                 self.set_progress(frame_idx / total_frames)
                 prog.update(1)
-                
+
                 # Reset the progress bar after each video segment
                 if frame_idx % total_frames == 0:
                     prog = tqdm(total=total_frames)
@@ -797,9 +911,9 @@ class FlirRecorder:
                 frame_id_abs = chunk_data.GetFrameID()
 
                 serial_msg = []
-                
+
                 frame_count = -1
-                if self.gpio_settings['line3'] == 'SerialOn':
+                if self.gpio_settings["line3"] == "SerialOn":
                     # We expect only 5 bytes to be sent
                     if c.ChunkSerialDataLength == 5:
                         chunk_serial_data = c.ChunkSerialData
@@ -839,7 +953,12 @@ class FlirRecorder:
                 if self.video_base_file is not None:
                     # Writing the frame information for the current camera to its queue
                     self.image_queue_dict[c.DeviceSerialNumber].put(
-                        {"im": im, "real_times": real_time, "timestamps": timestamp,  "base_filename": self.video_base_file}
+                        {
+                            "im": im,
+                            "real_times": real_time,
+                            "timestamps": timestamp,
+                            "base_filename": self.video_base_file,
+                        }
                     )
             if self.video_base_file is not None:
                 # put the frame metadata into the json queue
@@ -866,10 +985,10 @@ class FlirRecorder:
 
             camera_ids.append(c.DeviceSerialNumber)
 
-            if self.gpio_settings['line2'] == '3V3_Enable':
-                c.LineSelector = 'Line2'
+            if self.gpio_settings["line2"] == "3V3_Enable":
+                c.LineSelector = "Line2"
                 c.V3_3Enable = False
-                c.LineMode = 'Output'
+                c.LineMode = "Output"
             # Stopping each camera
             c.stop()
 
@@ -897,9 +1016,11 @@ class FlirRecorder:
 
         return records
 
+    @profile_memory(interval=10)
     def stop_acquisition(self):
         self.stop_recording.set()
 
+    @profile_memory(interval=10)
     async def reset_cameras(self):
         """Reset all the cameras and reopen the system"""
 
@@ -946,6 +1067,7 @@ class FlirRecorder:
         if config_file is not None and config_file != "":
             await self.configure_cameras(config_file)
 
+    @profile_memory(interval=10)
     def close(self):
         """Close all the cameras and release the system"""
 
@@ -976,6 +1098,7 @@ class FlirRecorder:
 
         print("PySpin system released")
 
+    @profile_memory(interval=10)
     def reset(self):
         self.close()
         self._get_pyspin_system()
