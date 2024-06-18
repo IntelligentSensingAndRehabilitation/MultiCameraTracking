@@ -731,7 +731,7 @@ class FlirRecorder:
 
         return status
 
-    @profile(stream=open("start_acquisition.log", "w+"))
+    # @profile(stream=open("start_acquisition.log", "w+"))
     def start_acquisition(self, recording_path=None, preview_callback: callable = None, max_frames: int = 1000):
         self.set_status("Recording")
 
@@ -843,6 +843,20 @@ class FlirRecorder:
             total_frames = max_frames
 
         prog = tqdm(total=total_frames)
+
+        # Memory profiling setup
+        def log_memory_usage(interval=5):
+            with open("start_acquisition_memory.log", "w+") as f:
+                while True:
+                    process = psutil.Process(os.getpid())
+                    mem_info = process.memory_info()
+                    mem_usage_mb = mem_info.rss / (1024 ** 2)
+                    f.write(f"{datetime.now()}: {mem_usage_mb:.2f} MB\n")
+                    f.flush()
+                    time.sleep(interval)
+
+        memory_thread = threading.Thread(target=log_memory_usage, daemon=True)
+        memory_thread.start()
 
         while self.camera_config["acquisition-type"] == "continuous" or frame_idx < max_frames:
 
@@ -1021,7 +1035,6 @@ class FlirRecorder:
         self.stop_recording.set()
 
     @profile(stream=open("reset_cameras.log", "w+"))
-    @asyncio.coroutine
     async def reset_cameras(self):
         """Reset all the cameras and reopen the system"""
 
