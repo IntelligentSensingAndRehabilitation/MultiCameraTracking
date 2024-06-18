@@ -14,3 +14,5 @@ jax
 jaxlib
 jaxopt
 jaxlie
+memory_profiler
+psutil

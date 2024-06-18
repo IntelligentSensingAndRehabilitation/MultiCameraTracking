@@ -17,7 +17,7 @@ import os
 import yaml
 import pandas as pd
 import hashlib
-from memory_profiler import memory_usage
+from memory_profiler import profile
 import logging
 import psutil
 from functools import wraps
@@ -33,66 +33,66 @@ from functools import wraps
 #     return wrapper
 
 # Set up logging
-logging.basicConfig(filename="memory_usage.log", level=logging.INFO, format="%(asctime)s %(message)s")
+# logging.basicConfig(filename="memory_usage.log", level=logging.INFO, format="%(asctime)s %(message)s")
 
 
-# Memory profiling decorator with periodic logging
-def profile_memory(interval=10):
-    def decorator(func):
-        @wraps(func)
-        def sync_wrapper(*args, **kwargs):
-            process = psutil.Process(os.getpid())
+# # Memory profiling decorator with periodic logging
+# def profile_memory(interval=10):
+#     def decorator(func):
+#         @wraps(func)
+#         def sync_wrapper(*args, **kwargs):
+#             process = psutil.Process(os.getpid())
 
-            def log_memory_usage():
-                while True:
-                    mem_info = process.memory_info()
-                    logging.info(
-                        f"{func.__name__} - Periodic RSS Memory: {mem_info.rss / 1024 ** 2:.2f} MB, VMS Memory: {mem_info.vms / 1024 ** 2:.2f} MB"
-                    )
-                    time.sleep(interval)
+#             def log_memory_usage():
+#                 while True:
+#                     mem_info = process.memory_info()
+#                     logging.info(
+#                         f"{func.__name__} - Periodic RSS Memory: {mem_info.rss / 1024 ** 2:.2f} MB, VMS Memory: {mem_info.vms / 1024 ** 2:.2f} MB"
+#                     )
+#                     time.sleep(interval)
 
-            # Start memory logging in a separate thread
-            memory_logging_thread = threading.Thread(target=log_memory_usage, daemon=True)
-            memory_logging_thread.start()
+#             # Start memory logging in a separate thread
+#             memory_logging_thread = threading.Thread(target=log_memory_usage, daemon=True)
+#             memory_logging_thread.start()
 
-            mem_usage_before = process.memory_info().rss / 1024**2
-            result = func(*args, **kwargs)
-            mem_usage_after = process.memory_info().rss / 1024**2
-            logging.info(
-                f"Memory usage of {func.__name__}: Before={mem_usage_before:.2f}MB, After={mem_usage_after:.2f}MB, Increase={mem_usage_after - mem_usage_before:.2f}MB"
-            )
-            return result
+#             mem_usage_before = process.memory_info().rss / 1024**2
+#             result = func(*args, **kwargs)
+#             mem_usage_after = process.memory_info().rss / 1024**2
+#             logging.info(
+#                 f"Memory usage of {func.__name__}: Before={mem_usage_before:.2f}MB, After={mem_usage_after:.2f}MB, Increase={mem_usage_after - mem_usage_before:.2f}MB"
+#             )
+#             return result
 
-        @wraps(func)
-        async def async_wrapper(*args, **kwargs):
-            process = psutil.Process(os.getpid())
+#         @wraps(func)
+#         async def async_wrapper(*args, **kwargs):
+#             process = psutil.Process(os.getpid())
 
-            def log_memory_usage():
-                while True:
-                    mem_info = process.memory_info()
-                    logging.info(
-                        f"{func.__name__} - Periodic RSS Memory: {mem_info.rss / 1024 ** 2:.2f} MB, VMS Memory: {mem_info.vms / 1024 ** 2:.2f} MB"
-                    )
-                    time.sleep(interval)
+#             def log_memory_usage():
+#                 while True:
+#                     mem_info = process.memory_info()
+#                     logging.info(
+#                         f"{func.__name__} - Periodic RSS Memory: {mem_info.rss / 1024 ** 2:.2f} MB, VMS Memory: {mem_info.vms / 1024 ** 2:.2f} MB"
+#                     )
+#                     time.sleep(interval)
 
-            # Start memory logging in a separate thread
-            memory_logging_thread = threading.Thread(target=log_memory_usage, daemon=True)
-            memory_logging_thread.start()
+#             # Start memory logging in a separate thread
+#             memory_logging_thread = threading.Thread(target=log_memory_usage, daemon=True)
+#             memory_logging_thread.start()
 
-            mem_usage_before = process.memory_info().rss / 1024**2
-            result = await func(*args, **kwargs)
-            mem_usage_after = process.memory_info().rss / 1024**2
-            logging.info(
-                f"Memory usage of {func.__name__}: Before={mem_usage_before:.2f}MB, After={mem_usage_after:.2f}MB, Increase={mem_usage_after - mem_usage_before:.2f}MB"
-            )
-            return result
+#             mem_usage_before = process.memory_info().rss / 1024**2
+#             result = await func(*args, **kwargs)
+#             mem_usage_after = process.memory_info().rss / 1024**2
+#             logging.info(
+#                 f"Memory usage of {func.__name__}: Before={mem_usage_before:.2f}MB, After={mem_usage_after:.2f}MB, Increase={mem_usage_after - mem_usage_before:.2f}MB"
+#             )
+#             return result
 
-        if asyncio.iscoroutinefunction(func):
-            return async_wrapper
-        else:
-            return sync_wrapper
+#         if asyncio.iscoroutinefunction(func):
+#             return async_wrapper
+#         else:
+#             return sync_wrapper
 
-    return decorator
+#     return decorator
 
 
 # # Periodic memory logging function
@@ -124,7 +124,7 @@ class CameraStatus(BaseModel):
     SyncOffset: float = 0.0
 
 
-@profile_memory(interval=10)
+@profile(stream=open("select_interface_memory.log", "w+"))
 def select_interface(interface, cameras):
     # This method takes in an interface and list of cameras (if a config
     # file is provided) or number of cameras. It checks if the current
@@ -186,7 +186,7 @@ def select_interface(interface, cameras):
     return retval
 
 
-@profile_memory(interval=10)
+@profile(stream=open("init_camera.log", "w+"))
 def init_camera(
     c: Camera,
     jumbo_packet: bool = True,
@@ -305,7 +305,7 @@ def init_camera(
                 print(f"{line3} is not valid for line3. Setting to 'Off'")
 
 
-@profile_memory(interval=10)
+@profile(stream=open("write_image_queue.log", "w+"))
 def write_image_queue(
     vid_file: str,
     image_queue: Queue,
@@ -429,7 +429,7 @@ def calculate_timespread_drift(timestamps):
     return np.max(spread) * 1000
 
 
-@profile_memory(interval=10)
+@profile(stream=open("write_metadata_queue.log", "w+"))
 def write_metadata_queue(json_queue: Queue, records_queue: Queue, json_file: str, config_metadata: dict):
     """
     Write metadata from the queue to a json file
@@ -582,7 +582,7 @@ class FlirRecorder:
         if self.status_callback is not None:
             self.status_callback(self.status, progress=progress)
 
-    @profile_memory(interval=10)
+    @profile(stream=open("synchronize_cams.log", "w+"))
     async def synchronize_cameras(self):
         if not all([c.GevIEEE1588 for c in self.cams]):
             self.set_status("Synchronizing")
@@ -595,7 +595,7 @@ class FlirRecorder:
 
         self.set_status("Synchronized")
 
-    @profile_memory(interval=10)
+    @profile(stream=open("configure_cams.log", "w+"))
     async def configure_cameras(
         self, config_file: str = None, num_cams: int = None, trigger: bool = True
     ) -> Awaitable[List[CameraStatus]]:
@@ -699,7 +699,7 @@ class FlirRecorder:
 
         self.set_status("Idle")
 
-    @profile_memory(interval=10)
+    @profile(stream=open("get_camera_status.log", "w+"))
     async def get_camera_status(self) -> List[CameraStatus]:
         status = [
             CameraStatus(
@@ -731,7 +731,7 @@ class FlirRecorder:
 
         return status
 
-    @profile_memory(interval=10)
+    @profile(stream=open("start_acquisition.log", "w+"))
     def start_acquisition(self, recording_path=None, preview_callback: callable = None, max_frames: int = 1000):
         self.set_status("Recording")
 
@@ -1016,11 +1016,12 @@ class FlirRecorder:
 
         return records
 
-    @profile_memory(interval=10)
+    @profile(stream=open("stop_acquisition.log", "w+"))
     def stop_acquisition(self):
         self.stop_recording.set()
 
-    @profile_memory(interval=10)
+    @profile(stream=open("reset_cameras.log", "w+"))
+    @asyncio.coroutine
     async def reset_cameras(self):
         """Reset all the cameras and reopen the system"""
 
@@ -1067,7 +1068,7 @@ class FlirRecorder:
         if config_file is not None and config_file != "":
             await self.configure_cameras(config_file)
 
-    @profile_memory(interval=10)
+    @profile(stream=open("close.log", "w+"))
     def close(self):
         """Close all the cameras and release the system"""
 
@@ -1098,7 +1099,7 @@ class FlirRecorder:
 
         print("PySpin system released")
 
-    @profile_memory(interval=10)
+    @profile(stream=open("reset.log", "w+"))
     def reset(self):
         self.close()
         self._get_pyspin_system()

@@ -18,6 +18,11 @@ import datetime
 import cv2
 import os
 import asyncio
+from memory_profiler import profile
+from time import time
+import gc
+import psutil
+import tracemalloc
 
 from multi_camera.acquisition.flir_recording_api import FlirRecorder, CameraStatus
 from multi_camera.backend.recording_db import (
@@ -126,7 +131,17 @@ print([""] + [f for f in config_files if f.endswith(".yaml")])
 
 loop = asyncio.get_event_loop()
 
+# Function to log queue size and memory usage
+def log_to_file(file_path, message):
+    with open(file_path, "a") as f:
+        f.write(message + "\n")
 
+# Function to get current memory usage
+def get_memory_usage():
+    process = psutil.Process()
+    return process.memory_info().rss
+
+@profile(stream=open("receive_status.log", "w+"))
 def receive_status(status, progress=None):
     """
     Receive status updates from the acquisition system
@@ -146,6 +161,22 @@ def receive_status(status, progress=None):
     loop.create_task(manager.broadcast(update))
 
 
+async def log_memory_usage_periodically(file_path, interval=10):
+    while True:
+        try:
+            memory_usage = get_memory_usage()
+            log_to_file(file_path, f"Time: {time()}, Memory usage: {memory_usage / 1024 ** 2:.2f} Mb")
+            # snapshot = tracemalloc.take_snapshot()
+            # top_stats = snapshot.statistics('lineno')
+            # log_to_file(file_path, "Top 10 memory usage by line:")
+            # for stat in top_stats[:10]:
+                # log_to_file(file_path, f"{stat}")
+
+            await asyncio.sleep(interval)
+        except Exception as e:
+            log_to_file(file_path, f"Exception in log_memory_usage_periodically: {e}")
+            break
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     state: GlobalState = get_global_state()
@@ -154,7 +185,9 @@ async def lifespan(app: FastAPI):
     acquisition_logger.info("Starting acquisition system")
     state.acquisition = FlirRecorder(receive_status)
 
-    state = get_global_state()
+    # Log initial memory usage
+    initial_memory_usage = get_memory_usage()
+    log_to_file("memory_log.txt", f"Initial memory usage: {initial_memory_usage / 1024 ** 2} Mb")
 
     db = get_db()
 
@@ -164,14 +197,27 @@ async def lifespan(app: FastAPI):
         synchronize_to_datajoint(db)
     except Exception as e:  
         acquisition_logger.error(f"Could not synchronize to datajoint: {e}")
-        
+
+    # Start the background task for logging memory usage
+    memory_log_task = asyncio.create_task(log_memory_usage_periodically("memory_log.txt", interval=10))
 
     yield
 
     # Perform shutdown tasks
-    state.acquisition.close()
+    # state.acquisition.close()
     acquisition_logger.info("Acquisition system closed")
 
+    # Cancel the memory logging task
+    memory_log_task.cancel()
+    try:
+        await memory_log_task
+    except asyncio.CancelledError:
+        pass
+
+    # Log final memory usage
+    final_memory_usage = get_memory_usage()
+    log_to_file("memory_log.txt", f"Final memory usage: {final_memory_usage / 1024 ** 2} Mb")
+    # tracemalloc.stop()  # Stop tracing memory allocations
 
 app = FastAPI(lifespan=lifespan)
 api_router = APIRouter(prefix="/api/v1")
@@ -798,7 +844,7 @@ if __name__ == "__main__":
         "multi_camera.backend.fastapi:app",
         host="0.0.0.0",
         port=8000,
-        reload=True,
+        reload=False,
         timeout_keep_alive=30,
-        # log_level="debug",
+        log_level="debug",
     )
