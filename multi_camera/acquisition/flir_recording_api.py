@@ -242,7 +242,7 @@ def write_image_queue(
         if frame is None:
             break
 
-        timestamps.append(frame["timestamps"])
+        # timestamps.append(frame["timestamps"])
         real_times.append(frame["real_times"])
 
         im = frame["im"]
@@ -269,6 +269,7 @@ def write_image_queue(
             # video_segment_num += 1
 
             out_video.release()
+            real_times = []
 
             # Get the video file for the current frame
             vid_file = frame["base_filename"] + f".{serial}.mp4"
@@ -285,13 +286,13 @@ def write_image_queue(
 
             # Check the timestamp spread between the current frame and previous frame
             # Skip if either timestamp is 0
-            if timestamps[-1] != 0 and timestamps[-2] != 0:
-                spread = (timestamps[-1] - timestamps[-2]) * 1e-6
-                buffer_fps = acquisition_fps * 1.2
-                if spread > buffer_fps:
-                    print(f"Warning | {serial} Timestamp spread: {spread} {acquisition_fps} {buffer_fps}")
-                    print("Timestamps: ",timestamps[-1], timestamps[-2])
-                    # frame_spreads.append((timestamps[-1] - timestamps[-2]) * 1e-6)
+            # if timestamps[-1] != 0 and timestamps[-2] != 0:
+            #     spread = (timestamps[-1] - timestamps[-2]) * 1e-6
+            #     buffer_fps = acquisition_fps * 1.2
+            #     if spread > buffer_fps:
+            #         print(f"Warning | {serial} Timestamp spread: {spread} {acquisition_fps} {buffer_fps}")
+            #         print("Timestamps: ",timestamps[-1], timestamps[-2])
+            #         # frame_spreads.append((timestamps[-1] - timestamps[-2]) * 1e-6)
 
         image_queue.task_done()
 

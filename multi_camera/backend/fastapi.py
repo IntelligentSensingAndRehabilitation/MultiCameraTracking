@@ -798,7 +798,7 @@ if __name__ == "__main__":
         "multi_camera.backend.fastapi:app",
         host="0.0.0.0",
         port=8000,
-        reload=True,
+        reload=False,
         timeout_keep_alive=30,
         # log_level="debug",
     )
