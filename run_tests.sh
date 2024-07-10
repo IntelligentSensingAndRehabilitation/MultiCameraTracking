@@ -2,4 +2,4 @@
 
 cd /Mocap
 
-pytest -s
+pytest -s tests/acquisition

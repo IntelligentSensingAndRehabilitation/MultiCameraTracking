@@ -89,6 +89,7 @@ RUN pip3 install /nimblephysics-0.8.73-cp38-cp38-manylinux_2_17_x86_64.manylinux
 COPY run_tests.sh /Mocap/run_tests.sh
 RUN pip3 install pytest
 
+COPY run_reset.sh /Mocap/run_reset.sh
 
 # # Run bash script to start front end and back end
 ENTRYPOINT ["/bin/bash"]

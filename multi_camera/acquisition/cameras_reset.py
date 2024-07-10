@@ -19,7 +19,7 @@ def reset(all_cams=True, config="", verbose=False):
             c.Init()
             c.DeviceReset()
             c.DeInit()
-            print(f"Reset {i}")
+            print(f"{i}: Reset {c.TLDevice.DeviceSerialNumber.GetValue()}")
             del c
 
         import concurrent.futures
