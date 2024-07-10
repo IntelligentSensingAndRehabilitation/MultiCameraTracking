@@ -14,8 +14,10 @@ def test_flir_recording(config_file):
     print(asyncio.run(acquisition.get_camera_status()))
 
     # Create temporary file to use for recording
-    # temp_file = tempfile.NamedTemporaryFile(delete=False)
+    temp_file = tempfile.NamedTemporaryFile(delete=False)
 
-    # acquisition.start_acquisition(recording_path=temp_file.name, max_frames=100)
+    print("Recording Path: ", temp_file.name)
 
-    # acquisition.close()
+    acquisition.start_acquisition(recording_path=temp_file.name, max_frames=1000)
+
+    acquisition.close()
