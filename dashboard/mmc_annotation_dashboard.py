@@ -16,6 +16,7 @@ from multi_camera.datajoint.annotation import (
     AssistiveDeviceLookup,
     VideoActivity as MMCVideoActivity,
     WalkingType as MMCWalkingType,
+    TUGType as MMCTUGType,
     AssistiveDevice as MMCAssistiveDevice,
 )
 import base64
@@ -39,7 +40,7 @@ st.set_page_config(layout="wide", page_title="MMC Annotation Dashboard")
 
 
 def load_data():
-    res = Recording & (MultiCameraRecording & 'video_project NOT LIKE "CUET"' & 'video_project NOT LIKE "h36m"') - MMCVideoActivity
+    res = (Recording & (MultiCameraRecording & 'video_project NOT LIKE "h36m"') & 'participant_id NOT LIKE 111') - MMCVideoActivity
     st.session_state['recordings_to_annotate'] = len(res)
     st.session_state['participant_id_options'] = np.unique((Session & res).fetch("participant_id"))
     if 'participant_id' not in st.session_state:
@@ -56,7 +57,7 @@ tab1, tab2 = st.tabs(['Annotate', 'View'])
 
 with tab1:
     # choose which subjects/sessions
-    res = Recording & (MultiCameraRecording & 'video_project NOT LIKE "CUET"' & 'video_project NOT LIKE "h36m"') - MMCVideoActivity #TODO: need to expand this later
+    res = Recording & (MultiCameraRecording  & 'video_project NOT LIKE "h36m"') - MMCVideoActivity #TODO: need to expand this later
     st.write("# Annotate MMC Videos")
     participant_id = st.selectbox("Participant ID", st.session_state['participant_id_options'], key='participant_id',on_change=load_data)
     st.session_state['session_date_options'] = (Session & ((Recording & {"participant_id":  participant_id}) - (MMCVideoActivity & {"participant_id":  participant_id}))).fetch('session_date')
@@ -93,6 +94,7 @@ with tab1:
             )
         }
     )
+    print(VideoActivityLookup.fetch('video_activity'))
     my_column_config.update(
         {
             "Annotation Sub-Type": st.column_config.SelectboxColumn(
@@ -111,10 +113,10 @@ with tab1:
     def validate_annotations(df):
         for index, row in df.iterrows():
             if row['Annotation Sub-Type'] is not None:
-                if row['Annotation'] != 'Overground Walking' and row['Annotation'] is not None:
+                if row['Annotation'] not in ['Overground Walking','TUG'] and row['Annotation'] is not None:
                     print(row['Annotation'] == None)
                     print('\n\n\n')
-                    st.error("Annotation Sub-Type can only be set for Overground Walking. Please correct this.")
+                    st.error("Annotation Sub-Type can only be set for Overground Walking and TUG. Please correct this.")
                     return False
         return True
 
@@ -140,23 +142,33 @@ with tab1:
         "PST_open": "PST Open",
         "PS_closed": "PST Closed",
         "PS_open": "PST Open",
+        "LTest":"L-test",
+        "ltest":"L-test",
+        "l test":"L-test",
+        "CUET":"CUET",
+        "circuit":"Mixed",
+        "circuits":"Mixed",
     }
     walking_type_mapping = {
         "fast": "Fast",
         "slow": "Slow",
         "ssgs": "ssgs",
         "_ss_": "ssgs",
+        "_cogTUG_":"Cognitive",
+        "_TUG_":"Normal",
     }
 
     def fill_annotation(row, mapping):
         for keyword, value in mapping.items():
-            if keyword.lower() in row["video_base_filename"].lower():
+            if (
+                keyword.lower() in row["video_base_filename"].lower()
+                or keyword.lower() in row["comment"].lower()
+            ):
                 return value
         return None
 
     df["Annotation"] = df.apply(fill_annotation, mapping=video_activity_mapping, axis=1)
     df["Annotation Sub-Type"] = df.apply(fill_annotation, mapping=walking_type_mapping, axis=1)
-
 
     with st.form(key="my_form"):
         st.title("Enter/Edit Annotations")
@@ -172,9 +184,14 @@ with tab1:
                     key.update({'video_activity': row["Annotation"]})
                     MMCVideoActivity.insert1(key, skip_duplicates=True)
                 if row["Annotation Sub-Type"] is not None:
-                    key = (MMCVideoActivity & {'recording_timestamps':row['recording_timestamps']}).fetch1("KEY")
-                    key.update({'walking_type': row["Annotation Sub-Type"]})
-                    MMCWalkingType.safe_insert(key, skip_duplicates=True)
+                    if row["Annotation"] == "Overground Walking":
+                        key = (MMCVideoActivity & {'recording_timestamps':row['recording_timestamps']}).fetch1("KEY")
+                        key.update({'walking_type': row["Annotation Sub-Type"]})
+                        MMCWalkingType.safe_insert(key, skip_duplicates=True)
+                    elif row["Annotation"] == "TUG":
+                        key = (MMCVideoActivity & {'recording_timestamps':row['recording_timestamps']}).fetch1("KEY")
+                        key.update({'tug_type': row["Annotation Sub-Type"]})
+                        MMCTUGType.safe_insert(key, skip_duplicates=True)
                 if row["Assistive Device"] is not None:
                     key = (MultiCameraRecording & {'recording_timestamps':row['recording_timestamps']}).fetch1("KEY")
                     key.update({'assistive_device': row["Assistive Device"]})
@@ -218,7 +235,7 @@ with tab2:
     # choose which subjects/sessions
     st.write("# View MMC Annotations")
     st.write("No editing here, just viewing")
-    res = Recording & (MultiCameraRecording & 'video_project NOT LIKE "CUET"' & 'video_project NOT LIKE "h36m"')
+    res = Recording & (MultiCameraRecording & 'video_project NOT LIKE "h36m"')
     participant_id_options= np.unique((Session & res).fetch("participant_id"))
     participant_id = st.selectbox("Participant ID", participant_id_options, key='participant_id2')
     date_options  = (Session & ((Recording & {"participant_id":  participant_id}))).fetch('session_date')
