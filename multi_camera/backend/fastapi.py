@@ -318,17 +318,20 @@ async def new_trial(data: NewTrialData, db: Session = Depends(db_dependency)):
             result = task.result()
             print(f"Task result: {result}")
 
-            add_recording(
-                db,
-                participant_name=current_session.participant_name,
-                session_date=current_session.session_date,
-                session_path=current_session.recording_path,
-                filename=recording_path,
-                recording_timestamp=now,
-                config_file=config,
-                comment=comment,
-                timestamp_spread=result["timestamp_spread"],
-            )
+            # The result now contains a list of all the recordings after acquisition was started
+            for record in result:
+
+                add_recording(
+                    db,
+                    participant_name=current_session.participant_name,
+                    session_date=current_session.session_date,
+                    session_path=current_session.recording_path,
+                    filename=record["filename"],
+                    recording_timestamp=record["recording_timestamp"],
+                    config_file=config,
+                    comment=comment,
+                    timestamp_spread=record["timestamp_spread"],
+                )
         except Exception as e:
             print(f"Task raised an exception: {e}")
 
