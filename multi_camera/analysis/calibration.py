@@ -36,7 +36,7 @@ class ChArucoAccumulator:
         self.ARUCO_DICT = cv2.aruco.DICT_6X6_250
         self.DICT = cv2.aruco.getPredefinedDictionary(self.ARUCO_DICT)
 
-        self.board = cv2.aruco.CharucoBoard_create(self.cols, self.rows, self.square_size, self.marker_size, self.DICT)
+        self.board = cv2.aruco.CharucoBoard((self.cols, self.rows), self.square_size, self.marker_size, self.DICT)
         # prepare object points, like (0,0,0), (1,0,0), (2,0,0) ....,(6,5,0)
         self.objp = np.zeros(((self.cols-1) * (self.rows-1), 3), np.float32)
         self.objp[:, :2] = np.mgrid[0 : self.cols-1, 0 : self.rows-1].T.reshape(-1, 2) * checkerboard_size  # cm
@@ -82,7 +82,7 @@ class ChArucoAccumulator:
         # chessboard_flags = cv2.CALIB_CB_ADAPTIVE_THRESH + cv2.CALIB_CB_NORMALIZE_IMAGE  # + cv2.CALIB_CB_FAST_CHECK
 
         gray_ds = cv2.resize(gray, (img.shape[1] // self.downsample, img.shape[0] // self.downsample))
-        params = cv2.aruco.DetectorParameters_create()
+        params = cv2.aruco.DetectorParameters()
         corners, ids, rejectedImgPoints = cv2.aruco.detectMarkers(gray_ds, self.DICT, parameters=params)
         corners, ids, _, _ = cv2.aruco.refineDetectedMarkers(gray_ds, self.board, corners, ids, rejectedImgPoints)
 
