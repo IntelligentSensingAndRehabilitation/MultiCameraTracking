@@ -13,11 +13,16 @@ def test_flir_recording(config_file):
     print("Camera Status:")
     print(asyncio.run(acquisition.get_camera_status()))
 
-    # Create temporary file to use for recording
-    temp_file = tempfile.NamedTemporaryFile(delete=False)
+    # Use the mounted volume for output
+    output_dir = '/Mocap/tests/testdata'
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Generate a unique filename for this test run
+    video_filename = "test_recording"
+    recording_path = os.path.join(output_dir, video_filename)
+    
+    print("Recording Path: ", recording_path)
 
-    print("Recording Path: ", temp_file.name)
-
-    acquisition.start_acquisition(recording_path=temp_file.name, max_frames=1000)
+    acquisition.start_acquisition(recording_path=recording_path, max_frames=1000)
 
     acquisition.close()
