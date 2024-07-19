@@ -24,8 +24,8 @@ class ChArucoAccumulator:
 
     def __init__(
         self,
-        checkerboard_size=110.0,
-        checkerboard_dim=(4, 6),
+        checkerboard_size=109.0,
+        checkerboard_dim=(5, 7),
         downsample=1,
         save_images=False,
     ):
@@ -500,7 +500,7 @@ class CheckerboardAccumulator:
         return [self.objp] * len(idx), list(np.array(self.corners)[idx])
 
 
-def get_checkerboards(filenames, max_frames=None, skip=1, multithread=False, filter_frames=True, charuco=True, **kwargs):
+def get_checkerboards(filenames, cam_names, max_frames=None, skip=1, multithread=False, filter_frames=True, charuco=True,**kwargs):
     """
     Detect checkboards in a list of videos.
 
@@ -516,8 +516,8 @@ def get_checkerboards(filenames, max_frames=None, skip=1, multithread=False, fil
     """
 
     num_views = len(filenames)
-
     caps = [cv2.VideoCapture(f) for f in filenames]
+
     if charuco:
         print("Running ChAruco Calibration")
         parsers = [ChArucoAccumulator(**kwargs) for _ in range(num_views)]
@@ -544,7 +544,7 @@ def get_checkerboards(filenames, max_frames=None, skip=1, multithread=False, fil
         pool = ThreadPool(num_views)
 
         def process_video(params):
-            cap, parser, idx = params
+            cap, parser, cam_name, idx = params
             if idx == 0:
                 progress_fn = trange
             else:
@@ -558,10 +558,10 @@ def get_checkerboards(filenames, max_frames=None, skip=1, multithread=False, fil
                     break
 
                 parser.process_frame(i, img)
-            print(idx, 'number of frames' ,len(parser.frames))
+            print(f"{cam_name} detected {len(parser.frames)} frames")
             return parser
 
-        parsers = pool.map(process_video, zip(caps, parsers, range(num_views)))
+        parsers = pool.map(process_video, zip(caps, parsers, cam_names, range(num_views)))
 
     for c in caps:
         c.release()
@@ -1231,6 +1231,7 @@ def run_calibration(
 
     parsers = get_checkerboards(
         vids,
+        cam_names,
         max_frames=5000,
         skip=frame_skip,
         save_images=False,

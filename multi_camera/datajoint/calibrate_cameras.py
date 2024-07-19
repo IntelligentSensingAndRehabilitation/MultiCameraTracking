@@ -26,7 +26,7 @@ class Calibration(dj.Manual):
     """
 
 
-def run_calibration(vid_base, vid_path=None, checkerboard_size=110.0, checkerboard_dim=(4, 6),charuco = False):
+def run_calibration(vid_base, vid_path=None, checkerboard_size=109.0, checkerboard_dim=(5, 7),charuco = True):
     from ..analysis.calibration import run_calibration
 
     if vid_path is None:
