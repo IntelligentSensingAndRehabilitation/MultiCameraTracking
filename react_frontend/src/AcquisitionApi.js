@@ -412,10 +412,10 @@ export const AquisitionApi = (props) => {
         fetchRecordings();
     };
 
-    const runCalibration = async (participant, filename) => {
+    const runCalibration = async (participant, filename, isCharuco) => {
         console.log(`Calibration running for ${participant} ${filename}`);
         const matchedRecording = await getMatchingPriorRecordings(participant, filename);
-        await axios.post(`${API_BASE_URL}/calibrate`, matchedRecording);
+        await axios.post(`${API_BASE_URL}/calibrate`, matchedRecording, isCharuco);
     }
 
     const processSession = async (participant, session, video_project) => {

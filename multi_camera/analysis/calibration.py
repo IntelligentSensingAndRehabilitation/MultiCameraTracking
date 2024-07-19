@@ -24,8 +24,8 @@ class ChArucoAccumulator:
 
     def __init__(
         self,
-        checkerboard_size=110.0,
-        checkerboard_dim=(4, 6),
+        checkerboard_size=109.0,
+        checkerboard_dim=(5, 7),
         downsample=1,
         save_images=False,
     ):
