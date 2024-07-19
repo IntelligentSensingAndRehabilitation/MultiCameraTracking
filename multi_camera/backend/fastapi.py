@@ -414,7 +414,9 @@ async def update_recording(recording: PriorRecordings, db=Depends(db_dependency)
 
 
 @api_router.post("/calibrate")
-async def update_recording(recording: PriorRecordings, charuco_flag, db=Depends(db_dependency)):
+async def update_recording(recording: PriorRecordings, 
+                           charuco_flag: bool = Query(..., description="True for Charuco, False for Checkerboard"),
+                           db=Depends(db_dependency)):
     from multi_camera.datajoint.calibrate_cameras import run_calibration
 
     print("Calibrating recording: ", recording)
