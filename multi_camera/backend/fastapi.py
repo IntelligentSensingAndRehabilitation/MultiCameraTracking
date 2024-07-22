@@ -576,7 +576,7 @@ async def receive_frames(frames):
     grid_height = math.ceil(num_frames / grid_width)
 
     # Convert each frame to RGB and store in a list
-    rgb_frames = [cv2.cvtColor(frame, cv2.COLOR_BAYER_RG2RGB) for frame in frames]
+    rgb_frames = [cv2.cvtColor(frame, conversion) for frame,conversion in frames]
 
     # Calculate the size of each frame to fit in the grid
     frame_height, frame_width, _ = rgb_frames[0].shape

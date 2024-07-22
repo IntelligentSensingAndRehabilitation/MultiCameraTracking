@@ -104,6 +104,7 @@ def init_camera(
     exposure_time: int = 15000,
     gpio_settings: dict = {},
     chunk_data: list = [],
+    camera_info: dict = {},
 ):
     """
     Initialize camera with settings for recording
@@ -126,6 +127,8 @@ def init_camera(
     # Initialize each available camera
     c.init()
 
+    print(f"Initializing {c.DeviceSerialNumber}")
+
     # Resetting binning to 1 to allow for maximum frame size
     c.BinningHorizontal = 1
     c.BinningVertical = 1
@@ -134,7 +137,25 @@ def init_camera(
     c.Width = c.WidthMax
     c.Height = c.HeightMax
 
-    c.PixelFormat = "BayerRG8"  # BGR8 Mono8
+    c.ReverseX = False
+    c.ReverseY = False
+
+    if "flip_image" in camera_info[int(c.DeviceSerialNumber)]:
+        flip_image = camera_info[int(c.DeviceSerialNumber)]["flip_image"]
+
+        if flip_image:
+            print(f"Flipping image for camera {c.DeviceSerialNumber}")
+            c.ReverseX = True
+            c.ReverseY = True
+
+
+    # c.ReverseX = True
+    # c.ReverseY = True
+
+    # c.PixelFormat = "BayerBG8"  # BGR8 Mono8
+
+    # c.ReverseX = True
+    # c.ReverseY = True
     
     # Now applying desired binning to maximum frame size
     c.BinningHorizontal = binning
@@ -259,6 +280,8 @@ def write_queue(
 
         if pixel_format == "BayerRG8":
             im = cv2.cvtColor(im, cv2.COLOR_BAYER_RG2RGB)
+        elif pixel_format == "BayerBG8":
+            im = cv2.cvtColor(im, cv2.COLOR_BAYER_BG2RGB)
 
         # need to collect two frames to track the FPS
         if out_video is None and len(real_times) == 1:
@@ -331,6 +354,9 @@ class FlirRecorder:
         self.iface = None
         self.status_callback = status_callback
         self.set_status("Uninitialized")
+
+        self.pixel_format_conversion = {'BayerRG8': cv2.COLOR_BAYER_RG2RGB, 
+                                        'BayerBG8': cv2.COLOR_BAYER_BG2RGB}
 
     def get_config_hash(self,yaml_content,hash_len=10):
 
@@ -464,12 +490,19 @@ class FlirRecorder:
             "chunk_data": self.camera_config["acquisition-settings"]["chunk_data"]
         }
 
+        camera_info = self.camera_config["camera-info"]
+
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(self.cams)) as executor:
-            list(executor.map(lambda c: init_camera(c, **config_params), self.cams))
+            list(executor.map(lambda c: init_camera(c, **config_params, camera_info=camera_info), self.cams))
 
         await self.synchronize_cameras()
 
         self.cams.sort(key=lambda x: x.DeviceSerialNumber)
+
+        # # Print the pixel format and serial ID for each camera
+        # for c in self.cams:
+        #     print(f"Camera {c.DeviceSerialNumber}: {c.PixelFormat}")
+
         self.pixel_format = self.cams[0].PixelFormat
 
         self.set_status("Idle")
@@ -530,7 +563,7 @@ class FlirRecorder:
                         "image_queue": self.image_queue_dict[serial],
                         "json_queue": json_queue[c.DeviceSerialNumber],
                         "serial": serial,
-                        "pixel_format": self.pixel_format,
+                        "pixel_format": c.PixelFormat,
                         "acquisition_fps": c.AcquisitionFrameRate,
                         "acquisition_type": self.camera_config["acquisition-type"],
                         "video_segment_len": self.camera_config["acquisition-settings"]["video_segment_len"],
@@ -636,6 +669,9 @@ class FlirRecorder:
 
                 frame_timestamps[c.DeviceSerialNumber]['chunk_serial_data'] = frame_count
 
+                if (frame_idx+1) != frame_id:
+                    print(f"{c.DeviceSerialNumber}: Frame ID mismatch: {frame_idx} {frame_id}")
+
                 # get the data array
                 # Using try/except to handle frame tearing
                 try:
@@ -645,7 +681,7 @@ class FlirRecorder:
                     if self.preview_callback is not None:
                         # if preview is enabled, save the size of the first image
                         # and append the image from each camera to a list
-                        real_time_images.append(im)
+                        real_time_images.append((im,self.pixel_format_conversion[c.PixelFormat]))
 
                 except Exception as e:
                     tqdm.write("Bad frame")
