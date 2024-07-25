@@ -196,7 +196,7 @@ export const AquisitionApi = (props) => {
                 {
                     recording_dir: recordingDir,
                     recording_filename: "calibration",
-                    comment: "calibration",
+                    comment: "charuco",
                     max_frames: max_frames
                 });
 
