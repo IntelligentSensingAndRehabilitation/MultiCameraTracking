@@ -59,6 +59,9 @@ def run_calibration(vid_base, vid_path=None, checkerboard_size=109.0, checkerboa
 
     entry["recording_base"] = vid_base
 
+    if charuco:
+        entry["calibration_type"] = "charuco"
+
     Calibration.insert1(entry)
 
 
