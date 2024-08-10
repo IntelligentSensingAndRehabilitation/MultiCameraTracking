@@ -603,18 +603,45 @@ def filter_keypoints(keypoints_2d, min_visible=3):
     return keypoints_2d[:, visible >= min_visible]
 
 
-def extract_origin(camera_params, checkerboard_points):
-    cal3d = triangulate_point(camera_params, checkerboard_points[:, 0])
+def extract_origin(camera_params: dict, checkerboard_points, width: int = 5, checks: bool = True):
+    """
+    Extract the location and orientation of the charuco/checkerboard
+
+    Our system uses a convention where the x and y axes define the plane of the
+    floor and the z axis is vertical. This code defines the two dimensions of the
+    checkerboard as x and z, and the y axis is the cross product of these two. This
+    means it is assumes the checkerboard is vertical oriented.
+
+    Args:
+        camera_params (dict): camera parameters
+        checkerboard_points (np.ndarray): 2D checkerboard points
+        width (int, optional): width of the checkerboard
+        checks (bool, optional): whether to check the results
+
+    Returns:
+        tuple: (x0, board_rotation)
+    """
+    cal3d = triangulate_point(camera_params, checkerboard_points)
+
+    N = checkerboard_points.shape[2]
+    M = N // width
 
     x0 = cal3d[0]
-    x = cal3d[5] - x0
-    z = cal3d[18] - x0
+    x = cal3d[width-1] - x0
+    z = cal3d[(M - 1) * width] - x0
 
     x = x / np.linalg.norm(x)
     z = -z / np.linalg.norm(z)
     y = -np.cross(x, z)
 
     board_rotation = np.stack([x, y, z])
+
+    if checks:
+        # confirm x and z are orthogonal, and that this is a valid rotation matrix
+        # the typical reason this fails is if the width parameter is wrong
+        assert np.abs(np.dot(x, z)) < 1e-2
+        assert np.linalg.det(board_rotation) > 0.99
+
     return x0, board_rotation
 
 
@@ -1305,10 +1332,26 @@ def run_calibration(
         if np.isnan(error):
             error = 10000
 
+    print("Frames: ", [p.frames[:5] for p in parsers])
+
     print("Zeroing coordinates")
     checkerboard_points = get_checkerboard_points(parsers)
-    x0, board_rotation = extract_origin(camera_params, checkerboard_points[:, 5:])
-    camera_params_zeroed = shift_calibration(camera_params, x0, board_rotation, zoffset=1245)
+    for i in range(checkerboard_points.shape[1]):
+        try:
+            x0, board_rotation = extract_origin(camera_params, checkerboard_points[:, i], width = 6 if charuco else 5)
+        except:
+            continue
+        print(f'Accepted frame {i} as origin')
+        break
+    
+    if charuco:
+        # if the board is originally laying on the ground, according to our new procedure, then
+        # we need to rotate the axis definitions
+        board_rotation = board_rotation[[2, 0, 1]]
+        # and then we need to flip the z axis to point down, and will flip a second axis to keep the handness
+        # the same
+        board_rotation = board_rotation * np.array([[1, -1, -1]]).T
+    camera_params_zeroed = shift_calibration(camera_params, x0, board_rotation, zoffset=0 if charuco else 1245)
     params_dict = jax.tree_map(np.array, camera_params_zeroed)
 
     timestamp = vid_base.split("calibration_")[1]
