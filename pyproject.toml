@@ -9,6 +9,7 @@ authors = ["James Cotton <peabody124@gmail.com>"]
 url="https://github.com/peabody124/MultiCameraTracking"
 
 [tool.poetry.dependencies]
+python = ">=3.8,<3.12"
 datajoint = "*"
 opencv-python = "*"
 opencv-contrib-python = "*"
