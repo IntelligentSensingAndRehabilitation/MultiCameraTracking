@@ -13,6 +13,7 @@
     //     }
     // },
     "postCreateCommand": ".devcontainer/post-create.sh",
+    "forwardPorts": [3306],
     "mounts": [
         "source=/data,target=/data,type=bind"
     ],
