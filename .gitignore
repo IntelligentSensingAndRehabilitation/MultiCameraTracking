@@ -40,3 +40,5 @@ docker/flir
 notebooks/
 
 results/
+
+.env

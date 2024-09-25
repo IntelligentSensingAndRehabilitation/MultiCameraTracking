@@ -7,12 +7,13 @@ services:
       dockerfile: ./docker/Dockerfile
     image: peabody124/mocap
     tty: true
+    stdin_open: true
     environment:
-      REACT_APP_BASE_URL: "jc-compute02.ric.org"
+      REACT_APP_BASE_URL: ${REACT_APP_BASE_URL}
       PYTHONUNBUFFERED: 1
     volumes:
-      - /data:/data
-      - /camera_configs:/configs
+      - ${DATA_VOLUME}:/data
+      - ${CAMERA_CONFIGS}:/configs
       - /etc/localtime:/etc/localtime:ro
-      - /datajoint_external:/datajoint_external
+      - ${DATAJOINT_EXTERNAL}:/datajoint_external
     network_mode: host

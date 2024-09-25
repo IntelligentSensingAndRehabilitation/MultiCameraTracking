@@ -1,3 +1,25 @@
 [tool.black]
 line-length = 150
 
+[tool.poetry]
+name = "multi_camera"
+version = "0.2.0"
+description = "Library for multi-camera acquisition and analysis."
+authors = ["James Cotton <peabody124@gmail.com>"]
+url="https://github.com/peabody124/MultiCameraTracking"
+
+[tool.poetry.dependencies]
+datajoint = "*"
+opencv-python = "*"
+opencv-contrib-python = "*"
+numpy = "*"
+scipy = "*"
+tqdm = "*"
+jax = "*"
+jaxlib = "*"
+jaxopt = "*"
+jaxlie = "*"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"

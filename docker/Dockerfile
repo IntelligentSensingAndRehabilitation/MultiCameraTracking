@@ -43,6 +43,7 @@ RUN apt-get install -y net-tools
 ### Install EasyMocap
 WORKDIR /
 RUN git clone https://github.com/peabody124/EasyMocap
+RUN pip install --upgrade pip
 RUN pip install -e /EasyMocap
 
 ### Install for biomechanical visualization
@@ -60,7 +61,7 @@ RUN pip3 install numba
 WORKDIR /Mocap
 COPY requirements.txt .
 RUN pip3 install -r requirements.txt
-COPY setup.py README.md /Mocap/
+COPY pyproject.toml README.md /Mocap/
 COPY multi_camera /Mocap/multi_camera
 COPY model_data /Mocap/model_data
 RUN pip3 install -e /Mocap/
@@ -85,7 +86,11 @@ COPY docker/nimblephysics-0.8.73-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x
 RUN pip3 install /nimblephysics-0.8.73-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
 #RUN pip3 install nimblephysics
 
+COPY run_tests.sh /Mocap/run_tests.sh
+RUN pip3 install pytest
+
+COPY run_reset.sh /Mocap/run_reset.sh
 
 # # Run bash script to start front end and back end
 ENTRYPOINT ["/bin/bash"]
-CMD ["/Mocap/start_acquisition_gui.sh"]
+# CMD ["/Mocap/start_acquisition_gui.sh"]

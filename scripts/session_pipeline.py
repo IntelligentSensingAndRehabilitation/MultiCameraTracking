@@ -14,6 +14,7 @@ from multi_camera.datajoint.multi_camera_dj import (
 )
 from multi_camera.datajoint.easymocap import EasymocapTracking, EasymocapSmpl
 from multi_camera.utils.standard_pipelines import reconstruction_pipeline
+import argparse
 
 pose_pipeline.set_environmental_variables()
 
@@ -28,18 +29,13 @@ def assign_calibration():
     # but this is intentional to also handle using different camera setups in a session
 
     missing = (MultiCameraRecording & Recording - CalibratedRecording).proj()
-    calibration_offset = (Calibration * MultiCameraRecording).proj(
-        calibration_offset="ABS(recording_timestamps-cal_timestamp)"
-    )
+    calibration_offset = (Calibration * MultiCameraRecording).proj(calibration_offset="ABS(recording_timestamps-cal_timestamp)")
 
     # only accept low reprojection errors
     calibration_offset = calibration_offset & (Calibration & "reprojection_error < 0.2")
 
     # find closest calibrations to an experiment
-    viable = (
-        missing.aggr(calibration_offset, min_calibration_offset="MIN(calibration_offset)")
-        & "min_calibration_offset < 1000"
-    )
+    viable = missing.aggr(calibration_offset, min_calibration_offset="MIN(calibration_offset)") & "min_calibration_offset < 1000"
 
     # need to awkwardly use the fetch at end to join on dependent attributes. this is basically performing an
     # argmin operation
@@ -74,9 +70,9 @@ def preannotation_session_pipeline(keys: List[Dict] = None, bridging: bool = Tru
         bottom_up_pipeline(keys, bottom_up_method_name="OpenPose_HR", reserve_jobs=True)
 
     # now run easymocap
-    VideoInfo.populate(SingleCameraVideo * MultiCameraRecording, reserve_jobs=True)
-    EasymocapTracking.populate(MultiCameraRecording * CalibratedRecording, reserve_jobs=True, suppress_errors=True)
-    EasymocapSmpl.populate(MultiCameraRecording * CalibratedRecording, reserve_jobs=True, suppress_errors=True)
+    VideoInfo.populate(SingleCameraVideo * MultiCameraRecording & keys, reserve_jobs=True)
+    EasymocapTracking.populate(MultiCameraRecording * CalibratedRecording & keys, reserve_jobs=True, suppress_errors=True)
+    EasymocapSmpl.populate(MultiCameraRecording * CalibratedRecording & keys, reserve_jobs=True, suppress_errors=True)
 
 
 def postannotation_session_pipeline(
@@ -102,8 +98,7 @@ def postannotation_session_pipeline(
     }
 
     annotated = CalibratedRecording & (
-        Video * SingleCameraVideo * PersonBbox * TrackingBboxMethodLookup
-        & {"tracking_method_name": tracking_method_name}
+        Video * SingleCameraVideo * PersonBbox * TrackingBboxMethodLookup & {"tracking_method_name": tracking_method_name}
     )
 
     if keys is None:
@@ -118,7 +113,30 @@ def postannotation_session_pipeline(
 
 
 if __name__ == "__main__":
-    assign_calibration()
-    preannotation_session_pipeline()
-    postannotation_session_pipeline()
-    postannotation_session_pipeline(top_down_method_name="MMPoseHalpe")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--post_annotation", action="store_true", help="Run post-annotation pipeline")
+    parser.add_argument("--participant_id", type=int, help="Participant ID", required=False)
+    args = parser.parse_args()
+
+    if args.post_annotation:
+        postannotation_session_pipeline()
+        postannotation_session_pipeline(top_down_method_name="MMPoseHalpe")
+    else:
+        # assign_calibration()
+
+        # if args.participant_id is set create a filter
+        if args.participant_id:
+            keys = (SingleCameraVideo & Recording - EasymocapSmpl & (Recording & f"participant_id IN ({args.participant_id})")).fetch("KEY")
+            preannotation_session_pipeline(keys)
+        else:
+            keys = (SingleCameraVideo & Recording - EasymocapSmpl & (Recording & "participant_id NOT IN (72,73,504)")).fetch("KEY")
+            preannotation_session_pipeline(keys)
+        postannotation_session_pipeline()
+        postannotation_session_pipeline(top_down_method_name="MMPoseHalpe")
+
+    # assign_calibration()
+    # keys = (SingleCameraVideo & Recording - EasymocapSmpl & (Recording & 'participant_id NOT IN (72,73,504)')).fetch('KEY')
+    # keys = (SingleCameraVideo & Recording - EasymocapSmpl & (Recording & 'participant_id IN (505)')).fetch('KEY')
+    # preannotation_session_pipeline(keys)
+    # postannotation_session_pipeline()
+    # postannotation_session_pipeline(top_down_method_name="MMPoseHalpe")
