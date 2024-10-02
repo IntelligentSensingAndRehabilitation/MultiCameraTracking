@@ -817,7 +817,7 @@ class FlirRecorder:
                 frame_metadata["chunk_serial_data"].append(frame_count)
                 frame_metadata["serial_msg"].append(serial_msg)
                 frame_metadata["camera_serials"].append(c.DeviceSerialNumber)
-                frame_metadata["exposure_times"].append(c.ExposureTime)
+                frame_metadata["exposure_times"].append(15000)
                 frame_metadata["frame_rates_binning"].append(c.BinningHorizontal * 30)
                 frame_metadata["frame_rates_requested"].append(c.AcquisitionFrameRate)
 
