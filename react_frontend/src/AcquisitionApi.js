@@ -196,7 +196,7 @@ export const AquisitionApi = (props) => {
                 {
                     recording_dir: recordingDir,
                     recording_filename: "calibration",
-                    comment: "calibration",
+                    comment: "charuco",
                     max_frames: max_frames
                 });
 
@@ -412,11 +412,15 @@ export const AquisitionApi = (props) => {
         fetchRecordings();
     };
 
-    const runCalibration = async (participant, filename) => {
+    const runCalibration = async (participant, filename, isCharuco) => {
         console.log(`Calibration running for ${participant} ${filename}`);
         const matchedRecording = await getMatchingPriorRecordings(participant, filename);
-        await axios.post(`${API_BASE_URL}/calibrate`, matchedRecording);
-    }
+        await axios.post(`${API_BASE_URL}/calibrate`, matchedRecording, {
+            params: {
+                charuco_flag: isCharuco
+            }
+        });
+    };
 
     const processSession = async (participant, session, video_project) => {
         console.log(`Processing session ${session} for ${participant}`);

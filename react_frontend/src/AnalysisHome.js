@@ -14,8 +14,8 @@ const RecordingTable = ({ recordings, participant, session_date, imported, callb
         await callback.onToggleShouldProcess(participant, session_date, recordingKey, isChecked);
     };
 
-    const calibrate = async (recordingKey) => {
-        await callback.onCalibrate(participant, session_date, recordingKey);
+    const calibrate = async (recordingKey, isCharuco) => {
+        await callback.onCalibrate(participant, session_date, recordingKey, isCharuco);
     }
 
     const process = async () => {
@@ -41,10 +41,13 @@ const RecordingTable = ({ recordings, participant, session_date, imported, callb
 
 
                             {/* If recording.comment == "calibration" add button for run calibration, otherwise show comment */}
-                            {recording.comment === "calibration" ?
-                                <td><Button variant="primary" onClick={() => calibrate(recording.filename)}>Run Calibration</Button></td> :
+                            {recording.comment === "calibration" ? (
+                                <td><Button variant="primary" onClick={() => calibrate(recording.filename, false)}>Checkerboard Calibration</Button></td>
+                            ) : recording.comment === "charuco" ? (
+                                <td><Button variant="primary" onClick={() => calibrate(recording.filename, true)}>Charuco Calibration</Button></td>
+                            ) : (
                                 <td>{recording.comment}</td>
-                            }
+                            )}
 
 
                             {/* <td>{recording.config_file}</td> */}
@@ -229,9 +232,9 @@ const AnalysisHome = () => {
         // setRecordingDb(_recordingDb);
     };
 
-    const onCalibrate = async (participant, session_date, recordingKey) => {
+    const onCalibrate = async (participant, session_date, recordingKey, isCharuco) => {
         console.log("calibrate", participant, session_date, recordingKey);
-        await runCalibration(participant, recordingKey);
+        await runCalibration(participant, recordingKey, isCharuco);
     }
 
     const onProcessSession = async (participant, session_date, videoProject) => {
