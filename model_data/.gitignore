@@ -1,4 +1,5 @@
-# The model data directory is a placeholder directory
+# The model_data directory is a placeholder directory
+
 # There is data required for annotation that goes into this
 # directory that cannot be checked in due to licensing issues
 # with SMPL

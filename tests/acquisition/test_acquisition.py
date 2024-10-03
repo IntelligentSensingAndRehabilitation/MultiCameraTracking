@@ -237,4 +237,3 @@ def test_recording_quality():
 
         
     json_quality_test(os.path.join(test_data_dir, 'test_recording.json'))
-
