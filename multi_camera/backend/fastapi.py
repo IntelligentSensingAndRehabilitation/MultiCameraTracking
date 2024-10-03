@@ -417,17 +417,34 @@ async def update_recording(recording: PriorRecordings, db=Depends(db_dependency)
 
 
 @api_router.post("/calibrate")
-async def update_recording(recording: PriorRecordings, db=Depends(db_dependency)):
+async def update_recording(recording: PriorRecordings, 
+                           charuco_flag: bool = Query(..., description="True for Charuco, False for Checkerboard"),
+                           db=Depends(db_dependency)):
     from multi_camera.datajoint.calibrate_cameras import run_calibration
 
     print("Calibrating recording: ", recording)
 
     vid_path, vid_base = os.path.split(recording.filename)
 
+    if charuco_flag == True:
+        print("Using charuco board")
+        checkerboard_size=109.0
+        checkerboard_dim=(5, 7)
+        charuco = True
+    else:
+        print("Using checkerboard")
+        checkerboard_size=110.0
+        checkerboard_dim=(4, 6)
+        charuco = False
+
+
     calibration_coroutine = run_in_threadpool(
         run_calibration,
         vid_base=vid_base,
         vid_path=vid_path,
+        checkerboard_size=checkerboard_size,
+        checkerboard_dim=checkerboard_dim,
+        charuco=charuco,
     )
     task = asyncio.create_task(calibration_coroutine)
 
@@ -562,7 +579,7 @@ async def receive_frames(frames):
     grid_height = math.ceil(num_frames / grid_width)
 
     # Convert each frame to RGB and store in a list
-    rgb_frames = [cv2.cvtColor(frame, cv2.COLOR_BAYER_RG2RGB) for frame in frames]
+    rgb_frames = [cv2.cvtColor(frame, conversion) for frame,conversion in frames]
 
     # Calculate the size of each frame to fit in the grid
     frame_height, frame_width, _ = rgb_frames[0].shape

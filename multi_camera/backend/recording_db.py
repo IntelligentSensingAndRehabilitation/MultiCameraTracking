@@ -317,7 +317,7 @@ def push_to_datajoint(db: Session, participant_id: str, session_date: date, vide
     # filter out the recordings that should not be processed and retain the
     # filename and comment
     recordings = [
-        (rec.filename, rec.comment) for rec in recordings if rec.should_process and rec.comment != "calibration"
+        (rec.filename, rec.comment) for rec in recordings if rec.should_process and rec.comment != "calibration" and rec.comment != "charuco"
     ]
 
     print("Processing recordings: ", recordings)

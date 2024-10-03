@@ -35,7 +35,7 @@ class SingleCameraVideo(dj.Manual):
     -> Video
     ---
     camera_name          : varchar(50)
-    frame_timstamps      : longblob   # precise timestamps from that camera
+    frame_timestamps      : longblob   # precise timestamps from that camera
     """
 
 

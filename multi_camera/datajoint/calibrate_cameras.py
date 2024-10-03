@@ -26,7 +26,7 @@ class Calibration(dj.Manual):
     """
 
 
-def run_calibration(vid_base, vid_path=None, checkerboard_size=110.0, checkerboard_dim=(4, 6)):
+def run_calibration(vid_base, vid_path=None, checkerboard_size=109.0, checkerboard_dim=(5, 7),charuco = True):
     from ..analysis.calibration import run_calibration
 
     if vid_path is None:
@@ -41,6 +41,7 @@ def run_calibration(vid_base, vid_path=None, checkerboard_size=110.0, checkerboa
         vid_path,
         checkerboard_size=checkerboard_size,
         checkerboard_dim=checkerboard_dim,
+        charuco = charuco,
         jax_cal=False,
     )
 
@@ -57,6 +58,9 @@ def run_calibration(vid_base, vid_path=None, checkerboard_size=110.0, checkerboa
             return
 
     entry["recording_base"] = vid_base
+
+    if charuco:
+        entry["calibration_type"] = "charuco"
 
     Calibration.insert1(entry)
 
@@ -80,13 +84,19 @@ if __name__ == "__main__":
         default=(4, 6),
         type=lambda x: tuple(map(int, x.split(","))),
     )
+    parser.add_argument(
+    "--charuco",
+    help="using a charuco board instead of a checkerboard. Default is False.",
+    action="store_true",
+    )
     args = parser.parse_args()
-
     run_calibration(
         vid_base=args.vid_base,
         vid_path=args.vid_path,
         checkerboard_size=args.checkerboard_size,
         checkerboard_dim=args.checkerboard_dim,
+        charuco = args.charuco,
+
     )
 
     print("Complete")

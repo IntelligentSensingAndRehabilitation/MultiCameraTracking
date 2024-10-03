@@ -403,7 +403,7 @@ def robust_triangulate_points(camera_params, points2d, sigma=150, threshold=0.5,
     """
 
     N = points2d.shape[0]
-    permutations = jnp.array([(i, j) for i in range(1, 8) for j in range(0, i)])
+    permutations = jnp.array([(i, j) for i in range(1, N) for j in range(0, i)])
 
     # convert any numpy array to jax array
     points2d = jnp.array(points2d)
