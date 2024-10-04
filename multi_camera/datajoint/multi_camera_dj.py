@@ -456,8 +456,8 @@ class ReprojectionError(dj.Computed):
             order = [camera_name_list.index(c) for c in camera_names]
             return np.stack([keypoints[o] for o in order], axis=0)
 
-        def my_reprojection_loss(camera_params, points2d, points3d, threshold=0.5, weights=None):
-            """Compute reprojection loss."""
+        def individual_reprojection_loss(camera_params, points2d, points3d, threshold=0.5, weights=None): 
+            """Compute projection loss for a single camera."""
             conf = points2d[..., -1]
             conf = conf * (conf > threshold)  # only use points with high confidence
             loss = reprojection_error(camera_params, points2d[..., :-1], points3d)
@@ -479,7 +479,7 @@ class ReprojectionError(dj.Computed):
         keypoints = pad_keypoints(keypoints)
         points2d = reorder_keypoints(keypoints, camera_names, camera_name)
         points2d, k3d = match_joint_count(points2d, k3d)
-        reprojection_values = my_reprojection_loss(camera_calibration, points2d, k3d)
+        reprojection_values = individual_reprojection_loss(camera_calibration, points2d, k3d)
         
         # Insert the reprojection error into the database
         #  do this for every camera
