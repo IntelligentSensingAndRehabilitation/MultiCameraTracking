@@ -232,7 +232,6 @@ def init_camera(
             if line3 != 'Off':
                 print(f"{line3} is not valid for line3. Setting to 'Off'")
 
-
 def write_image_queue(
     vid_file: str, image_queue: Queue, serial, pixel_format: str, acquisition_fps: float, acquisition_type: str, video_segment_len: int
 ):
@@ -306,15 +305,15 @@ def write_image_queue(
         else:
             out_video.write(im)
 
-            # Check the timestamp spread between the current frame and previous frame
-            # Skip if either timestamp is 0
-            if timestamps[-1] != 0 and timestamps[-2] != 0:
-                spread = (timestamps[-1] - timestamps[-2]) * 1e-6
-                buffer_fps = acquisition_fps * 1.2
-                if spread > buffer_fps:
-                    print(f"Warning | {serial} Timestamp spread: {spread} {acquisition_fps} {buffer_fps}")
-                    print("Timestamps: ",timestamps[-1], timestamps[-2])
-                    # frame_spreads.append((timestamps[-1] - timestamps[-2]) * 1e-6)
+            # # Check the timestamp spread between the current frame and previous frame
+            # # Skip if either timestamp is 0
+            # if timestamps[-1] != 0 and timestamps[-2] != 0:
+            #     spread = (timestamps[-1] - timestamps[-2]) * 1e-6
+            #     buffer_fps = acquisition_fps * 1.2
+            #     if spread > buffer_fps:
+            #         print(f"Warning | {serial} Timestamp spread: {spread} {acquisition_fps} {buffer_fps}")
+            #         print("Timestamps: ",timestamps[-1], timestamps[-2])
+            #         # frame_spreads.append((timestamps[-1] - timestamps[-2]) * 1e-6)
 
         image_queue.task_done()
 
@@ -325,7 +324,7 @@ def write_image_queue(
     delta = np.mean(np.diff(ts, axis=0)) * 1e-9
     fps = 1.0 / delta
 
-    print(f"Finished writing images. Final fps: {fps}")
+    print(f"{serial}: Finished writing images. Final fps: {fps}")
 
     # indicate the last None event is handled
     image_queue.task_done()
@@ -498,6 +497,10 @@ class FlirRecorder:
     def set_progress(self, progress):
         if self.status_callback is not None:
             self.status_callback(self.status, progress=progress)
+
+    def check_queue_sizes(self, queue_dict):
+        for name, q in queue_dict.items():
+            print(name, q.qsize())
 
     async def synchronize_cameras(self):
         if not all([c.GevIEEE1588 for c in self.cams]):
@@ -729,6 +732,11 @@ class FlirRecorder:
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(self.cams)) as executor:
             l = list(executor.map(start_cam, range(len(self.cams))))
 
+        frame_diff = {}
+        prev_timestamp = {}
+        timestamp_diff = {}
+        initial_timestamp = {}
+
         print("Acquisition, Resulting, Exposure, DeviceLinkThroughputLimit:")
         for c in self.cams:
             print(f"{c.DeviceSerialNumber}: {c.AcquisitionFrameRate}, {c.AcquisitionResultingFrameRate}, {c.ExposureTime}, {c.DeviceLinkThroughputLimit} ")
@@ -743,6 +751,11 @@ class FlirRecorder:
                 print(c.SerialReceiveQueueMaxCharacterCount)
                 c.SerialReceiveQueueClear()
                 print(c.SerialReceiveQueueCurrentCharacterCount)
+
+            frame_diff[c.DeviceSerialNumber] = 0
+            prev_timestamp[c.DeviceSerialNumber] = 0
+            timestamp_diff[c.DeviceSerialNumber] = 0
+            initial_timestamp[c.DeviceSerialNumber] = 0
 
         # schedule a command to start in 250 ms in the future
         self.cams[0].TimestampLatch()
@@ -825,6 +838,9 @@ class FlirRecorder:
                 im_ref = c.get_image()
                 timestamp = im_ref.GetTimeStamp()
 
+                if frame_idx == 0:
+                    initial_timestamp[c.DeviceSerialNumber] = timestamp
+
                 chunk_data = im_ref.GetChunkData()
                 frame_id = im_ref.GetFrameID()
                 frame_id_abs = chunk_data.GetFrameID()
@@ -854,8 +870,20 @@ class FlirRecorder:
                 frame_metadata["frame_rates_binning"].append(c.BinningHorizontal * 30)
                 frame_metadata["frame_rates_requested"].append(c.AcquisitionFrameRate)
 
-                if (frame_idx+1) != frame_id:
-                    print(f"{c.DeviceSerialNumber}: Frame ID mismatch: {frame_idx} {frame_id}")
+                curr_frame_diff = (frame_idx+1) - frame_id
+                if curr_frame_diff != frame_diff[c.DeviceSerialNumber] and curr_frame_diff != 0:
+                    print(f"{c.DeviceSerialNumber}: Frame ID mismatch: {frame_idx + 1} {frame_id}")
+                    # self.check_queue_sizes(self.image_queue_dict)
+                    frame_diff[c.DeviceSerialNumber] = (frame_idx+1) - frame_id
+                    
+                    if timestamp != 0 and prev_timestamp[c.DeviceSerialNumber] != 0:
+                        cur_timestamp_diff = timestamp - prev_timestamp[c.DeviceSerialNumber]
+
+                        print(f"{c.DeviceSerialNumber}: timestamp diff {cur_timestamp_diff * 1e-6}")
+
+                    print(f"{c.DeviceSerialNumber}: frame_idx based on timestamps {(timestamp - initial_timestamp[c.DeviceSerialNumber]) * 1e-9 * 29.08}")
+                    # timestamp_diff[c.DeviceSerialNumber] = cur_timestamp_diff
+
 
                 # get the data array
                 # Using try/except to handle frame tearing
@@ -877,6 +905,9 @@ class FlirRecorder:
                     self.image_queue_dict[c.DeviceSerialNumber].put(
                         {"im": im, "real_times": real_time, "timestamps": timestamp,  "base_filename": self.video_base_file}
                     )
+
+                prev_timestamp[c.DeviceSerialNumber] = timestamp
+
             if self.video_base_file is not None:
                 # put the frame metadata into the json queue
                 self.json_queue.put(frame_metadata)
