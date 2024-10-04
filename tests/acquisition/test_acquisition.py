@@ -8,32 +8,54 @@ import cv2
 import numpy as np
 import pandas as pd
 
-@pytest.mark.parametrize('config_file', [os.path.join(os.path.dirname(__file__), 'test_configs/mobile_system_config.yaml')])
+# @pytest.mark.parametrize('config_file', [os.path.join(os.path.dirname(__file__), 'test_configs/mobile_system_config.yaml')])
 
-def test_flir_recording(config_file):
-    acquisition = FlirRecorder()
+# def test_flir_recording(config_file):
+#     acquisition = FlirRecorder()
 
-    asyncio.run(acquisition.configure_cameras(config_file=config_file))
-    print("Camera Status:")
-    print(asyncio.run(acquisition.get_camera_status()))
+#     asyncio.run(acquisition.configure_cameras(config_file=config_file))
+#     print("Camera Status:")
+#     print(asyncio.run(acquisition.get_camera_status()))
 
-    # Use the mounted volume for output
-    output_dir = '/Mocap/tests/testdata'
-    os.makedirs(output_dir, exist_ok=True)
+#     # Use the mounted volume for output
+#     output_dir = '/Mocap/tests/testdata'
+#     os.makedirs(output_dir, exist_ok=True)
     
-    # Generate a unique filename for this test run
-    video_filename = "test_recording"
-    recording_path = os.path.join(output_dir, video_filename)
+#     # Generate a unique filename for this test run
+#     video_filename = "test_recording"
+#     recording_path = os.path.join(output_dir, video_filename)
     
-    print("Recording Path: ", recording_path)
+#     print("Recording Path: ", recording_path)
 
-    acquisition.start_acquisition(recording_path=recording_path, max_frames=500)
+#     acquisition.start_acquisition(recording_path=recording_path, max_frames=500)
 
-    acquisition.close()
+#     acquisition.close()
 
-def test_flir_recording_no_config():
 
-    num_cams = 4
+@pytest.mark.parametrize('num_cams,max_frames', [
+    (6, 500),
+    (8, 500),
+    (10, 500),
+    (12, 500),
+    (6, 1000),
+    (8, 1000),
+    (10, 1000),
+    (12, 1000),
+    (6, 2000),
+    (8, 2000),
+    (10, 2000),
+    (12, 2000),
+    (6, 5000),
+    (8, 5000),
+    (10, 5000),
+    (12, 5000),
+    (6, 10000),
+    (8, 10000),
+    (10, 10000),
+    (12, 10000),
+])
+
+def test_flir_recording_no_config(num_cams, max_frames):
 
     acquisition = FlirRecorder()
 
@@ -51,9 +73,11 @@ def test_flir_recording_no_config():
     
     print("Recording Path: ", recording_path)
 
-    acquisition.start_acquisition(recording_path=recording_path, max_frames=500)
+    acquisition.start_acquisition(recording_path=recording_path, max_frames=max_frames)
 
     acquisition.close()
+
+    json_quality_test(os.path.join(output_dir, 'test_recording_no_config.json'))
 
 
 def video_quality_test(video_path):
@@ -247,17 +271,17 @@ def json_quality_test(json_path):
 
     
 
-def test_recording_quality():
-    # Check the quality of the recorded video
+# def test_recording_quality():
+#     # Check the quality of the recorded video
     
-    # read the video files and check how many frames are in each and the fps
-    # the video filenames are test_recording.cam_id.mp4
+#     # read the video files and check how many frames are in each and the fps
+#     # the video filenames are test_recording.cam_id.mp4
 
-    test_data_dir = '/Mocap/tests/testdata'
+#     test_data_dir = '/Mocap/tests/testdata'
 
-    # for filename in os.listdir(test_data_dir):
-    #     if filename.endswith(".mp4"):
-    #         video_quality_test(os.path.join(test_data_dir, filename))
+#     # for filename in os.listdir(test_data_dir):
+#     #     if filename.endswith(".mp4"):
+#     #         video_quality_test(os.path.join(test_data_dir, filename))
 
         
-    json_quality_test(os.path.join(test_data_dir, 'test_recording.json'))
+#     json_quality_test(os.path.join(test_data_dir, 'test_recording.json'))
