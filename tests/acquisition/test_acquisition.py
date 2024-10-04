@@ -31,6 +31,30 @@ def test_flir_recording(config_file):
 
     acquisition.close()
 
+def test_flir_recording_no_config():
+
+    num_cams = 4
+
+    acquisition = FlirRecorder()
+
+    asyncio.run(acquisition.configure_cameras(num_cams=num_cams))
+    print("Camera Status:")
+    print(asyncio.run(acquisition.get_camera_status()))
+
+    # Use the mounted volume for output
+    output_dir = '/Mocap/tests/testdata'
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Generate a unique filename for this test run
+    video_filename = "test_recording_no_config"
+    recording_path = os.path.join(output_dir, video_filename)
+    
+    print("Recording Path: ", recording_path)
+
+    acquisition.start_acquisition(recording_path=recording_path, max_frames=500)
+
+    acquisition.close()
+
 
 def video_quality_test(video_path):
     cap = cv2.VideoCapture(video_path)
