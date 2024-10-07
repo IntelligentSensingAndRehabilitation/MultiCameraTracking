@@ -17,6 +17,8 @@ import os
 import yaml
 import pandas as pd
 import hashlib
+import platform
+import psutil
 
 
 # Data structures we will expose outside this library
@@ -387,6 +389,7 @@ def write_metadata_queue(json_queue: Queue, records_queue: Queue, json_file: str
             json_data["camera_config_hash"] = config_metadata["camera_config_hash"]
             json_data["camera_info"] = config_metadata["camera_info"]
             json_data["meta_info"] = config_metadata["meta_info"]
+            json_data["system_info"] = config_metadata["system_info"]
             # Get the current camera settings for each camera before writing
             json_data["exposure_times"] = frame["exposure_times"]
             json_data["frame_rates_requested"] = frame["frame_rates_requested"]
@@ -434,6 +437,7 @@ def write_metadata_queue(json_queue: Queue, records_queue: Queue, json_file: str
     json_data["camera_config_hash"] = config_metadata["camera_config_hash"]
     json_data["camera_info"] = config_metadata["camera_info"]
     json_data["meta_info"] = config_metadata["meta_info"]
+    json_data["system_info"] = config_metadata["system_info"]
     # Get the current camera settings for each camera before writing
     json_data["exposure_times"] = frame["exposure_times"]
     json_data["frame_rates_requested"] = frame["frame_rates_requested"]
@@ -480,6 +484,32 @@ class FlirRecorder:
 
         # Create hash of encoded config file and return
         return hashlib.sha256(encoded_config).hexdigest()[:hash_len]
+    
+    def get_detailed_processor_info(self):
+        cpu_info = ""
+
+        try:
+            with open("/proc/cpuinfo", "r") as f:
+                for line in f:
+                    if "model name" in line:
+                        cpu_info = line.split(":")[1].strip()
+                        break
+        except:
+            cpu_info = "CPU information not available for this system"
+
+        return cpu_info
+    
+    def get_system_info(self):
+        info = {
+            "system": platform.system(),
+            "hostname": platform.node(),
+            "release": platform.release(),
+            "version": platform.version(),
+            "architecture": platform.machine(),
+            "processor": self.get_detailed_processor_info(),
+        }
+
+        return info
 
     def _get_pyspin_system(self):
         # use this to ensure both calls with simple pyspin and locally use the same references
@@ -694,6 +724,8 @@ class FlirRecorder:
             config_metadata["camera_config_hash"] = None
             acquisition_type = "max_frames"
             video_segment_len = max_frames
+
+        config_metadata["system_info"] = self.get_system_info()
 
         # Initializing an image queue for each camera
         self.image_queue_dict = {c.DeviceSerialNumber: Queue(max_frames) for c in self.cams}
