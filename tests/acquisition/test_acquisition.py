@@ -7,6 +7,7 @@ import json
 import cv2
 import numpy as np
 import pandas as pd
+import datetime
 
 # @pytest.mark.parametrize('config_file', [os.path.join(os.path.dirname(__file__), 'test_configs/mobile_system_config.yaml')])
 
@@ -73,12 +74,31 @@ def test_flir_recording_no_config(num_cams, max_frames):
     
     print("Recording Path: ", recording_path)
 
-    acquisition.start_acquisition(recording_path=recording_path, max_frames=max_frames)
-
+    records = acquisition.start_acquisition(recording_path=recording_path, max_frames=max_frames)
     acquisition.close()
 
-    json_quality_test(os.path.join(output_dir, 'test_recording_no_config.json'))
+    results = json_quality_test(os.path.join(output_dir, 'test_recording_no_config.json'))
 
+    results['num_cams'] = num_cams
+    results['max_frames'] = max_frames
+    results['timestamp_spread'] = records[0]['timestamp_spread']
+    results['recording_timestamp'] = records[0]['recording_timestamp'].strftime('%Y%m%d_%H%M%S')
+
+    # create a path for the results
+    results_file = os.path.join(output_dir, 'test_matrix_results.json')
+
+    if os.path.exists(results_file):
+        with open(results_file, 'r') as f:
+            test_results = json.load(f)
+    else:
+        test_results = {}
+
+    test_key = f"test_{num_cams}_{max_frames}"
+
+    test_results[test_key] = results
+
+    with open(results_file, 'w') as f:
+        json.dump(test_results, f, indent=4)
 
 def video_quality_test(video_path):
     cap = cv2.VideoCapture(video_path)
@@ -165,13 +185,19 @@ def check_lengths(json_data):
     assert all(len(fid) == len(json_data['serials']) for fid in json_data['frame_id']), "Num cameras mismatch in frame_id"
 
 def check_timestamp_zeros(json_data):
+
+    timestamp_results = {}
     
     # Create dataframe wtih timestamps
     df = pd.DataFrame(json_data['timestamps'], columns=json_data['serials'])
 
     print("")
     print(" ======== calculating with raw timestamps ========")
-    print(calculate_fps(df))
+    raw_fps = calculate_fps(df)
+    print(raw_fps)
+
+    timestamp_results['raw_fps'] = raw_fps
+
     calculate_overall_timespread(df)
 
     # count 0s for each camera
@@ -188,8 +214,12 @@ def check_timestamp_zeros(json_data):
 
         print("")
         print(" ======== calculating with interpolated timestamps ========")
-        print(calculate_fps(df_interpolated))
-        calculate_overall_timespread(df_interpolated)
+        interp_fps = calculate_fps(df_interpolated)
+        print(interp_fps)
+        interpolated_spread = calculate_overall_timespread(df_interpolated)
+
+        timestamp_results['interpolated_fps'] = interp_fps
+        timestamp_results['interpolated_timestamp_spread'] = interpolated_spread
 
         interpolated_ts = []
 
@@ -199,9 +229,11 @@ def check_timestamp_zeros(json_data):
         print("")
         print("No 0s in the timestamps")
 
-        zero_counts = None
+        zero_counts = 0
 
-    return zero_counts
+    timestamp_results['zero_counts'] = zero_counts
+
+    return timestamp_results
 
 def calculate_fps(timestamp_df):
     # each column has the timestamps for a given camera (the camera id is the column name)
@@ -229,13 +261,24 @@ def calculate_overall_timespread(timestamp_df):
 
     print(f"Timestamps showed a maximum spread of {np.max(spread)} ms")
 
-def check_frame_id_skips(json_data):
-    # check if the frame id skips are consistent with the frame id
-    # the frame id should be increasing by 1 for each frame
-    # if the frame id skips, then the frame id should be increasing by more than 1
+    return spread
+
+def calculate_duplicates(df):
+    duplicates_count = {}
+
+    for col in df.columns:
+        duplicates = df[col].value_counts() - 1
+        duplicates_count[col] = duplicates[duplicates > 0].to_dict()
+
+    return duplicates_count
+
+
+def check_frame_ids(json_data):
 
     # Create dataframe wtih frame ids
     df = pd.DataFrame(json_data['frame_id'], columns=json_data['serials'])
+
+    # the frame id should be increasing by 1 for each frame
 
     # calculate the frame id skips
     frame_id_diff = df.diff()
@@ -243,7 +286,10 @@ def check_frame_id_skips(json_data):
     # count the number of frame id skips
     frame_id_skips = (frame_id_diff > 1).sum().to_dict()
 
-    return frame_id_skips
+    # Check if any columns in the dataframe have duplicates
+    duplicates = calculate_duplicates(df)
+
+    return frame_id_skips, duplicates
 
 
 def json_quality_test(json_path):
@@ -255,21 +301,38 @@ def json_quality_test(json_path):
     check_lengths(data)
 
     # check for zeros in the timestamps
-    zero_counts = check_timestamp_zeros(data)
+    timestamp_metrics = check_timestamp_zeros(data)
 
-    if zero_counts is not None:
+    if timestamp_metrics['zero_counts']:
         print("")
         print("Number of 0s in timestamps per camera")
-        print(zero_counts)
+        print(timestamp_metrics['zero_counts'])
 
-    # check for frame id skips
-    frame_id_skips = check_frame_id_skips(data)
+    # check the frame ids
+    frame_id_skips, frame_id_duplicates = check_frame_ids(data)
 
     print("")
     print("Number of frame id skips per camera")
     print(frame_id_skips)
 
-    
+    print("")
+    print("Number of frame id duplicates per camera")
+    print(frame_id_duplicates)
+
+    # aggregate the results
+    results = {
+        'timestamp_metrics': timestamp_metrics,
+        'frame_id_skips': frame_id_skips,
+        'frame_id_duplicates': frame_id_duplicates,
+        'metadata': {
+            'system_info': data['system_info']
+        }
+    }
+
+    return results 
+
+
+
 
 # def test_recording_quality():
 #     # Check the quality of the recorded video
