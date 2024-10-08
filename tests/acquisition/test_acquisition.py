@@ -81,7 +81,7 @@ def test_flir_recording_no_config(num_cams, max_frames):
 
     results['num_cams'] = num_cams
     results['max_frames'] = max_frames
-    results['timestamp_spread'] = records[0]['timestamp_spread']
+    results['timestamp_spread'] = np.round(np.max(records[0]['timestamp_spread']), 3)
     results['recording_timestamp'] = records[0]['recording_timestamp'].strftime('%Y%m%d_%H%M%S')
 
     # create a path for the results
@@ -244,7 +244,7 @@ def calculate_fps(timestamp_df):
         # calculate the time difference between frames
         time_diff = np.diff(timestamps)
         # calculate the fps
-        fps[cam_id] = 1/np.mean(time_diff * 1e-9)
+        fps[cam_id] = np.round(1/np.mean(time_diff * 1e-9), 3)
 
     return fps
 
@@ -261,7 +261,7 @@ def calculate_overall_timespread(timestamp_df):
 
     print(f"Timestamps showed a maximum spread of {np.max(spread)} ms")
 
-    return spread
+    return np.round(np.max(spread), 3)
 
 def calculate_duplicates(df):
     duplicates_count = {}
@@ -328,6 +328,9 @@ def json_quality_test(json_path):
             'system_info': data['system_info']
         }
     }
+
+    if 'first_bad_frame' in data:
+        results['first_bad_frame'] = data['first_bad_frame']
 
     return results 
 

@@ -375,9 +375,14 @@ def write_metadata_queue(json_queue: Queue, records_queue: Queue, json_file: str
     json_data["chunk_serial_data"] = []
     json_data["serial_msg"] = []
 
+    bad_frame = 0
+
     for frame_num, frame in enumerate(iter(json_queue.get, None)):
         if frame is None:
             break
+
+        if 'first_bad_frame' in frame:
+            bad_frame = frame["first_bad_frame"]
 
         if current_filename != frame["base_filename"]:
             
@@ -395,6 +400,8 @@ def write_metadata_queue(json_queue: Queue, records_queue: Queue, json_file: str
             json_data["frame_rates_requested"] = frame["frame_rates_requested"]
             json_data["frame_rates_binning"] = frame["frame_rates_binning"]
 
+            if bad_frame != 0:
+                json_data["first_bad_frame"] = bad_frame
 
             with open(json_file, "w") as f:
                 json.dump(json_data, f)
@@ -442,6 +449,9 @@ def write_metadata_queue(json_queue: Queue, records_queue: Queue, json_file: str
     json_data["exposure_times"] = frame["exposure_times"]
     json_data["frame_rates_requested"] = frame["frame_rates_requested"]
     json_data["frame_rates_binning"] = frame["frame_rates_binning"]
+
+    if bad_frame != 0:
+        json_data["first_bad_frame"] = bad_frame
 
     with open(json_file, "w") as f:
         json.dump(json_data, f)
@@ -780,6 +790,7 @@ class FlirRecorder:
         prev_timestamp = {}
         timestamp_diff = {}
         initial_timestamp = {}
+        first_bad_frame = {}
 
         print("Acquisition, Resulting, Exposure, DeviceLinkThroughputLimit:")
         for c in self.cams:
@@ -800,6 +811,7 @@ class FlirRecorder:
             prev_timestamp[c.DeviceSerialNumber] = 0
             timestamp_diff[c.DeviceSerialNumber] = 0
             initial_timestamp[c.DeviceSerialNumber] = 0
+            first_bad_frame[c.DeviceSerialNumber] = -1
 
         # schedule a command to start in 250 ms in the future
         self.cams[0].TimestampLatch()
@@ -926,6 +938,11 @@ class FlirRecorder:
                         print(f"{c.DeviceSerialNumber}: timestamp diff {cur_timestamp_diff * 1e-6}")
 
                     print(f"{c.DeviceSerialNumber}: frame_idx based on timestamps {(timestamp - initial_timestamp[c.DeviceSerialNumber]) * 1e-9 * 29.08}")
+
+                    if first_bad_frame[c.DeviceSerialNumber] == -1:
+                        first_bad_frame[c.DeviceSerialNumber] = {'loop_frame_idx': frame_idx, 'cam_frame_id': frame_id}
+
+                        frame_metadata["first_bad_frame"] = first_bad_frame
                     # timestamp_diff[c.DeviceSerialNumber] = cur_timestamp_diff
 
 
