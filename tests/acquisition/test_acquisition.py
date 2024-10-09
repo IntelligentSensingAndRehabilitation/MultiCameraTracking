@@ -77,7 +77,7 @@ def test_flir_recording_no_config(num_cams, max_frames):
     records = acquisition.start_acquisition(recording_path=recording_path, max_frames=max_frames)
     acquisition.close()
 
-    results = json_quality_test(os.path.join(output_dir, 'test_recording_no_config.json'))
+    results, json_quality_errors = json_quality_test(os.path.join(output_dir, 'test_recording_no_config.json'))
 
     results['num_cams'] = num_cams
     results['max_frames'] = max_frames
@@ -99,6 +99,11 @@ def test_flir_recording_no_config(num_cams, max_frames):
 
     with open(results_file, 'w') as f:
         json.dump(test_results, f, indent=4)
+
+    newline = "\n"
+
+    assert not json_quality_errors, f"Quality Errors: {newline.join(json_quality_errors)}"
+    
 
 def video_quality_test(video_path):
     cap = cv2.VideoCapture(video_path)
@@ -178,11 +183,18 @@ def video_quality_test(video_path):
 
 
 def check_lengths(json_data):
+    errors = []
     n_frames = len(json_data['real_times'])
-    assert n_frames == len(json_data['timestamps']), "Timestamps length mismatch"
-    assert n_frames == len(json_data['frame_id']), "Frame ID length mismatch"
-    assert all(len(ts) == len(json_data['serials']) for ts in json_data['timestamps']), "Num cameras mismatch in timestamps"
-    assert all(len(fid) == len(json_data['serials']) for fid in json_data['frame_id']), "Num cameras mismatch in frame_id"
+    if n_frames != len(json_data['timestamps']):
+        errors.append("Timestamps length mismatch")
+    if n_frames != len(json_data['frame_id']):
+        errors.append("Frame ID length mismatch")
+    if not all(len(ts) == len(json_data['serials']) for ts in json_data['timestamps']):
+        errors.append("Num cameras mismatch in timestamps")
+    if not all(len(fid) == len(json_data['serials']) for fid in json_data['frame_id']):
+        errors.append("Num cameras mismatch in frame_id")
+
+    return errors
 
 def check_timestamp_zeros(json_data):
 
@@ -293,12 +305,18 @@ def check_frame_ids(json_data):
 
 
 def json_quality_test(json_path):
+
+    json_quality_errors = []
+
     # load the json file
     with open(json_path, 'r') as f:
         data = json.load(f)
 
     # check the lengths of the data
-    check_lengths(data)
+    length_errors = check_lengths(data)
+
+    if length_errors:
+        json_quality_errors.extend(length_errors)
 
     # check for zeros in the timestamps
     timestamp_metrics = check_timestamp_zeros(data)
@@ -307,6 +325,14 @@ def json_quality_test(json_path):
         print("")
         print("Number of 0s in timestamps per camera")
         print(timestamp_metrics['zero_counts'])
+
+        # check if the interpolated timestamp spread is greater than 30 ms
+        if timestamp_metrics['interpolated_timestamp_spread'] > 30:
+            json_quality_errors.append(f"High Timestamp Spread: {timestamp_metrics['interpolated_timestamp_spread']}")
+
+        # check if the interpolated fps is less than 28 for any camera
+        if any(fps < 28 for fps in timestamp_metrics['interpolated_fps'].values()):
+            json_quality_errors.append(f"Low FPS: {timestamp_metrics['interpolated_fps']}")
 
     # check the frame ids
     frame_id_skips, frame_id_duplicates = check_frame_ids(data)
@@ -318,6 +344,14 @@ def json_quality_test(json_path):
     print("")
     print("Number of frame id duplicates per camera")
     print(frame_id_duplicates)
+
+    # Check if there are any cameras with frame id skips
+    if any(frame_id_skips.values()):
+        json_quality_errors.append(f"Frame ID Skips: {frame_id_skips}")
+
+    # Check if there are any cameras with frame id duplicates
+    if any(frame_id_duplicates.values()):
+        json_quality_errors.append(f"Frame ID Duplicates: {frame_id_duplicates}")
 
     # aggregate the results
     results = {
@@ -331,8 +365,9 @@ def json_quality_test(json_path):
 
     if 'first_bad_frame' in data:
         results['first_bad_frame'] = data['first_bad_frame']
+        json_quality_errors.append(f"First Bad Frame: {data['first_bad_frame']}")
 
-    return results 
+    return results, json_quality_errors
 
 
 
