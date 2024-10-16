@@ -262,7 +262,7 @@ async def set_session(subject_id: str) -> Session:
     """
 
     date = datetime.date.today()
-    session_dir = os.path.join(RECORDING_BASE, subject_id, date.strftime("%Y%m%d"))
+    session_dir = os.path.join(RECORDING_BASE, subject_id, "VIDEO", date.strftime("%Y%m%d"))
     os.makedirs(session_dir, exist_ok=True)
 
     state: GlobalState = get_global_state()
