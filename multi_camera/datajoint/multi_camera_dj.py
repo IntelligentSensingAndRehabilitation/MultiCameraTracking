@@ -414,6 +414,7 @@ class ReprojectionError(dj.Computed):
     camera_name          : varchar(10)
     ---
     reprojection_error : float
+    reprojection_error_timeseries : longblob
     """
     def make(self, key):
         print(key)
@@ -422,7 +423,7 @@ class ReprojectionError(dj.Computed):
         from multi_camera.datajoint.multi_camera_dj import SingleCameraVideo, MultiCameraRecording, PersonKeypointReconstruction
         from multi_camera.datajoint.calibrate_cameras import Calibration
         from pose_pipeline import TopDownPerson
-
+        
         def fetch_key_data(key):
             """Fetch necessary data for a given key."""
             calibration_key = (Calibration & key).fetch1("KEY")
@@ -444,18 +445,18 @@ class ReprojectionError(dj.Computed):
             recording_timestamps = (MultiCameraRecording & recording_key).fetch1("recording_timestamps")
             
             return k3d, camera_calibration, camera_names, keypoints, camera_name, recording_timestamps
-
+        
         def pad_keypoints(keypoints):
             """Pad keypoints with zeros for missing frames."""
             N = max(len(k) for k in keypoints)
             return np.stack([np.pad(k, ((0, N - len(k)), (0, 0), (0, 0)), mode='constant') for k in keypoints], axis=0)
-
+        
         def reorder_keypoints(keypoints, camera_names, camera_name):
             """Reorder keypoints to match the calibration order."""
             camera_name_list = camera_name.tolist()  # Convert to list
             order = [camera_name_list.index(c) for c in camera_names]
             return np.stack([keypoints[o] for o in order], axis=0)
-
+        
         def individual_reprojection_loss(camera_params, points2d, points3d, threshold=0.5, weights=None): 
             """Compute projection loss for a single camera."""
             conf = points2d[..., -1]
@@ -466,7 +467,7 @@ class ReprojectionError(dj.Computed):
             if weights is not None:
                 weights = weights.reshape(1, 1, loss.shape[2])
                 loss = loss * weights
-            return np.nanmean(loss, axis=(1, 2))
+            return np.nanmean(loss, axis=2)
 
         def match_joint_count(points2d, points3d):
             """Ensure the number of joints matches between points2d and points3d."""
@@ -474,7 +475,6 @@ class ReprojectionError(dj.Computed):
             points2d = points2d[:, :, :num_joints, :]
             points3d = points3d[:, :num_joints, :]
             return points2d, points3d
-
         k3d, camera_calibration, camera_names, keypoints, camera_name, recording_timestamps = fetch_key_data(key)
         keypoints = pad_keypoints(keypoints)
         points2d = reorder_keypoints(keypoints, camera_names, camera_name)
@@ -487,7 +487,8 @@ class ReprojectionError(dj.Computed):
             self.insert1({
                 **key,
                 "camera_name": camera_name,
-                "reprojection_error": reprojection_value
+                "reprojection_error": float(np.nanmean(reprojection_value)),
+                "reprojection_error_timeseries": reprojection_value,
             })
 
 
