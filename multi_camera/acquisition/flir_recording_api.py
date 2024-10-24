@@ -701,6 +701,34 @@ class FlirRecorder:
 
         return status
 
+    def _prepare_config_metadata(self, max_frames: int) -> dict:
+        """Prepare configuration metadata."""
+        if self.camera_config:
+            self.acquisition_type = self.camera_config["acquisition-type"]
+            self.video_segment_len = self.camera_config["acquisition-settings"]["video_segment_len"]
+            return {
+                "meta_info": self.camera_config["meta-info"],
+                "camera_info": self.camera_config["camera-info"],
+                "camera_config_hash": self.get_config_hash(self.camera_config),
+                "acquisition_type": self.acquisition_type,
+                "video_segment_len": self.video_segment_len,
+                "system_info": self.get_system_info()
+            }
+        
+        self.acquisition_type = "max_frames"
+        self.video_segment_len = max_frames
+        
+        return {
+            "meta_info": "No Config",
+            "camera_info": [c.DeviceSerialNumber for c in self.cams],
+            "exposure_times": [15000] * len(self.cams),
+            "frame_rate_requested": [30] * len(self.cams),
+            "camera_config_hash": None,
+            "acquisition_type": "max_frames",
+            "video_segment_len": max_frames,
+            "system_info": self.get_system_info()
+        }
+
     def start_acquisition(self, recording_path=None, preview_callback: callable = None, max_frames: int = 1000):
         self.set_status("Recording")
 
@@ -716,26 +744,7 @@ class FlirRecorder:
             self.video_root = "_".join(self.video_base_name.split("_")[:-2])
 
         
-
-        config_metadata = {}
-        if self.camera_config:
-            config_metadata["meta_info"] = self.camera_config["meta-info"]
-            config_metadata["camera_info"] = self.camera_config["camera-info"]
-            camera_config_hash = self.get_config_hash(self.camera_config)
-            print("CONFIG HASH",camera_config_hash)
-            config_metadata["camera_config_hash"] = camera_config_hash
-            acquisition_type = self.camera_config["acquisition-type"]
-            video_segment_len = self.camera_config["acquisition-settings"]["video_segment_len"]
-        else:
-            config_metadata["meta_info"] = "No Config"
-            config_metadata["camera_info"] =  [c.DeviceSerialNumber for c in self.cams]
-            config_metadata["exposure_times"] = [15000] * len(self.cams)
-            config_metadata["frame_rate_requested"] = [30] * len(self.cams)
-            config_metadata["camera_config_hash"] = None
-            acquisition_type = "max_frames"
-            video_segment_len = max_frames
-
-        config_metadata["system_info"] = self.get_system_info()
+        config_metadata = self._prepare_config_metadata(max_frames)
 
         # Initializing an image queue for each camera
         self.image_queue_dict = {c.DeviceSerialNumber: Queue(max_frames) for c in self.cams}
@@ -761,8 +770,8 @@ class FlirRecorder:
                         "serial": serial,
                         "pixel_format": c.PixelFormat,
                         "acquisition_fps": c.AcquisitionFrameRate,
-                        "acquisition_type": acquisition_type,
-                        "video_segment_len": video_segment_len,
+                        "acquisition_type": self.acquisition_type,
+                        "video_segment_len": self.video_segment_len,
                     },
                 ).start()
 
@@ -825,14 +834,14 @@ class FlirRecorder:
 
         frame_idx = 0
 
-        if acquisition_type == "continuous":
-            total_frames = video_segment_len
+        if self.acquisition_type == "continuous":
+            total_frames = self.video_segment_len
         else:
             total_frames = max_frames
         
         prog = tqdm(total=total_frames)
 
-        while acquisition_type == "continuous" or frame_idx < max_frames:
+        while self.acquisition_type == "continuous" or frame_idx < max_frames:
 
             # Get the current real time
             real_time = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
@@ -845,7 +854,7 @@ class FlirRecorder:
                 break
 
             # Update progress for max frame recording
-            if acquisition_type == "continuous":
+            if self.acquisition_type == "continuous":
 
                 self.set_progress(frame_idx / total_frames)
                 prog.update(1)
