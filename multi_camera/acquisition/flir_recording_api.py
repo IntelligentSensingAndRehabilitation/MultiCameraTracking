@@ -752,6 +752,63 @@ class FlirRecorder:
             prog.update(1)
 
         return prog, frame_idx
+    
+    def initialize_frame_metadata(self):
+            
+        # Get the current real time
+        real_time = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+        local_time = datetime.now()
+
+        frame_metadata = {"real_times": real_time, "local_times": local_time, "base_filename": self.video_base_file}
+
+        frame_metadata["timestamps"] = []
+        frame_metadata["frame_id"] = []
+        frame_metadata["frame_id_abs"] = []
+        frame_metadata["chunk_serial_data"] = []
+        frame_metadata["serial_msg"] = []
+        frame_metadata["camera_serials"] = []
+        frame_metadata["exposure_times"] = []
+        frame_metadata["frame_rates_requested"] = []
+        frame_metadata["frame_rates_binning"] = []
+
+        return frame_metadata
+    
+    def process_serial_data(self, c):
+        serial_msg = []
+        frame_count = -1
+        if self.gpio_settings['line3'] == 'SerialOn':
+            # We expect only 5 bytes to be sent
+            if c.ChunkSerialDataLength == 5:
+                chunk_serial_data = c.ChunkSerialData
+                serial_msg = chunk_serial_data
+                split_chunk = [ord(c) for c in chunk_serial_data]
+
+                # Reconstruct the current count from the chunk serial data
+                frame_count = 0
+                for i, b in enumerate(split_chunk):
+                    frame_count |= (b & 0x7F) << (7 * i)
+
+        return serial_msg, frame_count
+    
+    def monitor_frames(self, frame_idx, frame_id, timestamp, camera_serial):
+        curr_frame_diff = (frame_idx+1) - frame_id
+        if curr_frame_diff != self.frame_diff[camera_serial] and curr_frame_diff != 0:
+            print(f"{camera_serial}: Frame ID mismatch: {frame_idx + 1} {frame_id}")
+            # self.check_queue_sizes(self.image_queue_dict)
+            self.frame_diff[camera_serial] = (frame_idx+1) - frame_id
+            
+            if timestamp != 0 and self.prev_timestamp[camera_serial] != 0:
+                cur_timestamp_diff = timestamp - self.prev_timestamp[camera_serial]
+
+                print(f"{camera_serial}: timestamp diff {cur_timestamp_diff * 1e-6}")
+
+            print(f"{camera_serial}: frame_idx based on timestamps {(timestamp - self.initial_timestamp[camera_serial]) * 1e-9 * 29.08}")
+
+            if self.first_bad_frame[camera_serial] == -1:
+                self.first_bad_frame[camera_serial] = {'loop_frame_idx': frame_idx, 'cam_frame_id': frame_id}
+
+                self.frame_metadata["first_bad_frame"] = self.first_bad_frame
+            # timestamp_diff[c.DeviceSerialNumber] = cur_timestamp_diff
 
     def start_acquisition(self, recording_path=None, preview_callback: callable = None, max_frames: int = 1000):
         self.set_status("Recording")
@@ -819,11 +876,11 @@ class FlirRecorder:
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(self.cams)) as executor:
             l = list(executor.map(start_cam, range(len(self.cams))))
 
-        frame_diff = {}
-        prev_timestamp = {}
-        timestamp_diff = {}
-        initial_timestamp = {}
-        first_bad_frame = {}
+        self.frame_diff = {}
+        self.prev_timestamp = {}
+        self.timestamp_diff = {}
+        self.initial_timestamp = {}
+        self.first_bad_frame = {}
 
         print("Acquisition, Resulting, Exposure, DeviceLinkThroughputLimit:")
         for c in self.cams:
@@ -840,11 +897,11 @@ class FlirRecorder:
                 c.SerialReceiveQueueClear()
                 print(c.SerialReceiveQueueCurrentCharacterCount)
 
-            frame_diff[c.DeviceSerialNumber] = 0
-            prev_timestamp[c.DeviceSerialNumber] = 0
-            timestamp_diff[c.DeviceSerialNumber] = 0
-            initial_timestamp[c.DeviceSerialNumber] = 0
-            first_bad_frame[c.DeviceSerialNumber] = -1
+            self.frame_diff[c.DeviceSerialNumber] = 0
+            self.prev_timestamp[c.DeviceSerialNumber] = 0
+            self.timestamp_diff[c.DeviceSerialNumber] = 0
+            self.initial_timestamp[c.DeviceSerialNumber] = 0
+            self.first_bad_frame[c.DeviceSerialNumber] = -1
 
         # schedule a command to start in 250 ms in the future
         self.cams[0].TimestampLatch()
@@ -867,10 +924,6 @@ class FlirRecorder:
 
         while self.acquisition_type == "continuous" or frame_idx < max_frames:
 
-            # Get the current real time
-            real_time = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-            local_time = datetime.now()
-
             # Use thread safe checking of semaphore to determine whether to stop recording
             if self.stop_recording.is_set():
                 self.stop_recording.clear()
@@ -884,73 +937,35 @@ class FlirRecorder:
             # the corresponding camera
             real_time_images = []
 
-            frame_metadata = {"real_times": real_time, "local_times": local_time, "base_filename": self.video_base_file}
-
-            frame_metadata["timestamps"] = []
-            frame_metadata["frame_id"] = []
-            frame_metadata["frame_id_abs"] = []
-            frame_metadata["chunk_serial_data"] = []
-            frame_metadata["serial_msg"] = []
-            frame_metadata["camera_serials"] = []
-            frame_metadata["exposure_times"] = []
-            frame_metadata["frame_rates_requested"] = []
-            frame_metadata["frame_rates_binning"] = []
+            self.frame_metadata = self.initialize_frame_metadata()
+            real_time = self.frame_metadata["real_times"]
 
             for c in self.cams:
                 im_ref = c.get_image()
                 timestamp = im_ref.GetTimeStamp()
 
+                cam_serial = c.DeviceSerialNumber
+
                 if frame_idx == 0:
-                    initial_timestamp[c.DeviceSerialNumber] = timestamp
+                    self.initial_timestamp[cam_serial] = timestamp
 
                 chunk_data = im_ref.GetChunkData()
                 frame_id = im_ref.GetFrameID()
                 frame_id_abs = chunk_data.GetFrameID()
 
-                serial_msg = []
-                
-                frame_count = -1
-                if self.gpio_settings['line3'] == 'SerialOn':
-                    # We expect only 5 bytes to be sent
-                    if c.ChunkSerialDataLength == 5:
-                        chunk_serial_data = c.ChunkSerialData
-                        serial_msg = chunk_serial_data
-                        split_chunk = [ord(c) for c in chunk_serial_data]
+                serial_msg, frame_count = self.process_serial_data(c)
 
-                        # Reconstruct the current count from the chunk serial data
-                        frame_count = 0
-                        for i, b in enumerate(split_chunk):
-                            frame_count |= (b & 0x7F) << (7 * i)
+                self.frame_metadata["timestamps"].append(timestamp)
+                self.frame_metadata["frame_id"].append(frame_id)
+                self.frame_metadata["frame_id_abs"].append(frame_id_abs)
+                self.frame_metadata["chunk_serial_data"].append(frame_count)
+                self.frame_metadata["serial_msg"].append(serial_msg)
+                self.frame_metadata["camera_serials"].append(cam_serial)
+                self.frame_metadata["exposure_times"].append(15000)
+                self.frame_metadata["frame_rates_binning"].append(c.BinningHorizontal * 30)
+                self.frame_metadata["frame_rates_requested"].append(c.AcquisitionFrameRate)
 
-                frame_metadata["timestamps"].append(timestamp)
-                frame_metadata["frame_id"].append(frame_id)
-                frame_metadata["frame_id_abs"].append(frame_id_abs)
-                frame_metadata["chunk_serial_data"].append(frame_count)
-                frame_metadata["serial_msg"].append(serial_msg)
-                frame_metadata["camera_serials"].append(c.DeviceSerialNumber)
-                frame_metadata["exposure_times"].append(15000)
-                frame_metadata["frame_rates_binning"].append(c.BinningHorizontal * 30)
-                frame_metadata["frame_rates_requested"].append(c.AcquisitionFrameRate)
-
-                curr_frame_diff = (frame_idx+1) - frame_id
-                if curr_frame_diff != frame_diff[c.DeviceSerialNumber] and curr_frame_diff != 0:
-                    print(f"{c.DeviceSerialNumber}: Frame ID mismatch: {frame_idx + 1} {frame_id}")
-                    # self.check_queue_sizes(self.image_queue_dict)
-                    frame_diff[c.DeviceSerialNumber] = (frame_idx+1) - frame_id
-                    
-                    if timestamp != 0 and prev_timestamp[c.DeviceSerialNumber] != 0:
-                        cur_timestamp_diff = timestamp - prev_timestamp[c.DeviceSerialNumber]
-
-                        print(f"{c.DeviceSerialNumber}: timestamp diff {cur_timestamp_diff * 1e-6}")
-
-                    print(f"{c.DeviceSerialNumber}: frame_idx based on timestamps {(timestamp - initial_timestamp[c.DeviceSerialNumber]) * 1e-9 * 29.08}")
-
-                    if first_bad_frame[c.DeviceSerialNumber] == -1:
-                        first_bad_frame[c.DeviceSerialNumber] = {'loop_frame_idx': frame_idx, 'cam_frame_id': frame_id}
-
-                        frame_metadata["first_bad_frame"] = first_bad_frame
-                    # timestamp_diff[c.DeviceSerialNumber] = cur_timestamp_diff
-
+                self.monitor_frames(frame_idx, frame_id, timestamp, cam_serial)
 
                 # get the data array
                 # Using try/except to handle frame tearing
@@ -973,11 +988,11 @@ class FlirRecorder:
                         {"im": im, "real_times": real_time, "timestamps": timestamp,  "base_filename": self.video_base_file}
                     )
 
-                prev_timestamp[c.DeviceSerialNumber] = timestamp
+                self.prev_timestamp[cam_serial] = timestamp
 
             if self.video_base_file is not None:
                 # put the frame metadata into the json queue
-                self.json_queue.put(frame_metadata)
+                self.json_queue.put(self.frame_metadata)
 
             if self.preview_callback:
                 self.preview_callback(real_time_images)
