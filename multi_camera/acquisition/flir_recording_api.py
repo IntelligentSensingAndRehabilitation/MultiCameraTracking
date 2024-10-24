@@ -728,6 +728,30 @@ class FlirRecorder:
             "video_segment_len": max_frames,
             "system_info": self.get_system_info()
         }
+    
+    def update_filename(self):
+        if self.video_base_file is not None:
+            now = datetime.now()
+            time_str = now.strftime("%Y%m%d_%H%M%S")
+
+            self.video_base_name = "_".join([self.video_root, time_str])
+            self.video_base_file = os.path.join(self.video_path, self.video_base_name)
+
+    def update_progress(self, frame_idx, total_frames, max_frames, prog):
+        if self.acquisition_type == "continuous":
+            self.set_progress(frame_idx / total_frames)
+            prog.update(1)
+            
+            # Reset the progress bar after each video segment
+            if frame_idx % total_frames == 0:
+                prog = tqdm(total=total_frames)
+                frame_idx = 0
+                self.update_filename()
+        else:
+            self.set_progress(frame_idx / max_frames)
+            prog.update(1)
+
+        return prog, frame_idx
 
     def start_acquisition(self, recording_path=None, preview_callback: callable = None, max_frames: int = 1000):
         self.set_status("Recording")
@@ -853,34 +877,7 @@ class FlirRecorder:
                 print("Stopping recording")
                 break
 
-            # Update progress for max frame recording
-            if self.acquisition_type == "continuous":
-
-                self.set_progress(frame_idx / total_frames)
-                prog.update(1)
-                
-                # Reset the progress bar after each video segment
-                if frame_idx % total_frames == 0:
-                    prog = tqdm(total=total_frames)
-                    frame_idx = 0
-
-                    if self.video_base_file is not None:
-                        # Create a new video_base_filename for the new video segment
-                        # video_base_name looks like 'data/t111/20240501/t111_20240501_130531'
-                        # we just need to replace the date and time parts of the filename
-                        # First get the current date and time
-                        now = datetime.now()
-                        time_str = now.strftime("%Y%m%d_%H%M%S")
-
-                        # Update the video_base_name with the new time_str
-                        self.video_base_name = "_".join([self.video_root, time_str])
-
-                        # Update the video_base_file with the new filename
-                        self.video_base_file = os.path.join(self.video_path, self.video_base_name)
-
-            else:
-                self.set_progress(frame_idx / max_frames)
-                prog.update(1)
+            prog, frame_idx = self.update_progress(frame_idx, total_frames, max_frames, prog)
 
             # get the image raw data
             # for each camera, get the current frame and assign it to
