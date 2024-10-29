@@ -802,7 +802,7 @@ class FlirRecorder:
 
                 print(f"{camera_serial}: timestamp diff {cur_timestamp_diff * 1e-6}")
 
-            print(f"{camera_serial}: frame_idx based on timestamps {(timestamp - self.initial_timestamp[camera_serial]) * 1e-9 * 29.08}")
+            print(f"{camera_serial}: frame_idx based on timestamps {int((timestamp - self.initial_timestamp[camera_serial]) * 1e-9 * 29.08)}, queue size: {self.image_queue_dict[camera_serial].qsize()}")
 
             if self.first_bad_frame[camera_serial] == -1:
                 self.first_bad_frame[camera_serial] = {'loop_frame_idx': frame_idx, 'cam_frame_id': frame_id}
@@ -835,7 +835,7 @@ class FlirRecorder:
 
         self.records_queue = Queue(max_frames)
 
-        # set up the threads to write videos to disk, if requested
+        # Set up video writing threads if recording is enabled
         if self.video_base_file is not None:
 
             # Start a writing thread for each camera
@@ -914,13 +914,34 @@ class FlirRecorder:
         self.iface.TLInterface.ActionCommand()
 
         frame_idx = 0
-
-        if self.acquisition_type == "continuous":
-            total_frames = self.video_segment_len
-        else:
-            total_frames = max_frames
-        
+        total_frames = self.video_segment_len if self.acquisition_type == "continuous" else max_frames
         prog = tqdm(total=total_frames)
+
+        # Function to get image from a single camera
+        def get_camera_image(camera):
+            im_ref = camera.get_image()
+            timestamp = im_ref.GetTimeStamp()
+            chunk_data = im_ref.GetChunkData()
+            frame_id = im_ref.GetFrameID()
+            frame_id_abs = chunk_data.GetFrameID()
+            serial_msg, frame_count = self.process_serial_data(camera)
+            
+            try:
+                im = im_ref.GetNDArray()
+                im_ref.Release()
+                return {
+                    'image': im,
+                    'timestamp': timestamp,
+                    'frame_id': frame_id,
+                    'frame_id_abs': frame_id_abs,
+                    'serial_msg': serial_msg,
+                    'frame_count': frame_count,
+                    'camera_serial': camera.DeviceSerialNumber,
+                    'pixel_format': camera.PixelFormat
+                }
+            except Exception as e:
+                tqdm.write("Bad frame")
+                return None
 
         while self.acquisition_type == "continuous" or frame_idx < max_frames:
 
@@ -931,64 +952,48 @@ class FlirRecorder:
                 break
 
             prog, frame_idx = self.update_progress(frame_idx, total_frames, max_frames, prog)
-
-            # get the image raw data
-            # for each camera, get the current frame and assign it to
-            # the corresponding camera
             real_time_images = []
-
             self.frame_metadata = self.initialize_frame_metadata()
-            real_time = self.frame_metadata["real_times"]
+            
+            # Use ThreadPoolExecutor to get images from all cameras concurrently
+            with concurrent.futures.ThreadPoolExecutor(max_workers=len(self.cams)) as executor:
+                future_to_camera = {executor.submit(get_camera_image, camera): camera for camera in self.cams}
+                for future in concurrent.futures.as_completed(future_to_camera):
+                    result = future.result()
+                    if result is None:
+                        continue
+                    
+                    cam_serial = result['camera_serial']
 
-            for c in self.cams:
-                im_ref = c.get_image()
-                timestamp = im_ref.GetTimeStamp()
+                    print( f"{cam_serial}: {result['frame_id']}, {frame_idx}")
+                    
+                    if frame_idx == 0:
+                        self.initial_timestamp[cam_serial] = result['timestamp']
 
-                cam_serial = c.DeviceSerialNumber
+                    self.frame_metadata["timestamps"].append(result['timestamp'])
+                    self.frame_metadata["frame_id"].append(result['frame_id'])
+                    self.frame_metadata["frame_id_abs"].append(result['frame_id_abs'])
+                    self.frame_metadata["chunk_serial_data"].append(result['frame_count'])
+                    self.frame_metadata["serial_msg"].append(result['serial_msg'])
+                    self.frame_metadata["camera_serials"].append(cam_serial)
+                    self.frame_metadata["exposure_times"].append(15000)
+                    self.frame_metadata["frame_rates_binning"].append(future_to_camera[future].BinningHorizontal * 30)
+                    self.frame_metadata["frame_rates_requested"].append(future_to_camera[future].AcquisitionFrameRate)
 
-                if frame_idx == 0:
-                    self.initial_timestamp[cam_serial] = timestamp
-
-                chunk_data = im_ref.GetChunkData()
-                frame_id = im_ref.GetFrameID()
-                frame_id_abs = chunk_data.GetFrameID()
-
-                serial_msg, frame_count = self.process_serial_data(c)
-
-                self.frame_metadata["timestamps"].append(timestamp)
-                self.frame_metadata["frame_id"].append(frame_id)
-                self.frame_metadata["frame_id_abs"].append(frame_id_abs)
-                self.frame_metadata["chunk_serial_data"].append(frame_count)
-                self.frame_metadata["serial_msg"].append(serial_msg)
-                self.frame_metadata["camera_serials"].append(cam_serial)
-                self.frame_metadata["exposure_times"].append(15000)
-                self.frame_metadata["frame_rates_binning"].append(c.BinningHorizontal * 30)
-                self.frame_metadata["frame_rates_requested"].append(c.AcquisitionFrameRate)
-
-                self.monitor_frames(frame_idx, frame_id, timestamp, cam_serial)
-
-                # get the data array
-                # Using try/except to handle frame tearing
-                try:
-                    im = im_ref.GetNDArray()
-                    im_ref.Release()
+                    self.monitor_frames(frame_idx, result['frame_id'], result['timestamp'], cam_serial)
 
                     if self.preview_callback is not None:
-                        # if preview is enabled, save the size of the first image
-                        # and append the image from each camera to a list
-                        real_time_images.append((im,self.pixel_format_conversion[c.PixelFormat]))
+                        real_time_images.append((result['image'], self.pixel_format_conversion[result['pixel_format']]))
 
-                except Exception as e:
-                    tqdm.write("Bad frame")
-                    continue
+                    if self.video_base_file is not None:
+                        self.image_queue_dict[cam_serial].put({
+                            "im": result['image'],
+                            "real_times": self.frame_metadata["real_times"],
+                            "timestamps": result['timestamp'],
+                            "base_filename": self.video_base_file
+                        })
 
-                if self.video_base_file is not None:
-                    # Writing the frame information for the current camera to its queue
-                    self.image_queue_dict[c.DeviceSerialNumber].put(
-                        {"im": im, "real_times": real_time, "timestamps": timestamp,  "base_filename": self.video_base_file}
-                    )
-
-                self.prev_timestamp[cam_serial] = timestamp
+                    self.prev_timestamp[cam_serial] = result['timestamp']
 
             if self.video_base_file is not None:
                 # put the frame metadata into the json queue
@@ -1019,7 +1024,6 @@ class FlirRecorder:
                 c.LineSelector = 'Line2'
                 c.V3_3Enable = False
                 c.LineMode = 'Output'
-            # Stopping each camera
             c.stop()
 
         records = []
