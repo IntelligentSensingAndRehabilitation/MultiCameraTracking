@@ -831,7 +831,7 @@ class FlirRecorder:
         self.image_queue_dict = {c.DeviceSerialNumber: Queue(max_frames) for c in self.cams}
 
         # Initialize intermediate queues for the reading threads
-        self.aquisition_queue = {c.DeviceSerialNumber: Queue(max_frames) for c in self.cams}
+        self.acquisition_queue = {c.DeviceSerialNumber: Queue(max_frames) for c in self.cams}
 
         # Initializing a json queue for each camera
         self.json_queue = Queue(max_frames)
@@ -943,13 +943,22 @@ class FlirRecorder:
                 frame_id_abs = chunk_data.GetFrameID()
                 serial_msg, frame_count = self.process_serial_data(camera)
 
-                print(f"acquiring from {camera_serial} frame_id: {frame_id}, {frame_idx}, {max_frames}")
+                print(f"acquiring from {camera_serial} frame_id: {frame_id}, {frame_idx+1}, {max_frames}")
                 
                 try:
                     im = im_ref.GetNDArray()
                     im_ref.Release()
+
+                    if self.video_base_file is not None:
+                        self.image_queue_dict[camera_serial].put({
+                            "im": im,
+                            "real_times": 0,
+                            "timestamps": timestamp,
+                            "base_filename": self.video_base_file
+                        })
+
+
                     frame_data = {
-                        'image': im,
                         'timestamp': timestamp,
                         'frame_id': frame_id,
                         'frame_id_abs': frame_id_abs,
@@ -959,10 +968,11 @@ class FlirRecorder:
                         'pixel_format': pixel_format
                     }
                 except Exception as e:
+                    print(e)
                     tqdm.write("Bad frame")
                     continue
                 # put the frame data into the acquisition queue
-                self.aquisition_queue[camera.DeviceSerialNumber].put(frame_data)
+                self.acquisition_queue[camera_serial].put(frame_data)
 
                 frame_idx += 1
 
@@ -985,21 +995,16 @@ class FlirRecorder:
                 prog, frame_idx = self.update_progress(frame_idx, total_frames, max_frames, prog)
 
                 # Wait until all queues have at least one item
-                while any(self.aquisition_queue[acq_queue].qsize() == 0 for acq_queue in self.aquisition_queue):
-                    print('waiting')
-                    # time.sleep(0.05)  # Adjust sleep time as needed
-                    continue
+                acquisition_frames = [self.acquisition_queue[acq].get() for acq in self.acquisition_queue] 
 
                 camera_metadata = []
                 real_time_images = []
                 self.frame_metadata = self.initialize_frame_metadata()
 
-                for acq_queue in self.aquisition_queue:
-                    # try:
-                    qlen = self.aquisition_queue[acq_queue].qsize()
-                    frame_data = self.aquisition_queue[acq_queue].get(timeout=0.1)
+                for frame_data in acquisition_frames:
 
                     camera_serial = frame_data['camera_serial']
+                    qlen = self.acquisition_queue[camera_serial].qsize()
                     
                     self.frame_metadata['timestamps'].append(frame_data['timestamp'])
                     self.frame_metadata['frame_id'].append(frame_data['frame_id'])
@@ -1017,16 +1022,8 @@ class FlirRecorder:
 
                     camera_metadata.append((camera_serial, frame_data['frame_id'], qlen))
 
-                    if self.preview_callback is not None:
-                        real_time_images.append((frame_data['image'], self.pixel_format_conversion[frame_data['pixel_format']]))
-
-                    if self.video_base_file is not None:
-                        self.image_queue_dict[camera_serial].put({
-                            "im": frame_data['image'],
-                            "real_times": 0,
-                            "timestamps": frame_data['timestamp'],
-                            "base_filename": self.video_base_file
-                        })
+                    # if self.preview_callback is not None:
+                    #     real_time_images.append((frame_data['image'], self.pixel_format_conversion[frame_data['pixel_format']]))
 
                     # except queue.Empty:
                     #     camera_metadata.append(None)
@@ -1041,7 +1038,7 @@ class FlirRecorder:
 
                 frame_idx += 1
 
-                # print(frame_idx, camera_metadata)
+                print(frame_idx, camera_metadata)
                 # synchronized_metadata.append(camera_metadata)
                 # print(synchronized_metadata)
 
