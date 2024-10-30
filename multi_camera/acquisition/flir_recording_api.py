@@ -885,6 +885,8 @@ class FlirRecorder:
         self.initial_timestamp = {}
         self.first_bad_frame = {}
 
+        self.cam_serials = []
+
         print("Acquisition, Resulting, Exposure, DeviceLinkThroughputLimit:")
         for c in self.cams:
             print(f"{c.DeviceSerialNumber}: {c.AcquisitionFrameRate}, {c.AcquisitionResultingFrameRate}, {c.ExposureTime}, {c.DeviceLinkThroughputLimit} ")
@@ -906,6 +908,8 @@ class FlirRecorder:
             self.initial_timestamp[c.DeviceSerialNumber] = 0
             self.first_bad_frame[c.DeviceSerialNumber] = -1
 
+            self.cam_serials.append(c.DeviceSerialNumber)
+
         # schedule a command to start in 250 ms in the future
         self.cams[0].TimestampLatch()
         value = self.cams[0].TimestampLatchValue
@@ -926,13 +930,20 @@ class FlirRecorder:
         # Function to get image from a single camera
         def get_camera_image(camera):
 
-            while running:
+            camera_serial = camera.DeviceSerialNumber
+            pixel_format = camera.PixelFormat
+
+            frame_idx = 0
+
+            while self.acquisition_type == "continuous" or frame_idx < max_frames:
                 im_ref = camera.get_image()
                 timestamp = im_ref.GetTimeStamp()
                 chunk_data = im_ref.GetChunkData()
                 frame_id = im_ref.GetFrameID()
                 frame_id_abs = chunk_data.GetFrameID()
                 serial_msg, frame_count = self.process_serial_data(camera)
+
+                print(f"acquiring from {camera_serial} frame_id: {frame_id}, {frame_idx}, {max_frames}")
                 
                 try:
                     im = im_ref.GetNDArray()
@@ -944,49 +955,98 @@ class FlirRecorder:
                         'frame_id_abs': frame_id_abs,
                         'serial_msg': serial_msg,
                         'frame_count': frame_count,
-                        'camera_serial': camera.DeviceSerialNumber,
-                        'pixel_format': camera.PixelFormat
+                        'camera_serial': camera_serial,
+                        'pixel_format': pixel_format
                     }
                 except Exception as e:
                     tqdm.write("Bad frame")
-                    frame_data = None
-
+                    continue
                 # put the frame data into the acquisition queue
                 self.aquisition_queue[camera.DeviceSerialNumber].put(frame_data)
+
+                frame_idx += 1
 
         def process_synchronized_metadata():
             synchronized_metadata = []
 
-            while running:
+            frame_id_array = np.zeros((max_frames, len(self.cams)), dtype=int)
+
+            frame_idx = 0
+            total_frames = self.video_segment_len if self.acquisition_type == "continuous" else max_frames
+            prog = tqdm(total=total_frames)
+
+            while self.acquisition_type == "continuous" or frame_idx < max_frames:
+
+                if self.stop_recording.is_set():
+                    self.stop_recording.clear()
+                    print("Stopping recording")
+                    break
+
+                prog, frame_idx = self.update_progress(frame_idx, total_frames, max_frames, prog)
 
                 # Wait until all queues have at least one item
                 while any(self.aquisition_queue[acq_queue].qsize() == 0 for acq_queue in self.aquisition_queue):
-                    time.sleep(0.1)  # Adjust sleep time as needed
+                    print('waiting')
+                    # time.sleep(0.05)  # Adjust sleep time as needed
+                    continue
 
                 camera_metadata = []
-                
+                real_time_images = []
+                self.frame_metadata = self.initialize_frame_metadata()
 
                 for acq_queue in self.aquisition_queue:
-                    try:
-                        frame_data = self.aquisition_queue[acq_queue].get(timeout=0.1)
-                        frame_id = frame_data['frame_id']
-                        camera_serial = frame_data['camera_serial']
-                        camera_metadata.append((camera_serial, frame_id))
+                    # try:
+                    qlen = self.aquisition_queue[acq_queue].qsize()
+                    frame_data = self.aquisition_queue[acq_queue].get(timeout=0.1)
 
-                        if self.video_base_file is not None:
-                            self.image_queue_dict[camera_serial].put({
-                                "im": frame_data['image'],
-                                "real_times": 0,
-                                "timestamps": frame_data['timestamp'],
-                                "base_filename": self.video_base_file
-                            })
+                    camera_serial = frame_data['camera_serial']
+                    
+                    self.frame_metadata['timestamps'].append(frame_data['timestamp'])
+                    self.frame_metadata['frame_id'].append(frame_data['frame_id'])
+                    self.frame_metadata['frame_id_abs'].append(frame_data['frame_id_abs'])
+                    self.frame_metadata['chunk_serial_data'].append(frame_data['frame_count'])
+                    self.frame_metadata['serial_msg'].append(frame_data['serial_msg'])
+                    self.frame_metadata['camera_serials'].append(camera_serial)
+                    self.frame_metadata['exposure_times'].append(15000)
+                    self.frame_metadata['frame_rates_binning'].append(30)
+                    self.frame_metadata['frame_rates_requested'].append(30)
 
-                    except queue.Empty:
-                        camera_metadata.append(None)
+                    # get the index of the camera 
+                    camera_index = self.cam_serials.index(camera_serial)
+                    frame_id_array[frame_idx, camera_index] = frame_data['frame_id']
 
-                print(camera_metadata)
+                    camera_metadata.append((camera_serial, frame_data['frame_id'], qlen))
+
+                    if self.preview_callback is not None:
+                        real_time_images.append((frame_data['image'], self.pixel_format_conversion[frame_data['pixel_format']]))
+
+                    if self.video_base_file is not None:
+                        self.image_queue_dict[camera_serial].put({
+                            "im": frame_data['image'],
+                            "real_times": 0,
+                            "timestamps": frame_data['timestamp'],
+                            "base_filename": self.video_base_file
+                        })
+
+                    # except queue.Empty:
+                    #     camera_metadata.append(None)
+
+                # Put the frame metadata into the json queue
+                if self.video_base_file is not None:
+                    self.json_queue.put(self.frame_metadata)
+
+                # Handle preview callback
+                if self.preview_callback: 
+                    self.preview_callback(real_time_images)
+
+                frame_idx += 1
+
+                # print(frame_idx, camera_metadata)
                 # synchronized_metadata.append(camera_metadata)
                 # print(synchronized_metadata)
+
+            for f in frame_id_array:
+                print(f)
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(self.cams)) as executor:
             # Start all camera captures in parallel
