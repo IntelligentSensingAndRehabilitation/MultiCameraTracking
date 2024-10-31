@@ -77,7 +77,7 @@ def test_flir_recording_no_config(num_cams, max_frames):
     records = acquisition.start_acquisition(recording_path=recording_path, max_frames=max_frames)
     acquisition.close()
 
-    results, json_quality_errors = json_quality_test(os.path.join(output_dir, 'test_recording_no_config.json'))
+    results, json_quality_errors = json_quality_test(os.path.join(output_dir, 'test_recording_no_config.json'), num_cams, max_frames)
 
     results['num_cams'] = num_cams
     results['max_frames'] = max_frames
@@ -182,16 +182,16 @@ def video_quality_test(video_path):
             print(f"  Frame {frame}: {gap:.2f}ms")
 
 
-def check_lengths(json_data):
+def check_lengths(json_data, num_cams, max_frames):
     errors = []
-    n_frames = len(json_data['real_times'])
-    if n_frames != len(json_data['timestamps']):
+
+    if max_frames != len(json_data['timestamps']):
         errors.append("Timestamps length mismatch")
-    if n_frames != len(json_data['frame_id']):
+    if max_frames != len(json_data['frame_id']):
         errors.append("Frame ID length mismatch")
-    if not all(len(ts) == len(json_data['serials']) for ts in json_data['timestamps']):
+    if not all(len(ts) == num_cams for ts in json_data['timestamps']):
         errors.append("Num cameras mismatch in timestamps")
-    if not all(len(fid) == len(json_data['serials']) for fid in json_data['frame_id']):
+    if not all(len(fid) == num_cams for fid in json_data['frame_id']):
         errors.append("Num cameras mismatch in frame_id")
 
     return errors
@@ -304,7 +304,7 @@ def check_frame_ids(json_data):
     return frame_id_skips, duplicates
 
 
-def json_quality_test(json_path):
+def json_quality_test(json_path, num_cams, max_frames):
 
     json_quality_errors = []
 
@@ -313,7 +313,7 @@ def json_quality_test(json_path):
         data = json.load(f)
 
     # check the lengths of the data
-    length_errors = check_lengths(data)
+    length_errors = check_lengths(data, num_cams, max_frames)
 
     if length_errors:
         json_quality_errors.extend(length_errors)
