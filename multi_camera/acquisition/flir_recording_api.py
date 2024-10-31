@@ -795,6 +795,7 @@ class FlirRecorder:
         if curr_frame_diff != self.frame_diff[camera_serial] and curr_frame_diff != 0:
             print(f"{camera_serial}: Frame ID mismatch: {frame_idx + 1} {frame_id}")
             self.check_queue_sizes(self.image_queue_dict)
+            self.check_queue_sizes(self.acquisition_queue[camera_serial])
             self.frame_diff[camera_serial] = (frame_idx+1) - frame_id
             
             if timestamp != 0 and self.prev_timestamp[camera_serial] != 0:
@@ -929,9 +930,12 @@ class FlirRecorder:
 
         # Function to get image from a single camera
         def get_camera_image(camera):
+            
 
             camera_serial = camera.DeviceSerialNumber
             pixel_format = camera.PixelFormat
+
+            # print(f"acquisition thread started for {camera_serial}")
 
             frame_idx = 0
 
@@ -943,7 +947,7 @@ class FlirRecorder:
                 frame_id_abs = chunk_data.GetFrameID()
                 serial_msg, frame_count = self.process_serial_data(camera)
 
-                print(f"acquiring from {camera_serial} frame_id: {frame_id}, {frame_idx+1}, {max_frames}")
+                # print(f"acquiring from {camera_serial} frame_id: {frame_id}, {frame_idx+1}, {max_frames}")
                 
                 try:
                     im = im_ref.GetNDArray()
@@ -977,13 +981,13 @@ class FlirRecorder:
                 frame_idx += 1
 
         def process_synchronized_metadata():
-            synchronized_metadata = []
+            print("Processing thread started")
 
-            frame_id_array = np.zeros((max_frames, len(self.cams)), dtype=int)
+            # frame_id_array = np.zeros((max_frames, len(self.cams)), dtype=int)
 
             frame_idx = 0
             total_frames = self.video_segment_len if self.acquisition_type == "continuous" else max_frames
-            prog = tqdm(total=total_frames)
+            # prog = tqdm(total=total_frames)
 
             while self.acquisition_type == "continuous" or frame_idx < max_frames:
 
@@ -992,19 +996,21 @@ class FlirRecorder:
                     print("Stopping recording")
                     break
 
-                prog, frame_idx = self.update_progress(frame_idx, total_frames, max_frames, prog)
-
+                # prog, frame_idx = self.update_progress(frame_idx, total_frames, max_frames, prog)
+                # print(f"Frame {frame_idx + 1}")
                 # Wait until all queues have at least one item
-                acquisition_frames = [self.acquisition_queue[acq].get() for acq in self.acquisition_queue] 
+                acquisition_frames = [self.acquisition_queue[c].get() for c in self.cam_serials] 
 
                 camera_metadata = []
                 real_time_images = []
                 self.frame_metadata = self.initialize_frame_metadata()
 
+                
+
                 for frame_data in acquisition_frames:
 
                     camera_serial = frame_data['camera_serial']
-                    qlen = self.acquisition_queue[camera_serial].qsize()
+                    # qlen = self.acquisition_queue[camera_serial].qsize()
                     
                     self.frame_metadata['timestamps'].append(frame_data['timestamp'])
                     self.frame_metadata['frame_id'].append(frame_data['frame_id'])
@@ -1016,17 +1022,37 @@ class FlirRecorder:
                     self.frame_metadata['frame_rates_binning'].append(30)
                     self.frame_metadata['frame_rates_requested'].append(30)
 
-                    # get the index of the camera 
-                    camera_index = self.cam_serials.index(camera_serial)
-                    frame_id_array[frame_idx, camera_index] = frame_data['frame_id']
+                    if frame_idx == 0:
+                        self.initial_timestamp[camera_serial] = frame_data['timestamp']
 
-                    camera_metadata.append((camera_serial, frame_data['frame_id'], qlen))
+                    
+                    self.monitor_frames( 
+                        frame_idx,
+                        frame_data['frame_id'],
+                        frame_data['timestamp'],
+                        camera_serial
+                    )
+
+                    self.prev_timestamp[camera_serial] = frame_data['timestamp']
+
+                    # get the index of the camera 
+                    # camera_index = self.cam_serials.index(camera_serial)
+                    # frame_id_array[frame_idx, camera_index] = frame_data['frame_id']
+
+                    # camera_metadata.append((camera_serial, frame_data['frame_id'], qlen))
 
                     # if self.preview_callback is not None:
                     #     real_time_images.append((frame_data['image'], self.pixel_format_conversion[frame_data['pixel_format']]))
 
                     # except queue.Empty:
                     #     camera_metadata.append(None)
+
+                # # check if the frame_id is consistent across all cameras
+                # if len(set(self.frame_metadata['frame_id'])) != 1:
+                #     print("Frame ID mismatch detected")
+                #     print(frame_idx + 1, self.frame_metadata['frame_id'])
+
+                
 
                 # Put the frame metadata into the json queue
                 if self.video_base_file is not None:
@@ -1038,23 +1064,33 @@ class FlirRecorder:
 
                 frame_idx += 1
 
-                print(frame_idx, camera_metadata)
+                # print(frame_idx, camera_metadata)
                 # synchronized_metadata.append(camera_metadata)
                 # print(synchronized_metadata)
 
-            for f in frame_id_array:
-                print(f)
+            # for f in frame_id_array:
+            #     print(f)
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=len(self.cams)) as executor:
+        # with concurrent.futures.ThreadPoolExecutor(max_workers=len(self.cams)) as executor:
+        #     # Start all camera captures in parallel
+        #     future_to_camera = {executor.submit(get_camera_image, camera): camera for camera in self.cams}
+
+        #     try:
+        #         process_synchronized_metadata()
+        #     finally:
+        #         running = False
+        #         for future in future_to_camera:
+        #             future.cancel()
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(self.cams)) as camera_executor, \
+            concurrent.futures.ThreadPoolExecutor(max_workers=1) as metadata_executor:
+            
             # Start all camera captures in parallel
-            future_to_camera = {executor.submit(get_camera_image, camera): camera for camera in self.cams}
+            future_to_camera = {camera_executor.submit(get_camera_image, camera): camera for camera in self.cams}
 
-            try:
-                process_synchronized_metadata()
-            finally:
-                running = False
-                for future in future_to_camera:
-                    future.cancel()
+            # Start metadata processing in parallel
+            metadata_future = metadata_executor.submit(process_synchronized_metadata)
+
 
         # while self.acquisition_type == "continuous" or frame_idx < max_frames:
         #     if self.stop_recording.is_set():
