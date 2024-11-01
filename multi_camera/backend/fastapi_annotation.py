@@ -187,7 +187,7 @@ app.add_middleware(
 
 @app.get("/")
 async def read_root(request: Request):
-    return templates.TemplateResponse("index.html", context={"request": request})
+    return templates.TemplateResponse("index_annotation.html", context={"request": request})
 
 
 @api_router.websocket("/ws/{client_id}")
