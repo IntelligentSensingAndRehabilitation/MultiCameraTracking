@@ -6,7 +6,7 @@ import axios from 'axios';
 // if not set, then use localhost
 const BASE_HOSTNAME = process.env.REACT_APP_BASE_URL || 'localhost';
 
-const BASE_URL = `${BASE_HOSTNAME}:8000/api/v1`;
+const BASE_URL = `${BASE_HOSTNAME}:8005/api/v1`;
 const API_BASE_URL = `http://${BASE_URL}`;
 const WS_BASE_URL = `ws://${BASE_URL}/ws`;
 
