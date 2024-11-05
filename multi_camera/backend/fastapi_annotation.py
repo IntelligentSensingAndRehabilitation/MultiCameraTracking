@@ -45,11 +45,11 @@ log_colors_config = {
 log_format = colorlog.ColoredFormatter(
     "%(log_color)s%(levelname)s (%(name)s):%(reset)s  %(message)s", log_colors=log_colors_config
 )
-acquisition_logger = logging.getLogger("acquisition")
+annotation_logger = logging.getLogger("annotation")
 streamHandler = logging.StreamHandler()
 streamHandler.setFormatter(log_format)
-acquisition_logger.addHandler(streamHandler)
-acquisition_logger.setLevel(logging.DEBUG)
+annotation_logger.addHandler(streamHandler)
+annotation_logger.setLevel(logging.DEBUG)
 
 
 class Session(BaseModel):
@@ -118,7 +118,7 @@ def receive_status(status, progress=None):
     if progress is not None:
         update["progress"] = progress
     else:
-        acquisition_logger.info(f"Status: {status}")
+        annotation_logger.info(f"Status: {status}")
 
     # Put the status in the queue using asyncio from a synchronous function
     loop.create_task(manager.broadcast(update))
@@ -129,7 +129,7 @@ async def lifespan(app: FastAPI):
     state: GlobalState = get_global_state()
 
     # Perform startup tasks
-    acquisition_logger.info("Starting annotation system")
+    annotation_logger.info("Starting annotation system")
 
     state = get_global_state()
 
@@ -140,14 +140,14 @@ async def lifespan(app: FastAPI):
     try:
         synchronize_to_datajoint(db)
     except Exception as e:  
-        acquisition_logger.error(f"Could not synchronize to datajoint: {e}")
+        annotation_logger.error(f"Could not synchronize to datajoint: {e}")
         
 
     yield
 
     # Perform shutdown tasks
     state.acquisition.close()
-    acquisition_logger.info("Acquisition system closed")
+    annotation_logger.info("Acquisition system closed")
 
 
 app = FastAPI(lifespan=lifespan)
