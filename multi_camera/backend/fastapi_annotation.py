@@ -1,10 +1,7 @@
 from fastapi import FastAPI, Depends, Request, APIRouter, WebSocket, WebSocketDisconnect, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
-from starlette.concurrency import run_in_threadpool
 from uvicorn.main import Server
-from websockets.exceptions import ConnectionClosedOK
 from datetime import date
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
