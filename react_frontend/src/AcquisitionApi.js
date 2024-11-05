@@ -241,37 +241,6 @@ export const AquisitionApi = (props) => {
         return response.data;
     };
 
-    // Mesh functions
-
-    const fetchUnannotatedRecordings = async () => {
-        const recordings = await axios.get(`${API_BASE_URL}/unannotated_recordings`);
-        return recordings.data.video_base_filenames;
-    };
-
-    const annotateRecording = async (filename, ids) => {
-        const response = await axios.post(`${API_BASE_URL}/annotation`,
-            {
-                video_base_filename: filename,
-                ids: ids
-            }
-        );
-        return response.data.success;
-    };
-
-    async function fetchMesh(filename, downsampling) {
-        // Fetch the mesh data for the given recording
-        const response = await axios.get(`${API_BASE_URL}/mesh`, {
-            params: {
-                filename: filename,
-                downsample: downsampling
-            }
-        });
-        const data = response.data;
-        // unpack the base64 encoded mesh data
-        data.meshes = JSON.parse(Buffer.from(data.meshes, 'base64'))
-        return response.data;
-    }
-
     // Biomechanics functions
 
     async function fetchBiomechanicsTrials() {
@@ -469,9 +438,6 @@ export const AquisitionApi = (props) => {
         changeComment,
         runCalibration,
         processSession,
-        fetchUnannotatedRecordings,
-        annotateRecording,
-        fetchMesh,
         fetchBiomechanicsTrials,
         fetchBiomechanics,
         fetchSmplTrials,

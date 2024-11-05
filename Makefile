@@ -5,8 +5,11 @@
 
 DIR := ${CURDIR}
 
-build:
-	docker compose build
+build-mocap:
+	docker compose build mocap
+
+build-annotate:
+	docker compose build annotate
 
 run:
 	docker compose run mocap
@@ -16,3 +19,6 @@ test:
 
 reset:
 	docker compose run --rm reset
+
+annotate:
+	docker compose run --rm annotate

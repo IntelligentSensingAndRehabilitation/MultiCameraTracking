@@ -36,3 +36,18 @@ services:
       - ${CAMERA_CONFIGS:-/camera_configs}:/configs
       - /etc/localtime:/etc/localtime:ro
     network_mode: host
+
+  annotate:
+    build:
+      context: .
+      dockerfile: ./docker/Dockerfile.annotation
+    image: peabody124/mocap_split_dev
+    tty: true
+    stdin_open: true
+    environment:
+      REACT_APP_BASE_URL: ${REACT_APP_BASE_URL:-localhost}
+      PYTHONUNBUFFERED: 1
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - ${DATAJOINT_EXTERNAL:-/mnt/datajoint_external}:/datajoint_external
+    network_mode: host

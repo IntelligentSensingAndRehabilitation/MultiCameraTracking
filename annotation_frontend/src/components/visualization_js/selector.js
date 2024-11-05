@@ -1,0 +1,94 @@
+import * as THREE from 'three';
+
+class Selector extends THREE.EventDispatcher {
+    constructor(viewer) {
+        super();
+
+        this.viewer = viewer;
+        this.raycaster = new THREE.Raycaster();
+        this.raycaster.layers.set(1);
+        this.mousePos = new THREE.Vector2();
+        this.selected = [];
+        this.hovered = null;
+        this.dragging = false;
+        this.selectable = viewer.scene.children.filter(
+            o => o instanceof THREE.Group);
+
+        const domElement = this.viewer.domElement;
+        domElement.addEventListener('pointermove', this.onPointerMove.bind(this));
+        domElement.addEventListener('pointerdown', this.onPointerDown.bind(this));
+        domElement.addEventListener('pointerup', this.onPointerUp.bind(this));
+    }
+
+    updateSelectable() {
+        this.selectable = this.viewer.scene.children.filter(
+            o => o instanceof THREE.Group);
+    }
+
+    onPointerMove(event) {
+        event.preventDefault();
+        this.dragging = true;
+
+        const rect = this.viewer.domElement.getBoundingClientRect();
+        this.mousePos.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+        this.mousePos.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+        this.raycaster.setFromCamera(this.mousePos, this.viewer.camera);
+        const intersections =
+            this.raycaster.intersectObjects(this.selectable, true);
+
+        if (intersections.length > 0) {
+            let object = intersections[0].object;
+            if (object.parent.name === 'world') {
+                return;
+            }
+            while (object.parent && !object.name) {
+                object = object.parent;
+            }
+            if (this.hovered !== object) {
+                if (this.hovered) {
+                    this.dispatchEvent({ type: 'hoveroff', object: this.hovered });
+                }
+                this.hovered = object;
+                this.dispatchEvent({ type: 'hoveron', object: this.hovered });
+                this.viewer.domElement.style.cursor = 'pointer';
+            }
+        } else if (this.hovered !== null) {
+            this.dispatchEvent({ type: 'hoveroff', object: this.hovered });
+
+            this.viewer.domElement.style.cursor = 'auto';
+            this.hovered = null;
+        }
+    }
+
+    onPointerDown(event) {
+        event.preventDefault();
+        this.dragging = false;
+    }
+
+    onPointerUp(event) {
+        event.preventDefault();
+        if (this.dragging) return;  // ignore drag events, only handle clicks
+        this.raycaster.setFromCamera(this.mousePos, this.viewer.camera);
+        const intersections =
+            this.raycaster.intersectObjects(this.selectable, true);
+
+        if (intersections.length > 0) {
+            let object = intersections[0].object;
+            while (object.parent && !object.name) {
+                object = object.parent;
+            }
+            // check if object in the list this.selected
+            if (this.selected.includes(object)) {
+                // remove object from the list
+                this.selected = this.selected.filter(item => item !== object);
+                this.dispatchEvent({ type: 'deselect', object: object });
+            } else {
+                // add object to the list
+                this.selected.push(object);
+                this.dispatchEvent({ type: 'select', object: object });
+            }
+        }
+    }
+}
+
+export { Selector };
