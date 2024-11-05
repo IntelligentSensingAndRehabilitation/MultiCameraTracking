@@ -1,25 +1,39 @@
-[tool.black]
-line-length = 150
-
-[tool.poetry]
+[project]
 name = "multi_camera"
-version = "0.2.0"
+version = "0.1.0"
 description = "Library for multi-camera acquisition and analysis."
-authors = ["James Cotton <peabody124@gmail.com>"]
-url="https://github.com/peabody124/MultiCameraTracking"
+authors = [
+  {name = "James Cotton", email = "peabody124@gmail.com"},
+  {name = "Kunal Shah", email = "kshah@ricres.org"},
+  ]
+readme = "README.md"
+requires-python = "~=3.11"
+dependencies = [
+    "aniposelib>=0.7.0",
+    "colorlog>=6.8.2",
+    "einops>=0.8.0",
+    "fastapi[all]>=0.115.0",
+    "jax[cuda12]>=0.4.28",
+    "jaxlib>=0.4.24",
+    "jaxlie>=1.4.1",
+    "jaxopt>=0.8.3",
+    "llvmlite>=0.43.0",
+    "matplotlib>=3.9.2",
+    "numba>=0.60.0",
+    "numpy>1.24",
+    "opencv-contrib-python<4.10",
+    "opencv-python<4.10",
+    "optax>=0.2.2",
+    "pillow>10",
+    "pyyaml>=6.0.2",
+    "simple-pyspin>=0.1.1",
+    "sqlalchemy>=2.0.35",
+    "tqdm>4.6",
+]
 
-[tool.poetry.dependencies]
-datajoint = "*"
-opencv-python = "*"
-opencv-contrib-python = "*"
-numpy = "*"
-scipy = "*"
-tqdm = "*"
-jax = "*"
-jaxlib = "*"
-jaxopt = "*"
-jaxlie = "*"
+[tool.uv]
+find-links = ["https://storage.googleapis.com/jax-releases/jax_cuda_releases.html"]
 
 [build-system]
-requires = ["poetry-core>=1.0.0"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
