@@ -737,21 +737,14 @@ class FlirRecorder:
             self.video_base_name = "_".join([self.video_root, time_str])
             self.video_base_file = os.path.join(self.video_path, self.video_base_name)
 
-    def update_progress(self, frame_idx, total_frames, max_frames, prog):
+    def update_progress(self, frame_idx, total_frames):
+        self.set_progress(frame_idx / total_frames)
+
         if self.acquisition_type == "continuous":
-            self.set_progress(frame_idx / total_frames)
-            prog.update(1)
-            
             # Reset the progress bar after each video segment
             if frame_idx % total_frames == 0:
-                prog = tqdm(total=total_frames)
                 frame_idx = 0
                 self.update_filename()
-        else:
-            self.set_progress(frame_idx / max_frames)
-            prog.update(1)
-
-        return prog, frame_idx
     
     def initialize_frame_metadata(self):
             
@@ -991,6 +984,8 @@ class FlirRecorder:
                         print("done processing remaining frames")
                         break
                     print("processing remaining frames")
+
+                self.update_progress(frame_idx, max_frames)
 
                 # Wait until all queues have at least one item
                 acquisition_frames = [self.acquisition_queue[c].get() for c in self.cam_serials] 
