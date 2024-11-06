@@ -932,6 +932,13 @@ class FlirRecorder:
             frame_idx = 0
 
             while self.acquisition_type == "continuous" or frame_idx < max_frames:
+
+                if self.stop_recording.is_set():
+                    # self.stop_recording.clear()
+                    print(f"Stopping {camera_serial} recording\n")
+                    # self.acquisition_queue[camera_serial].put(None)
+                    break
+
                 im_ref = camera.get_image()
                 timestamp = im_ref.GetTimeStamp()
                 chunk_data = im_ref.GetChunkData()
@@ -978,8 +985,12 @@ class FlirRecorder:
 
                 if self.stop_recording.is_set():
                     self.stop_recording.clear()
-                    print("Stopping recording")
-                    break
+                    
+                    # if all acquisition queues have at least one item, continue, otherwise break out of the loop
+                    if not all([self.acquisition_queue[c].qsize() > 0 for c in self.cam_serials]):
+                        print("done processing remaining frames")
+                        break
+                    print("processing remaining frames")
 
                 # Wait until all queues have at least one item
                 acquisition_frames = [self.acquisition_queue[c].get() for c in self.cam_serials] 
