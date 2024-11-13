@@ -16,3 +16,4 @@ jaxopt
 jaxlie
 ipympl
 pytest
+psutil

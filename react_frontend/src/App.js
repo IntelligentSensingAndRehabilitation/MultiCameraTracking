@@ -11,7 +11,6 @@ import { LinkContainer } from 'react-router-bootstrap';
 import AcquisitionHome from './AcquisitionHome';
 import AnalysisHome from './AnalysisHome';
 import { AquisitionApi } from './AcquisitionApi';
-import Annotator from './components/Annotator';
 import BiomechanicsBrowser from './components/BiomechanicsBrowser';
 import Container from "react-bootstrap/Container";
 import SmplBrowser from './components/SmplBrowser';
@@ -31,9 +30,6 @@ function App() {
             <LinkContainer to="/analysis">
               <Nav.Link>Analyze</Nav.Link>
             </LinkContainer>
-            <LinkContainer to="/annotator">
-              <Nav.Link>Annotate</Nav.Link>
-            </LinkContainer>
             <LinkContainer to="/biomechanics_browser">
               <Nav.Link>Biomechanics</Nav.Link>
             </LinkContainer>
@@ -48,7 +44,6 @@ function App() {
         <Routes>
           <Route path="/" element={<AcquisitionHome />} />
           <Route path="/analysis" element={<AnalysisHome />} />
-          <Route path="/annotator" element={<Annotator data="true" />} />
           <Route path="/biomechanics_browser" element={<BiomechanicsBrowser />} />
           <Route path="/smpl_browser" element={<SmplBrowser />} />
         </Routes>

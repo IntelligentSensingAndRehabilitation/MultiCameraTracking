@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useContext } from 'react';
 import { Container, Row, Col, Form, Button, ToggleButton } from "react-bootstrap";
 import { Viewer } from './visualization_js/viewer.js';
-import { AcquisitionState } from "../AcquisitionApi.js";
+import { AnnotationState } from "../AnnotationApi.js";
 
 const system = {
     'meshes': {},
@@ -20,7 +20,7 @@ const Annotator = ({ data }) => {
 
     const [filter, setFilter] = useState(false);
 
-    const { fetchMesh, fetchUnannotatedRecordings, annotateRecording } = useContext(AcquisitionState);
+    const { fetchMesh, fetchUnannotatedRecordings, annotateRecording } = useContext(AnnotationState);
 
     const [currentRecording, setCurrentRecording] = useState(null);
     const [recordingValidated, setRecordingValidated] = useState(false);
