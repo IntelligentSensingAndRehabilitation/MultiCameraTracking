@@ -474,6 +474,11 @@ class FlirRecorder:
 
         # Set up thread safe semaphore to stop recording from a different thread
         self.stop_recording = threading.Event()
+        self.stop_frame_set = threading.Event()
+
+        # Set up thread safe counter for frame count
+        self.frame_counter_lock = threading.Lock()
+        self.stop_frame = 0
 
         self.preview_callback = None
         self.cams = []
@@ -806,6 +811,19 @@ class FlirRecorder:
                 self.frame_metadata["first_bad_frame"] = self.first_bad_frame
             # timestamp_diff[c.DeviceSerialNumber] = cur_timestamp_diff
 
+    def increment_frame_counter(self):
+        with self.frame_counter_lock:
+            self.frame_counter += 1
+
+    def get_frame_count(self):
+        with self.frame_counter_lock:
+            return self.frame_counter
+        
+    def set_stop_frame(self, cleanup_frames):
+        self.stop_frame = self.get_frame_count() + cleanup_frames
+        self.stop_frame_set.set()
+        print("stop_frame", self.stop_frame)
+
     def start_acquisition(self, recording_path=None, preview_callback: callable = None, max_frames: int = 1000):
         self.set_status("Recording")
 
@@ -926,11 +944,15 @@ class FlirRecorder:
 
             while self.acquisition_type == "continuous" or frame_idx < max_frames:
 
-                if self.stop_recording.is_set():
+                if self.stop_frame_set.is_set():
                     # self.stop_recording.clear()
-                    print(f"Stopping {camera_serial} recording\n")
-                    # self.acquisition_queue[camera_serial].put(None)
-                    break
+                    print(f"{camera_serial} | {frame_idx} | {self.stop_frame}")
+                    # Check if the camera frame count is equal to the stop_frame
+                    if frame_idx >= self.stop_frame:
+
+                        print(f"Stopping {camera_serial} recording\n")
+                        self.acquisition_queue[camera_serial].put(None)
+                        break
 
                 im_ref = camera.get_image()
                 timestamp = im_ref.GetTimeStamp()
@@ -973,22 +995,34 @@ class FlirRecorder:
 
         def process_synchronized_metadata():
             frame_idx = 0
+            self.frame_counter = 0
+            cleanup_frames = 10
 
             while self.acquisition_type == "continuous" or frame_idx < max_frames:
 
                 if self.stop_recording.is_set():
-                    self.stop_recording.clear()
+                    # self.stop_recording.clear()
                     
-                    # if all acquisition queues have at least one item, continue, otherwise break out of the loop
-                    if not all([self.acquisition_queue[c].qsize() > 0 for c in self.cam_serials]):
-                        print("done processing remaining frames")
-                        break
-                    print("processing remaining frames")
+                    # # if all acquisition queues have at least one item, continue, otherwise break out of the loop
+                    # if not all([self.acquisition_queue[c].qsize() > 0 for c in self.cam_serials]):
+                    #     print("done processing remaining frames")
+                    #     break
+                    # print("processing remaining frames")
+                    
+                    # Set the current stop_frame
+                    if not self.stop_frame_set.is_set():
+                        print("setting stop frame")
+                        self.set_stop_frame(cleanup_frames)
+                    else:
+                        print("cleaning_up", frame_idx, self.stop_frame)
 
-                self.update_progress(frame_idx, max_frames)
+                
 
                 # Wait until all queues have at least one item
                 acquisition_frames = [self.acquisition_queue[c].get() for c in self.cam_serials] 
+
+                self.update_progress(frame_idx, max_frames)
+                self.increment_frame_counter()
 
                 real_time_images = []
                 self.frame_metadata = self.initialize_frame_metadata()
@@ -1046,6 +1080,10 @@ class FlirRecorder:
         if self.preview_callback:
             self.preview_callback(None)
 
+        self.stop_frame_set.clear()
+        self.stop_recording.clear()
+        print(self.stop_recording.is_set())
+        print(self.stop_frame_set.is_set())
         print("Finished recording")
 
         exposure_times = []
