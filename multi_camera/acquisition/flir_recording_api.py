@@ -791,11 +791,11 @@ class FlirRecorder:
     def monitor_frames(self, frame_idx, frame_id, timestamp, camera_serial):
         curr_frame_diff = (frame_idx+1) - frame_id
         if curr_frame_diff != self.frame_diff[camera_serial] and curr_frame_diff != 0:
-            print(f"{camera_serial}: Frame ID mismatch: {frame_idx + 1} {frame_id}")
+            print(f"{camera_serial}: Frame ID mismatch | loop: {frame_idx + 1} | cam: {frame_id}")
             print("checking image queue sizes")
-            self.check_queue_sizes(self.image_queue_dict)
+            # self.check_queue_sizes(self.image_queue_dict)
             print("checking acquisition queue sizes")
-            self.check_queue_sizes(self.acquisition_queue)
+            # self.check_queue_sizes(self.acquisition_queue)
             self.frame_diff[camera_serial] = (frame_idx+1) - frame_id
             
             if timestamp != 0 and self.prev_timestamp[camera_serial] != 0:
@@ -954,12 +954,30 @@ class FlirRecorder:
                         self.acquisition_queue[camera_serial].put(None)
                         break
 
-                im_ref = camera.get_image()
-                timestamp = im_ref.GetTimeStamp()
-                chunk_data = im_ref.GetChunkData()
-                frame_id = im_ref.GetFrameID()
-                frame_id_abs = chunk_data.GetFrameID()
-                serial_msg, frame_count = self.process_serial_data(camera)
+                try:
+                    im_ref = camera.get_image()
+
+                    
+                    if im_ref.IsIncomplete():
+                        
+                        im_stat = im_ref.GetImageStatus()
+                        print(f"{camera_serial}: Image incomplete\n{PySpin.Image.GetImageStatusDescription(im_stat)}")
+                    
+
+                    timestamp = im_ref.GetTimeStamp()
+                    chunk_data = im_ref.GetChunkData()
+                    frame_id = im_ref.GetFrameID()
+                    frame_id_abs = chunk_data.GetFrameID()
+                    serial_msg, frame_count = self.process_serial_data(camera)
+                except Exception as e:
+                    print(f"{e}*************{camera_serial}***************************** FAILED TO GET IMAGE ******************************************")
+                    time.sleep(0.1)
+                    continue
+
+                # Check if the frame is none
+                if im_ref is None:
+                    print("############################################### IMAGE IS NONE ******************************************")
+                    continue
                 
                 try:
                     im = im_ref.GetNDArray()
@@ -990,7 +1008,7 @@ class FlirRecorder:
                     continue
                 # put the frame data into the acquisition queue
                 self.acquisition_queue[camera_serial].put(frame_data)
-
+                
                 frame_idx += 1
 
         def process_synchronized_metadata():
@@ -1016,10 +1034,17 @@ class FlirRecorder:
                     else:
                         print("cleaning_up", frame_idx, self.stop_frame)
 
-                
+                # Check if all acquisition queues have at least one item
+                if any([self.acquisition_queue[c].empty() for c in self.cam_serials]):
+                    time.sleep(0.1)
+                    continue
 
                 # Wait until all queues have at least one item
-                acquisition_frames = [self.acquisition_queue[c].get() for c in self.cam_serials] 
+                # acquisition_frames = [self.acquisition_queue[c].get() for c in self.cam_serials] 
+                acquisition_frames = []
+                for c in self.cam_serials:
+                    acquisition_frames.append(self.acquisition_queue[c].get())
+                    self.acquisition_queue[c].task_done()
 
                 self.update_progress(frame_idx, max_frames)
                 self.increment_frame_counter()
