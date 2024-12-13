@@ -130,6 +130,7 @@ with tab1:
         "slow": "Overground Walking",
         "ssgs": "Overground Walking",
         "_ss_": "Overground Walking",
+        "6MWT": "Overground Walking",
         "tug": "TUG",
         "fsst": "FSST",
         "tandem": "Tandem Walking",
@@ -146,6 +147,7 @@ with tab1:
         "slow": "Slow",
         "ssgs": "ssgs",
         "_ss_": "ssgs",
+        "6MWT": "6MWT",
     }
 
     def fill_annotation(row, mapping):
