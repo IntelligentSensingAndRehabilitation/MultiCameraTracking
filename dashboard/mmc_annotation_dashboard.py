@@ -60,6 +60,7 @@ with tab1:
     res = Recording & (MultiCameraRecording  & 'video_project NOT LIKE "h36m"') - MMCVideoActivity #TODO: need to expand this later
     st.write("# Annotate MMC Videos")
     participant_id = st.selectbox("Participant ID", st.session_state['participant_id_options'], key='participant_id',on_change=load_data)
+    participant_res = Recording & {'participant_id':participant_id}# this is necessary to restrict the MultiCameraRecording table to the selected participant
     st.session_state['session_date_options'] = (Session & ((Recording & {"participant_id":  participant_id}) - (MMCVideoActivity & {"participant_id":  participant_id}))).fetch('session_date')
     session_date = st.selectbox("Session Date", st.session_state['session_date_options'], key='session_date',index=0)
 
@@ -146,6 +147,7 @@ with tab1:
         "LTest":"L-test",
         "ltest":"L-test",
         "l test":"L-test",
+        "_FGA_": "Overground Walking",
         "CUET":"CUET",
         "circuit":"Mixed",
         "circuits":"Mixed",
@@ -155,10 +157,17 @@ with tab1:
         "slow": "Slow",
         "ssgs": "ssgs",
         "_ss_": "ssgs",
-        "6MWT": "6MWT",
         "_cogTUG_":"Cognitive",
         "_TUG_":"Normal",
-
+        "FGA_20ft_": "FGA_20ft",
+        "FGA_no_": "FGA_no",
+        "FGA_yes_": "FGA_yes",
+        "FGA_varying_": "FGA_varying",
+        "FGA_pivot_": "FGA_pivot",
+        "FGA_step_over_": "FGA_step_over",
+        "FGA_closed_": "FGA_closed",
+        "FGA_backwards_": "FGA_backwards",
+        "6MWT": "6MWT",
     }
 
     def fill_annotation(row, mapping):
@@ -183,24 +192,24 @@ with tab1:
             print(st.session_state['data_editor'])
             for idx,row in edited_df.iterrows():
                 if row["Annotation"] is not None:
-                    key = (MultiCameraRecording & {'recording_timestamps':row['recording_timestamps']}).fetch1("KEY")
+                    key = (MultiCameraRecording & participant_res & {'recording_timestamps':row['recording_timestamps']}).fetch1("KEY")
                     key.update({'video_activity': row["Annotation"]})
                     MMCVideoActivity.insert1(key, skip_duplicates=True)
                 if row["Annotation Sub-Type"] is not None:
                     if row["Annotation"] == "Overground Walking":
-                        key = (MMCVideoActivity & {'recording_timestamps':row['recording_timestamps']}).fetch1("KEY")
+                        key = (MMCVideoActivity & participant_res & {'recording_timestamps':row['recording_timestamps']}).fetch1("KEY")
                         key.update({'walking_type': row["Annotation Sub-Type"]})
                         MMCWalkingType.safe_insert(key, skip_duplicates=True)
                     elif row["Annotation"] == "TUG":
-                        key = (MMCVideoActivity & {'recording_timestamps':row['recording_timestamps']}).fetch1("KEY")
+                        key = (MMCVideoActivity & participant_res & {'recording_timestamps':row['recording_timestamps']}).fetch1("KEY")
                         key.update({'tug_type': row["Annotation Sub-Type"]})
                         MMCTUGType.safe_insert(key, skip_duplicates=True)
                 if row["Assistive Device"] is not None:
-                    key = (MultiCameraRecording & {'recording_timestamps':row['recording_timestamps']}).fetch1("KEY")
+                    key = (MultiCameraRecording & participant_res & {'recording_timestamps':row['recording_timestamps']}).fetch1("KEY")
                     key.update({'assistive_device': row["Assistive Device"]})
                     MMCAssistiveDevice.insert1(key, skip_duplicates=True)
                 else:
-                    key = (MultiCameraRecording & {'recording_timestamps':row['recording_timestamps']}).fetch1("KEY")
+                    key = (MultiCameraRecording & participant_res & {'recording_timestamps':row['recording_timestamps']}).fetch1("KEY")
                     key.update({'assistive_device': "None"})
                     MMCAssistiveDevice.insert1(key, skip_duplicates=True)
             load_data()

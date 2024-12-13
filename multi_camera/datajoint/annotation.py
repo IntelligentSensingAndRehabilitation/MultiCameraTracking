@@ -53,7 +53,7 @@ class WalkingTypeLookup(dj.Lookup):
     definition = """
     walking_type: varchar(32)
     """
-    contents = zip(["Fast", "Slow", "ssgs"])
+    contents = zip(["Fast", "Slow", "ssgs", "FGA_20ft", "FGA_no", "FGA_yes", "FGA_varying", "FGA_pivot", "FGA_step_over", "FGA_closed", "FGA_backwards"])
 
 @schema
 class WalkingType(dj.Manual):
