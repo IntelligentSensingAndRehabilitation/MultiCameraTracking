@@ -24,9 +24,15 @@ This project is under active development and breaking changes may be introduced.
 # Usage
 
 ## Installation:
+Activate your desired enviornment manager (conda or venv) and install with:
 
-    pip install -r requirements
     pip install -e .
+
+If uv is installed on your system, install with:
+
+    uv pip install -e .
+
+more details can be found [here](https://gist.github.com/peifferjd/0afc6484a99cf968cde16edb26752901).
 
 ## Running Web GUI
 
