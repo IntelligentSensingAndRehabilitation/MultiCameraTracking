@@ -27,6 +27,8 @@ class VideoActivityLookup(dj.Lookup):
             "PST Open",
             "PST Closed",
             "Ramp",
+            "cognitive TUG",
+            "L-test",
             "Other",
         ]
     )
@@ -70,6 +72,34 @@ class WalkingType(dj.Manual):
             WalkingType.insert1(keys, **kwargs)
         else:
             WalkingType.insert(keys, **kwargs)
+
+@schema
+class TUGTypeLookup(dj.Lookup):
+    definition = """
+    tug_type: varchar(32)
+    """
+    contents = zip(["Normal", "Cognitive"])
+
+
+@schema
+class TUGType(dj.Manual):
+    definition = """
+    # annotates the subtype of TUG. This is only for TUG.
+    -> VideoActivity
+    ---
+    -> TUGTypeLookup
+    """
+
+    def safe_insert(keys, **kwargs):
+        possible_strings = ['TUG']
+        activities = np.unique((VideoActivity & keys).fetch("video_activity"))
+        assert np.isin(activities, possible_strings).all(), "Only TUG is allowed for this table"
+        if len(keys) == 1 or type(keys) == dict:
+            TUGType.insert1(keys, **kwargs)
+        else:
+            TUGType.insert(keys, **kwargs)
+
+
 
 
 @schema
