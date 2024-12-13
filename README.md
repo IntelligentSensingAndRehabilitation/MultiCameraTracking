@@ -24,7 +24,7 @@ This project is under active development and breaking changes may be introduced.
 # Usage
 
 ## Installation:
-Activate your desired enviornment manager (conda or venv) and install with:
+Activate your desired environment manager (conda or venv) and install with:
 
     pip install -e .
 
