@@ -41,7 +41,7 @@ def get_height(key):
     which is rather inelegant but works for now
     """
 
-    from sensor_fusion.emgimu_session import Height
+    from portable_biomechanics_sessions.emgimu_session import Height
     from multi_camera.datajoint.sessions import get_subject_id_from_participant_id
 
     subject_id = get_subject_id_from_participant_id(key["participant_id"])
