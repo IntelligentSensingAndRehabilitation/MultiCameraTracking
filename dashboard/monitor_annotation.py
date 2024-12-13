@@ -4,8 +4,8 @@ import pandas as pd
 
 from multi_camera.datajoint.multi_camera_dj import MultiCameraRecording
 from multi_camera.datajoint.annotation import VideoActivity as MMCVideoActivity, WalkingType as MMCWalkingType, AssistiveDevice as MMCAssistiveDevice
-from sensor_fusion.session_annotations import VideoActivity as SFVideoActivity, WalkingType as SFWalkingType, AssistiveDevice as SFAssistiveDevice
-from sensor_fusion.emgimu_session import FirebaseSession
+from portable_biomechanics_sessions.session_annotations import VideoActivity as SFVideoActivity, WalkingType as SFWalkingType, AssistiveDevice as SFAssistiveDevice
+from portable_biomechanics_sessions.emgimu_session import FirebaseSession
 
 st.set_page_config(layout="wide", page_title="Annotation Tracker")
 
@@ -43,7 +43,7 @@ for i in range(len(vp)):
 df = pd.concat([df, pd.DataFrame(disp, index=["Assistive Device"])], ignore_index=False)
 
 # missing sensor annotations
-from sensor_fusion.session_annotations import SessionSensor,SensorPlacement
+from portable_biomechanics_sessions.session_annotations import SessionSensor,SensorPlacement
 vp,counts = np.unique(((FirebaseSession.AppVideo & SessionSensor) - SensorPlacement).fetch("video_project"), return_counts=True)
 disp = {}
 # display in streamlit

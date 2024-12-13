@@ -4,7 +4,7 @@ import glob
 import numpy as np
 import pandas as pd
 from pose_pipeline import BlurredVideo
-from sensor_fusion.mmc_linkage import RecordingLink
+from portable_biomechanics_sessions.mmc_linkage import RecordingLink
 from multi_camera.datajoint.multi_camera_dj import (
     MultiCameraRecording,
     SingleCameraVideo,
@@ -133,6 +133,7 @@ with tab1:
         "slow": "Overground Walking",
         "ssgs": "Overground Walking",
         "_ss_": "Overground Walking",
+        "6MWT": "Overground Walking",
         "tug": "TUG",
         "fsst": "FSST",
         "tandem": "Tandem Walking",
@@ -166,6 +167,7 @@ with tab1:
         "FGA_step_over_": "FGA_step_over",
         "FGA_closed_": "FGA_closed",
         "FGA_backwards_": "FGA_backwards",
+        "6MWT": "6MWT",
     }
 
     def fill_annotation(row, mapping):
