@@ -149,7 +149,7 @@ class BiomechanicalReconstruction(dj.Computed):
         assert len(trials) > 0, "No trials to process"
 
         if key["bilevel_settings"] > 1:
-            from sensor_fusion.emgimu_session import Height
+            from portable_biomechanics_sessions.emgimu_session import Height
 
             height = (Height & key).fetch1("height_mm") / 1000.0
         else:
