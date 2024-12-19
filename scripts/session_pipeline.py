@@ -16,7 +16,7 @@ from multi_camera.datajoint.easymocap import EasymocapTracking, EasymocapSmpl
 from multi_camera.utils.standard_pipelines import reconstruction_pipeline
 import argparse
 
-pose_pipeline.set_environmental_variables()
+# pose_pipeline.set_environmental_variables()
 
 pose_pipeline.env.pytorch_memory_limit()
 pose_pipeline.env.tensorflow_memory_limit()
