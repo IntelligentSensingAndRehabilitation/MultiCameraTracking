@@ -22,7 +22,6 @@ pose_pipeline.env.pytorch_memory_limit()
 pose_pipeline.env.tensorflow_memory_limit()
 pose_pipeline.env.jax_memory_limit()
 
-
 def assign_calibration():
     # find the calibration that is closest in time to each recording that also has a minimum
     # threshold. note that this will possibly allow different calibrations within a session,
@@ -70,8 +69,11 @@ def preannotation_session_pipeline(keys: List[Dict] = None, bridging: bool = Tru
         bottom_up_pipeline(keys, bottom_up_method_name="OpenPose_HR", reserve_jobs=True)
 
     # now run easymocap
+    print("populating video info")
     VideoInfo.populate(SingleCameraVideo * MultiCameraRecording & keys, reserve_jobs=True)
+    print("populating easymocaptracking")
     EasymocapTracking.populate(MultiCameraRecording * CalibratedRecording & keys, reserve_jobs=True, suppress_errors=True)
+    print("populating easymocapsmpl")
     EasymocapSmpl.populate(MultiCameraRecording * CalibratedRecording & keys, reserve_jobs=True, suppress_errors=True)
 
 
@@ -120,7 +122,7 @@ if __name__ == "__main__":
 
     if args.post_annotation:
         postannotation_session_pipeline()
-        postannotation_session_pipeline(top_down_method_name="MMPoseHalpe")
+        postannotation_session_pipeline(top_down_method_name="MMPose_RTMPose_Cocktail14")
     else:
         # assign_calibration()
 
@@ -132,7 +134,7 @@ if __name__ == "__main__":
             keys = (SingleCameraVideo & Recording - EasymocapSmpl & (Recording & "participant_id NOT IN (72,73,504)")).fetch("KEY")
             preannotation_session_pipeline(keys)
         postannotation_session_pipeline()
-        postannotation_session_pipeline(top_down_method_name="MMPoseHalpe")
+        postannotation_session_pipeline(top_down_method_name="MMPose_RTMPose_Cocktail14")
 
     # assign_calibration()
     # keys = (SingleCameraVideo & Recording - EasymocapSmpl & (Recording & 'participant_id NOT IN (72,73,504)')).fetch('KEY')
