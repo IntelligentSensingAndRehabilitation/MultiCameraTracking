@@ -69,7 +69,7 @@ def reconstruction_pipeline(
         k["tracking_method"] = tracking_method
         PersonKeypointReconstructionMethod.insert1(k, skip_duplicates=True)
 
-        if len(PersonKeypointReconstructionMethod - (SingleCameraVideo - (TopDownPerson & k)).proj()) != 1:
+        if len(PersonKeypointReconstructionMethod - (SingleCameraVideo - (TopDownPerson * SingleCameraVideo & k).proj())) != 1:
             print(
                 f"Skipping {k} because some videos are missing keypoints. This likely means you are running two parallel copies of the pipeline, but could mean one step errrored out"
             )
