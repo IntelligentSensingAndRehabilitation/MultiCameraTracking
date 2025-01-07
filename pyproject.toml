@@ -7,23 +7,23 @@ authors = [
   {name = "Kunal Shah", email = "kshah@ricres.org"},
   ]
 readme = "README.md"
-requires-python = "~=3.11"
+requires-python = ">=3.8"
 dependencies = [
     "aniposelib>=0.7.0",
     "colorlog>=6.8.2",
     "einops>=0.8.0",
     "fastapi[all]>=0.115.0",
-    "jax[cuda12]>=0.4.28",
-    "jaxlib>=0.4.24",
-    "jaxlie>=1.4.1",
+    "jax>=0.4.13",
+    "jaxlib>=0.4.13",
+    "jaxlie>=1.4.2",
     "jaxopt>=0.8.3",
-    "llvmlite>=0.43.0",
-    "matplotlib>=3.9.2",
-    "numba>=0.60.0",
+    "llvmlite>=0.41.1",
+    "matplotlib>=3.7.5",
+    "numba>=0.58.1",
     "numpy>1.24",
     "opencv-contrib-python<4.10",
     "opencv-python<4.10",
-    "optax>=0.2.2",
+    "optax>=0.1.8",
     "pillow>10",
     "pyyaml>=6.0.2",
     "simple-pyspin>=0.1.1",
