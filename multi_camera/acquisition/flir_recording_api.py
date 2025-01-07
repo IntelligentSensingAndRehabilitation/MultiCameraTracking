@@ -656,10 +656,6 @@ class FlirRecorder:
 
         self.cams.sort(key=lambda x: x.DeviceSerialNumber)
 
-        # # Print the pixel format and serial ID for each camera
-        # for c in self.cams:
-        #     print(f"Camera {c.DeviceSerialNumber}: {c.PixelFormat}")
-
         self.pixel_format = self.cams[0].PixelFormat
 
         self.set_status("Idle")
@@ -952,19 +948,14 @@ class FlirRecorder:
 
                 try:
                     im_ref = camera.get_image()
-                    # im_ref = camera.cam.GetNextImage(1000)
-
-                    # print("buffer count", camera.GetTransferQueueCurrentBlockCount())
-                    # block_count = camera.TransferQueueCurrentBlockCount
-                    # overflow_count = camera.TransferQueueOverflowCount
-
                     
                     if im_ref.IsIncomplete():
                         
                         im_stat = im_ref.GetImageStatus()
                         print(f"{camera_serial}: Image incomplete\n{PySpin.Image.GetImageStatusDescription(im_stat)}")
+                        im_ref.Release()
+                        continue
                     
-
                     timestamp = im_ref.GetTimeStamp()
                     chunk_data = im_ref.GetChunkData()
                     frame_id = im_ref.GetFrameID()
@@ -975,11 +966,6 @@ class FlirRecorder:
                     if frame_id != prev_frame_id + 1:
                         # If it has not, print the frame id, previous frame id, and buffer count
                         print(f"{camera_serial}: Frame ID mismatch, current frame id: {frame_id}, previous frame id: {prev_frame_id}")
-
-                        # # Check the buffer count
-                        # print(f"{camera_serial}: Buffer count {block_count}, loop count {frame_idx}, frame_id {frame_id}, frames since last {processed_frames}")
-
-                        # processed_frames = 0
 
                     prev_frame_id = frame_id
                     processed_frames += 1
@@ -996,7 +982,6 @@ class FlirRecorder:
                 
                 try:
                     im = im_ref.GetNDArray()
-                    # im_ref.Release()
 
                     if self.video_base_file is not None:
                         self.image_queue_dict[camera_serial].put({
@@ -1005,7 +990,6 @@ class FlirRecorder:
                             "timestamps": timestamp,
                             "base_filename": self.video_base_file
                         })
-
 
                     frame_data = {
                         'image': im,
@@ -1017,19 +1001,21 @@ class FlirRecorder:
                         'camera_serial': camera_serial,
                         'pixel_format': pixel_format
                     }
+                    # put the frame data into the acquisition queue
+                    self.acquisition_queue[camera_serial].put(frame_data)
+
                 except Exception as e:
                     print(e)
                     tqdm.write("Bad frame")
                     continue
                 finally:
+                    # always be sure to release the image reference
                     if im_ref is not None:
                         im_ref.Release()
                     
                     im_ref = None
                     im = None
-
-                # put the frame data into the acquisition queue
-                self.acquisition_queue[camera_serial].put(frame_data)
+                    frame_data = None
                 
                 frame_idx += 1
 
@@ -1040,16 +1026,7 @@ class FlirRecorder:
 
             while self.acquisition_type == "continuous" or frame_idx < max_frames:
 
-                empty_queues = [self.acquisition_queue[c].empty() for c in self.cam_serials]
-
                 if self.stop_recording.is_set():
-                    # self.stop_recording.clear()
-                    
-                    # # if all acquisition queues have at least one item, continue, otherwise break out of the loop
-                    # if not all([self.acquisition_queue[c].qsize() > 0 for c in self.cam_serials]):
-                    #     print("done processing remaining frames")
-                    #     break
-                    # print("processing remaining frames")
                     
                     # Set the current stop_frame
                     if not self.stop_frame_set.is_set():
@@ -1057,8 +1034,14 @@ class FlirRecorder:
                         self.set_stop_frame(cleanup_frames)
                     else:
                         print("cleaning_up", frame_idx, self.stop_frame)
-                        print(f"{self.cam_serials}\n{empty_queues}")
+                        print(f"{self.cam_serials}\n{[self.acquisition_queue[c].empty() for c in self.cam_serials]}")
 
+                        # break out if frame_idx == stop_frame
+                        if frame_idx == self.stop_frame:
+                            print("exiting metadata loop")
+                            break
+
+                empty_queues = [self.acquisition_queue[c].empty() for c in self.cam_serials]
                 # Check if all acquisition queues have at least one item
                 if any(empty_queues):
                     time.sleep(0.1)
@@ -1096,7 +1079,6 @@ class FlirRecorder:
 
                     if frame_idx == 0:
                         self.initial_timestamp[camera_serial] = frame_data['timestamp']
-
                     
                     # self.monitor_frames( 
                     #     frame_idx,
