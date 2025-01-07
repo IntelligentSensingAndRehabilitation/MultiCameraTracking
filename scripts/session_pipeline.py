@@ -126,8 +126,13 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.post_annotation:
-        postannotation_session_pipeline()
-        postannotation_session_pipeline(top_down_method_name="MMPose_RTMPose_Cocktail14")
+        if args.session_date:
+            print("Session Date: ", args.session_date)
+            postannotation_session_pipeline(date_filter=args.session_date)
+            postannotation_session_pipeline(top_down_method_name="MMPose_RTMPose_Cocktail14", date_filter=args.session_date)
+        else:
+            postannotation_session_pipeline()
+            postannotation_session_pipeline(top_down_method_name="MMPose_RTMPose_Cocktail14")
     else:
         # assign_calibration()
 
