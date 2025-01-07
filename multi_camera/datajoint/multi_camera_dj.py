@@ -406,6 +406,7 @@ class PersonKeypointReconstruction(dj.Computed):
         if return_points:
             return joints3d
 
+
 @schema
 class ReprojectionError(dj.Computed):
     definition = """
@@ -415,11 +416,13 @@ class ReprojectionError(dj.Computed):
     ---
     reprojection_error : float
     reprojection_error_timeseries : longblob
+    num_zeros : int
+    num_nans : int
     """
     def make(self, key):
         print(key)
         import numpy as np
-        from multi_camera.analysis.camera import reprojection_error
+        from body_models.losses import reprojection_loss
         from multi_camera.datajoint.multi_camera_dj import SingleCameraVideo, MultiCameraRecording, PersonKeypointReconstruction
         from multi_camera.datajoint.calibrate_cameras import Calibration
         from pose_pipeline import TopDownPerson
@@ -456,18 +459,6 @@ class ReprojectionError(dj.Computed):
             camera_name_list = camera_name.tolist()  # Convert to list
             order = [camera_name_list.index(c) for c in camera_names]
             return np.stack([keypoints[o] for o in order], axis=0)
-        
-        def individual_reprojection_loss(camera_params, points2d, points3d, threshold=0.5, weights=None): 
-            """Compute projection loss for a single camera."""
-            conf = points2d[..., -1]
-            conf = conf * (conf > threshold)  # only use points with high confidence
-            loss = reprojection_error(camera_params, points2d[..., :-1], points3d)
-            loss = np.linalg.norm(loss, axis=-1)
-            loss = loss * conf
-            if weights is not None:
-                weights = weights.reshape(1, 1, loss.shape[2])
-                loss = loss * weights
-            return np.nanmean(loss, axis=2)
 
         def match_joint_count(points2d, points3d):
             """Ensure the number of joints matches between points2d and points3d."""
@@ -475,22 +466,32 @@ class ReprojectionError(dj.Computed):
             points2d = points2d[:, :, :num_joints, :]
             points3d = points3d[:, :num_joints, :]
             return points2d, points3d
+        
         k3d, camera_calibration, camera_names, keypoints, camera_name, recording_timestamps = fetch_key_data(key)
         keypoints = pad_keypoints(keypoints)
         points2d = reorder_keypoints(keypoints, camera_names, camera_name)
         points2d, k3d = match_joint_count(points2d, k3d)
-        reprojection_values = individual_reprojection_loss(camera_calibration, points2d, k3d)
+        reprojection_values = np.nanmean(reprojection_loss(camera_calibration, points2d, k3d,huber_max=50, average = False),axis=2)
         
-        # Insert the reprojection error into the database
-        #  do this for every camera
         for camera_name, reprojection_value in zip(camera_names, reprojection_values):
+            num_zeros = np.sum(reprojection_value == 0)
+            num_nans = np.sum(np.isnan(reprojection_value))
+            
+            # Replace 0s with NaNs
+            reprojection_value_with_nans = np.where(reprojection_value == 0, np.nan, reprojection_value)
+            
+            # Calculate reprojection error after replacing 0s with NaNs
+            reprojection_error_with_nans = float(np.nanmean(reprojection_value_with_nans))
+            if np.isnan(reprojection_error_with_nans):
+                reprojection_error_with_nans = -1.
             self.insert1({
                 **key,
                 "camera_name": camera_name,
-                "reprojection_error": float(np.nanmean(reprojection_value)),
-                "reprojection_error_timeseries": reprojection_value,
+                "reprojection_error": reprojection_error_with_nans,
+                "reprojection_error_timeseries": reprojection_value_with_nans,
+                "num_zeros": num_zeros,
+                "num_nans": num_nans,
             })
-
 
 @schema
 class PersonKeypointReprojectionQuality(dj.Computed):
