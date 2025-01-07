@@ -19,7 +19,6 @@ import pandas as pd
 import hashlib
 import platform
 import psutil
-import gc
 
 
 # Data structures we will expose outside this library
@@ -308,16 +307,6 @@ def write_image_queue(
 
         else:
             out_video.write(im)
-
-            # # Check the timestamp spread between the current frame and previous frame
-            # # Skip if either timestamp is 0
-            # if timestamps[-1] != 0 and timestamps[-2] != 0:
-            #     spread = (timestamps[-1] - timestamps[-2]) * 1e-6
-            #     buffer_fps = acquisition_fps * 1.2
-            #     if spread > buffer_fps:
-            #         print(f"Warning | {serial} Timestamp spread: {spread} {acquisition_fps} {buffer_fps}")
-            #         print("Timestamps: ",timestamps[-1], timestamps[-2])
-            #         # frame_spreads.append((timestamps[-1] - timestamps[-2]) * 1e-6)
 
         image_queue.task_done()
 
@@ -1070,18 +1059,6 @@ class FlirRecorder:
                         print("cleaning_up", frame_idx, self.stop_frame)
                         print(f"{self.cam_serials}\n{empty_queues}")
 
-                        # # Check the status of each camera
-                        # for c in self.cams:
-                        #     serial = c.DeviceSerialNumber
-                        #     gev_status = c.GevIEEE1588Status
-                        #     offset = c.GevIEEE1588OffsetFromMasterLatched
-                        #     link_error_count = c.LinkErrorCount
-                        #     packet_delay = c.GevSCPD
-                        #     packet_size = c.GevSCPSPacketSize
-                        #     resent_count = c.PacketResendRequestCount
-
-                        #     print(f"{serial}: {gev_status} | {offset} | {link_error_count} | {packet_delay} | {packet_size} | {resent_count}")
-
                 # Check if all acquisition queues have at least one item
                 if any(empty_queues):
                     time.sleep(0.1)
@@ -1195,15 +1172,6 @@ class FlirRecorder:
                 self.records_queue.task_done()
 
             self.records_queue.join()
-
-        # check if any threads are still running
-        # threads = threading.enumerate()
-        # print(f"Threads still running: {len(threads)}")
-        # for t in threads:
-        #     print(f"thread name: {t.name} is alive: {t.is_alive()}")
-
-        # print("GARBAGE COLLECTION")
-        # gc.collect()
 
         self.set_status("Idle")
 
