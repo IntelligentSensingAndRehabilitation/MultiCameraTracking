@@ -937,8 +937,6 @@ class FlirRecorder:
             while self.acquisition_type == "continuous" or frame_idx < max_frames:
 
                 if self.stop_frame_set.is_set():
-                    # self.stop_recording.clear()
-                    print(f"{camera_serial} | {frame_idx} | {self.stop_frame}")
                     # Check if the camera frame count is equal to the stop_frame
                     if frame_idx >= self.stop_frame:
 
@@ -1034,7 +1032,7 @@ class FlirRecorder:
                         self.set_stop_frame(cleanup_frames)
                     else:
                         print("cleaning_up", frame_idx, self.stop_frame)
-                        print(f"{self.cam_serials}\n{[self.acquisition_queue[c].empty() for c in self.cam_serials]}")
+                        # print(f"{self.cam_serials}\n{[self.acquisition_queue[c].empty() for c in self.cam_serials]}")
 
                         # break out if frame_idx == stop_frame
                         if frame_idx == self.stop_frame:
@@ -1114,8 +1112,6 @@ class FlirRecorder:
 
         self.stop_frame_set.clear()
         self.stop_recording.clear()
-        print(self.stop_recording.is_set())
-        print(self.stop_frame_set.is_set())
         print("Finished recording")
 
         exposure_times = []
