@@ -129,10 +129,13 @@ if __name__ == "__main__":
         if args.session_date:
             print("Session Date: ", args.session_date)
             postannotation_session_pipeline(date_filter=args.session_date)
-            postannotation_session_pipeline(top_down_method_name="MMPose_RTMPose_Cocktail14", date_filter=args.session_date)
+            postannotation_session_pipeline(top_down_method_name="MMPose_RTMPose_Cocktail14",
+                                            reconstruction_method_name="Robust Triangulation",
+                                            date_filter=args.session_date)
         else:
             postannotation_session_pipeline()
-            postannotation_session_pipeline(top_down_method_name="MMPose_RTMPose_Cocktail14")
+            postannotation_session_pipeline(top_down_method_name="MMPose_RTMPose_Cocktail14"
+                                            reconstruction_method_name="Robust Triangulation")
     else:
         # assign_calibration()
 
@@ -161,10 +164,13 @@ if __name__ == "__main__":
         if args.session_date:
             print("Session Date: ", args.session_date)
             postannotation_session_pipeline(date_filter=args.session_date)
-            postannotation_session_pipeline(top_down_method_name="MMPose_RTMPose_Cocktail14", date_filter=args.session_date)
+            postannotation_session_pipeline(top_down_method_name="MMPose_RTMPose_Cocktail14",
+                                            reconstruction_method_name="Robust Triangulation",
+                                            date_filter=args.session_date)
         else:
             postannotation_session_pipeline()
-            postannotation_session_pipeline(top_down_method_name="MMPose_RTMPose_Cocktail14")
+            postannotation_session_pipeline(top_down_method_name="MMPose_RTMPose_Cocktail14",
+                                            reconstruction_method_name="Robust Triangulation")
 
     # assign_calibration()
     # keys = (SingleCameraVideo & Recording - EasymocapSmpl & (Recording & 'participant_id NOT IN (72,73,504)')).fetch('KEY')
