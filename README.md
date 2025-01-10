@@ -11,7 +11,7 @@ Modules:
 - `multi_camera.utils` - miscellaneous utilities.
 
 
-Acquisition is designed to perform simple multi-camera video acquisition with FLIR cameras. These use network synchronization and are tested on BFS-PGE-31S4C. Requires recent firmware to support IEEE1394 synchronization.
+Acquisition is designed to perform simple multi-camera video acquisition with FLIR cameras. These use network synchronization and are tested on BFS-PGE-31S4C. Requires recent firmware to support IEEE1588 synchronization.
 
 # TODO and Warning
 
@@ -36,22 +36,7 @@ more details can be found [here](https://gist.github.com/peifferjd/0afc6484a99cf
 
 ## Running Web GUI
 
-First start FastAPI backend, which provides a REST API for the acquisition software
-
-    python -m multi_camera.backend.fastapi
-
-Then start the web GUI
-
-    cd react_frontend
-    npm start
-
-## Recording:
-
-    python -m multi_camera.acquisition.flir_recording_api [-h] [-m MAX_FRAMES] [-n NUM_CAMS] [--preview] [-s SCALING] [-c CONFIG] vid_filename
-
-One can either pass a number of frames or hit "Ctrl-C" to stop recording
-
-set_mtu.sh script is used to enable jumbo packets with linux.
+See the [Startup Instructions](docs/acquisition/acquisition_startup.md)
 
 ## Calibration
 
