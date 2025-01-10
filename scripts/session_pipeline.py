@@ -134,7 +134,7 @@ if __name__ == "__main__":
                                             date_filter=args.session_date)
         else:
             postannotation_session_pipeline()
-            postannotation_session_pipeline(top_down_method_name="MMPose_RTMPose_Cocktail14"
+            postannotation_session_pipeline(top_down_method_name="MMPose_RTMPose_Cocktail14",
                                             reconstruction_method_name="Robust Triangulation")
     else:
         # assign_calibration()
