@@ -65,6 +65,10 @@ To visualize a skeleton of the raw triangulated coordinates run `PersonKeypointR
 
 ## SMPL Reconstruction
 
+First, follow the [instructions from EasyMocap](https://github.com/arashsm79/EasyMocap/blob/master/doc/installation.md) to set up the SMPL models.
+
+**Note:** Set up the `data/` directory from `installation.md` in your clone of the **EasyMocap** repo.
+
 To perform SMPL fitting on the 3D keypoints with some temporal smoothing
 
     SMPLReconstruction.populate(key)
