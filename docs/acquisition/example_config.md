@@ -1,6 +1,6 @@
 # Example config.yaml file
 
-Config files should follow the format below. camera_serial_number should be updated with the serial numbers of the cameras that should be used for acquisition.
+Config files should follow the format below. `camera_serial_number` should be updated with the serial numbers of the cameras that should be used for acquisition.
 
 
 ```
