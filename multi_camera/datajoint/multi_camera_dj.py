@@ -156,7 +156,6 @@ class PersonKeypointReconstruction(dj.Computed):
             ]
         else:
             joints = TopDownPerson.joint_names(top_down_method_name)
-            print(joints)
             pairs = [
                 ("Left Hip", "Right Hip"),
                 ("Left Ankle", "Left Knee"),
