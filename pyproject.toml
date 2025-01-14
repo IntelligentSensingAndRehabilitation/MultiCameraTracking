@@ -1,6 +1,6 @@
 [project]
 name = "multi_camera"
-version = "0.1.0"
+version = "2024.01.14"
 description = "Library for multi-camera acquisition and analysis."
 authors = [
   {name = "James Cotton", email = "peabody124@gmail.com"},
@@ -29,6 +29,7 @@ dependencies = [
     "simple-pyspin>=0.1.1",
     "sqlalchemy>=2.0.35",
     "tqdm>4.6",
+    "flax>=0.10.2"
 ]
 
 [tool.uv]

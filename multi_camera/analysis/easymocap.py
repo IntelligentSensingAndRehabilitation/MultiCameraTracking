@@ -3,7 +3,7 @@ from scipy import interpolate
 from dataclasses import dataclass
 
 
-model_path = '/home/jcotton/projects/pose/EasyMocap/data/smplx'
+model_path = '/home/isr/app/packages/EasyMocap/data/smplx'
 
 
 def mvmp_association_and_tracking(dataset, keypoints='body25'):

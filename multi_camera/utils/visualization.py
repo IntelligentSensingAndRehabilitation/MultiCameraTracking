@@ -72,7 +72,7 @@ def skeleton_video(keypoints3d, filename, method, fps=30.0):
             "Right Elbow",
             "Right Wrist",
         ]
-    elif method == "MMPoseWholebody":
+    elif method in ["MMPoseWholebody", "MMPose_RTMPose_Cocktail14"]:
         joints = TopDownPerson.joint_names("MMPoseWholebody")
         left = [
             "Left Little Toe",
@@ -83,8 +83,6 @@ def skeleton_video(keypoints3d, filename, method, fps=30.0):
             "Left Ankle",
             "Left Knee",
             "Left Hip",
-            "Pelvis",
-            "Sternum",
             "Left Shoulder",
             "Left Elbow",
             "Left Wrist",
@@ -98,8 +96,6 @@ def skeleton_video(keypoints3d, filename, method, fps=30.0):
             "Right Ankle",
             "Right Knee",
             "Right Hip",
-            "Pelvis",
-            "Sternum",
             "Right Shoulder",
             "Right Elbow",
             "Right Wrist",

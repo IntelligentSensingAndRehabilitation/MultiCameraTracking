@@ -107,6 +107,8 @@ class PersonKeypointReconstruction(dj.Computed):
         tracking_method = key["tracking_method"]
         reconstruction_method = key["reconstruction_method"]
 
+        top_down_method_name = (TopDownMethodLookup & key).fetch1("top_down_method_name")
+
         camera_calibration, camera_names = (Calibration & calibration_key).fetch1("camera_calibration", "camera_names")
         keypoints, camera_name = (
             TopDownPerson * SingleCameraVideo * MultiCameraRecording
@@ -129,28 +131,49 @@ class PersonKeypointReconstruction(dj.Computed):
         order = [list(camera_name).index(c) for c in camera_names]
         points2d = np.stack([keypoints[o][:, :, :] for o in order], axis=0)
 
-        joints = TopDownPerson.joint_names("MMPoseHalpe")
-        pairs = [
-            ("Pelvis", "Right Hip"),
-            ("Pelvis", "Left Hip"),
-            ("Left Ankle", "Left Knee"),
-            ("Right Ankle", "Right Knee"),
-            ("Left Knee", "Left Hip"),
-            ("Right Knee", "Right Hip"),
-            ("Left Hip", "Pelvis"),
-            ("Right Hip", "Pelvis"),
-            ("Left Shoulder", "Left Elbow"),
-            ("Right Shoulder", "Right Elbow"),
-            ("Left Elbow", "Left Wrist"),
-            ("Right Elbow", "Right Wrist"),
-            ("Left Heel", "Left Big Toe"),
-            ("Right Heel", "Right Big Toe"),
-            ("Right Shoulder", "Left Shoulder"),
-            ("Right Shoulder", "Right Elbow"),
-            ("Right Elbow", "Right Wrist"),
-            ("Left Shoulder", "Left Elbow"),
-            ("Left Elbow", "Left Wrist"),
-        ]
+        if top_down_method_name == "MMPoseHalpe":
+            joints = TopDownPerson.joint_names("MMPoseHalpe")
+            pairs = [
+                ("Pelvis", "Right Hip"),
+                ("Pelvis", "Left Hip"),
+                ("Left Ankle", "Left Knee"),
+                ("Right Ankle", "Right Knee"),
+                ("Left Knee", "Left Hip"),
+                ("Right Knee", "Right Hip"),
+                ("Left Hip", "Pelvis"),
+                ("Right Hip", "Pelvis"),
+                ("Left Shoulder", "Left Elbow"),
+                ("Right Shoulder", "Right Elbow"),
+                ("Left Elbow", "Left Wrist"),
+                ("Right Elbow", "Right Wrist"),
+                ("Left Heel", "Left Big Toe"),
+                ("Right Heel", "Right Big Toe"),
+                ("Right Shoulder", "Left Shoulder"),
+                ("Right Shoulder", "Right Elbow"),
+                ("Right Elbow", "Right Wrist"),
+                ("Left Shoulder", "Left Elbow"),
+                ("Left Elbow", "Left Wrist"),
+            ]
+        else:
+            joints = TopDownPerson.joint_names(top_down_method_name)
+            pairs = [
+                ("Left Hip", "Right Hip"),
+                ("Left Ankle", "Left Knee"),
+                ("Right Ankle", "Right Knee"),
+                ("Left Knee", "Left Hip"),
+                ("Right Knee", "Right Hip"),
+                ("Left Shoulder", "Left Elbow"),
+                ("Right Shoulder", "Right Elbow"),
+                ("Left Elbow", "Left Wrist"),
+                ("Right Elbow", "Right Wrist"),
+                ("Left Heel", "Left Big Toe"),
+                ("Right Heel", "Right Big Toe"),
+                ("Right Shoulder", "Left Shoulder"),
+                ("Right Shoulder", "Right Elbow"),
+                ("Right Elbow", "Right Wrist"),
+                ("Left Shoulder", "Left Elbow"),
+                ("Left Elbow", "Left Wrist"),
+            ]
         skeleton = np.array([(joints.index(p[0]), joints.index(p[1])) for p in pairs])
 
         # select method for reconstruction

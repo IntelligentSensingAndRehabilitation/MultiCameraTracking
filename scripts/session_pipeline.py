@@ -16,12 +16,11 @@ from multi_camera.datajoint.easymocap import EasymocapTracking, EasymocapSmpl
 from multi_camera.utils.standard_pipelines import reconstruction_pipeline
 import argparse
 
-pose_pipeline.set_environmental_variables()
+# pose_pipeline.set_environmental_variables()
 
 pose_pipeline.env.pytorch_memory_limit()
 pose_pipeline.env.tensorflow_memory_limit()
 pose_pipeline.env.jax_memory_limit()
-
 
 def assign_calibration():
     # find the calibration that is closest in time to each recording that also has a minimum
@@ -70,8 +69,11 @@ def preannotation_session_pipeline(keys: List[Dict] = None, bridging: bool = Tru
         bottom_up_pipeline(keys, bottom_up_method_name="OpenPose_HR", reserve_jobs=True)
 
     # now run easymocap
+    print("populating video info")
     VideoInfo.populate(SingleCameraVideo * MultiCameraRecording & keys, reserve_jobs=True)
+    print("populating easymocaptracking")
     EasymocapTracking.populate(MultiCameraRecording * CalibratedRecording & keys, reserve_jobs=True, suppress_errors=True)
+    print("populating easymocapsmpl")
     EasymocapSmpl.populate(MultiCameraRecording * CalibratedRecording & keys, reserve_jobs=True, suppress_errors=True)
 
 
@@ -80,6 +82,7 @@ def postannotation_session_pipeline(
     tracking_method_name: str = "Easymocap",
     top_down_method_name: str = "Bridging_bml_movi_87",
     reconstruction_method_name: str = "Implicit Optimization KP Conf, MaxHuber=10",
+    date_filter: str = None,
 ):
     """
     Run the person reconstruction pipeline on the set of recordings
@@ -101,9 +104,12 @@ def postannotation_session_pipeline(
         Video * SingleCameraVideo * PersonBbox * TrackingBboxMethodLookup & {"tracking_method_name": tracking_method_name}
     )
 
+    if date_filter:
+        annotated = annotated & (f"recording_timestamps LIKE '{date_filter}%'")
+
     if keys is None:
         keys = (CalibratedRecording & Recording & annotated - (PersonKeypointReconstruction & filt)).fetch("KEY")
-
+    print(keys)
     reconstruction_pipeline(
         keys,
         top_down_method_name=top_down_method_name,
@@ -115,24 +121,56 @@ def postannotation_session_pipeline(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--post_annotation", action="store_true", help="Run post-annotation pipeline")
-    parser.add_argument("--participant_id", type=int, help="Participant ID", required=False)
+    parser.add_argument("--participant_id", help="Participant ID", required=False)
+    parser.add_argument("--session_date", help="Session Date (YYYY-MM-DD)", required=False)
     args = parser.parse_args()
 
     if args.post_annotation:
-        postannotation_session_pipeline()
-        postannotation_session_pipeline(top_down_method_name="MMPoseHalpe")
+        if args.session_date:
+            print("Session Date: ", args.session_date)
+            postannotation_session_pipeline(date_filter=args.session_date)
+            postannotation_session_pipeline(top_down_method_name="MMPose_RTMPose_Cocktail14",
+                                            reconstruction_method_name="Robust Triangulation",
+                                            date_filter=args.session_date)
+        else:
+            postannotation_session_pipeline()
+            postannotation_session_pipeline(top_down_method_name="MMPose_RTMPose_Cocktail14",
+                                            reconstruction_method_name="Robust Triangulation")
     else:
         # assign_calibration()
 
-        # if args.participant_id is set create a filter
+        # create a filter for the recording table based on if participant_id and/or session_date is set
+        passed_args = []
         if args.participant_id:
-            keys = (SingleCameraVideo & Recording - EasymocapSmpl & (Recording & f"participant_id IN ({args.participant_id})")).fetch("KEY")
-            preannotation_session_pipeline(keys)
+            passed_args.append(f"participant_id IN ({args.participant_id})")
+        if args.session_date:
+            passed_args.append(f"recording_timestamps LIKE '{args.session_date}%'")
+
+        if len(passed_args) > 1:
+            # concatenate the filters with an AND
+            filter = " AND ".join(passed_args)
+        elif len(passed_args) == 1:
+            filter = passed_args[0]
+        else:
+            filter = None
+
+        if filter:
+            keys = (SingleCameraVideo & Recording - EasymocapSmpl & (Recording & filter)).fetch("KEY")
         else:
             keys = (SingleCameraVideo & Recording - EasymocapSmpl & (Recording & "participant_id NOT IN (72,73,504)")).fetch("KEY")
-            preannotation_session_pipeline(keys)
-        postannotation_session_pipeline()
-        postannotation_session_pipeline(top_down_method_name="MMPoseHalpe")
+
+        preannotation_session_pipeline(keys)
+
+        if args.session_date:
+            print("Session Date: ", args.session_date)
+            postannotation_session_pipeline(date_filter=args.session_date)
+            postannotation_session_pipeline(top_down_method_name="MMPose_RTMPose_Cocktail14",
+                                            reconstruction_method_name="Robust Triangulation",
+                                            date_filter=args.session_date)
+        else:
+            postannotation_session_pipeline()
+            postannotation_session_pipeline(top_down_method_name="MMPose_RTMPose_Cocktail14",
+                                            reconstruction_method_name="Robust Triangulation")
 
     # assign_calibration()
     # keys = (SingleCameraVideo & Recording - EasymocapSmpl & (Recording & 'participant_id NOT IN (72,73,504)')).fetch('KEY')

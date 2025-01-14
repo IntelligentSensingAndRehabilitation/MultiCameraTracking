@@ -11,7 +11,7 @@ Modules:
 - `multi_camera.utils` - miscellaneous utilities.
 
 
-Acquisition is designed to perform simple multi-camera video acquisition with FLIR cameras. These use network synchronization and are tested on BFS-PGE-31S4C. Requires recent firmware to support IEEE1394 synchronization.
+Acquisition is designed to perform simple multi-camera video acquisition with FLIR cameras. These use network synchronization and are tested on BFS-PGE-31S4C. Requires recent firmware to support IEEE1588 synchronization.
 
 # TODO and Warning
 
@@ -36,22 +36,7 @@ more details can be found [here](https://gist.github.com/peifferjd/0afc6484a99cf
 
 ## Running Web GUI
 
-First start FastAPI backend, which provides a REST API for the acquisition software
-
-    python -m multi_camera.backend.fastapi
-
-Then start the web GUI
-
-    cd react_frontend
-    npm start
-
-## Recording:
-
-    python -m multi_camera.acquisition.flir_recording_api [-h] [-m MAX_FRAMES] [-n NUM_CAMS] [--preview] [-s SCALING] [-c CONFIG] vid_filename
-
-One can either pass a number of frames or hit "Ctrl-C" to stop recording
-
-set_mtu.sh script is used to enable jumbo packets with linux.
+See the [Startup Instructions](docs/acquisition/acquisition_startup.md)
 
 ## Calibration
 
@@ -79,6 +64,10 @@ One that is set up, you can insert entries into `PersonKeypointReconstructionMet
 To visualize a skeleton of the raw triangulated coordinates run `PersonKeypointReconstructionVideo.populate()`.
 
 ## SMPL Reconstruction
+
+First, follow the [instructions from EasyMocap](https://github.com/arashsm79/EasyMocap/blob/master/doc/installation.md) to set up the SMPL models.
+
+**Note:** Set up the `data/` directory from `installation.md` in your clone of the **EasyMocap** repo.
 
 To perform SMPL fitting on the 3D keypoints with some temporal smoothing
 
@@ -108,45 +97,6 @@ Finally, it can be used to visualize the results after annotation using the top 
 the SMPLReconstruction results
 
     python apps/visualize.py --smpl --top_down FILENAME
-
-## Example config.yaml
-
-```
----
- camera-info:
-   camera_serial_number (ex: 23336091):
-     lens_info: "F1.4/6mm"
-   camera_serial_number:
-     lens_info: "F1.4/6mm"
-   .
-   .
-   .
-   camera_serial_number:
-     lens_info: "F1.4/6mm"
-
- acquisition-type: 'continuous' # 'max-frame' or 'continuous'
-
- acquisition-settings:
-    exposure_time: 15000 # in microseconds
-    frame_rate: 30
-    video_segment_len: 1000 # if acquisition-type is 'continuous', this is the number of frames to record before starting a new file
-    chunk_data: ['FrameID','SerialData']
-
-# To do max-frame recording or continuous recording with a single start trigger, set line0 to 'Off'
-# To do continuous recording, with each frame triggered, set line0 to 'ArduinoTrigger'
-# To have 3.3V toggled when acquisition is started/stopped, set line2 to '3V3_Enable'
-# To have the cameras receive serial data, set line3 to 'SerialOn'
- gpio-settings:
-    line0: 'Off' # Opto-isolated input; the options for this pin are 'Off' 'ArduinoTrigger'
-    line1: 'Off' # Opto-isolated output; the options for this pin are 'Off' or 'ExposureActive'
-    line2: 'Off' # Non-isolated input/output; the options for this pin are 'Off' or '3V3_Enable'
-    line3: 'Off' # Non-isolated input; the options for this pin are 'Off' or 'SerialOn'
-
-# Any additional meta information can be added here
- meta-info:
-   system: "Mobile"
-   location: "Lab Space 3"
-```
 
 # Resources
 
