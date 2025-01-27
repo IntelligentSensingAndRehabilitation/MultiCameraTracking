@@ -109,7 +109,7 @@ def postannotation_session_pipeline(
 
     if keys is None:
         keys = (CalibratedRecording & Recording & annotated - (PersonKeypointReconstruction & filt)).fetch("KEY")
-    print(keys)
+
     reconstruction_pipeline(
         keys,
         top_down_method_name=top_down_method_name,
