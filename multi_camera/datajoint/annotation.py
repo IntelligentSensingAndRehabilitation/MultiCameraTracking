@@ -104,7 +104,7 @@ class FMSTypeLookup(dj.Lookup):
     definition = """
     fms_type: varchar(32)
     """
-    contents = zip(["SLS", "Deep Squat", "Hurdle", "In-Line Lunge", "Shoulder Mobility", "Active Straight Leg Raise", "Trunk Stability Push-Up", "Rotary", "Ankle Clearing", "Shoulder Clearing", "Flexion Clearing", "Extension Clearing"])
+    contents = zip(["SLS", "Deep Squat", "Hurdle", "Lunge", "Shoulder Mobility", "Active Straight Leg Raise", "Trunk Stability Push-Up", "Rotary", "Ankle Clearing", "Shoulder Clearing", "Flexion Clearing", "Extension Clearing"])
 
 @schema
 class FMSType(dj.Manual):
