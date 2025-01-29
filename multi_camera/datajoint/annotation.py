@@ -102,7 +102,7 @@ class TUGType(dj.Manual):
 @schema
 class FMSTypeLookup(dj.Lookup):
     definition = """
-    FMS_type: varchar(32)
+    fms_type: varchar(32)
     """
     contents = zip(["SLS", "Deep Squat", "Hurdle", "In-Line Lunge", "Shoulder Mobility", "Active Straight Leg Raise", "Trunk Stability Push-Up", "Rotary", "Ankle Clearing", "Shoulder Clearing", "Flexion Clearing", "Extension Clearing"])
 
