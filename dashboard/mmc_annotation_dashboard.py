@@ -17,6 +17,9 @@ from multi_camera.datajoint.annotation import (
     VideoActivity as MMCVideoActivity,
     WalkingType as MMCWalkingType,
     TUGType as MMCTUGType,
+    FMSType as MMCFMSType,
+    TUGTypeLookup as MMCTUGTypeLookup,
+    FMSTypeLookup as MMCFMSTypeLookup,
     AssistiveDevice as MMCAssistiveDevice,
 )
 import base64
@@ -99,7 +102,7 @@ with tab1:
     my_column_config.update(
         {
             "Annotation Sub-Type": st.column_config.SelectboxColumn(
-                options=list(WalkingTypeLookup.fetch("walking_type"))
+                options=list(WalkingTypeLookup.fetch("walking_type")) + list(MMCTUGTypeLookup.fetch("tug_type")) + list(MMCFMSTypeLookup.fetch("fms_type"))
             )
         }
     )
@@ -112,9 +115,9 @@ with tab1:
     )
 
     def validate_annotations(df):
-        for index, row in df.iterrows():
+        for index, row in df.iterrows():            
             if row['Annotation Sub-Type'] is not None:
-                if row['Annotation'] not in ['Overground Walking','TUG'] and row['Annotation'] is not None:
+                if row['Annotation'] not in ['Overground Walking','TUG', 'FMS'] and row['Annotation'] is not None:
                     print(row['Annotation'] == None)
                     print('\n\n\n')
                     st.error("Annotation Sub-Type can only be set for Overground Walking and TUG. Please correct this.")
@@ -151,8 +154,20 @@ with tab1:
         "CUET":"CUET",
         "circuit":"Mixed",
         "circuits":"Mixed",
+        "single_leg_squat":"FMS",
+        "deep_squat":"FMS",
+        "hurdle":"FMS",
+        "lunge":"FMS",
+        "shoulder_mob":"FMS",
+        "active_slr":"FMS",
+        "stability_pushup":"FMS",
+        "rotary":"FMS",
+        "ankle_clearing":"FMS",
+        "shoulder_clearing":"FMS",
+        "ext_clearing":"FMS",
+        "flex_clearing":"FMS",
     }
-    walking_type_mapping = {
+    activity_subtype_mapping = {
         "fast": "Fast",
         "slow": "Slow",
         "ssgs": "ssgs",
@@ -168,6 +183,18 @@ with tab1:
         "FGA_closed_": "FGA_closed",
         "FGA_backwards_": "FGA_backwards",
         "6MWT": "6MWT",
+        "single_leg_squat": "Single Leg Stand",
+        "deep_squat":"Deep Squat",
+        "hurdle":"Hurdle",
+        "lunge":"Lunge",
+        "shoulder_mob":"Shoulder Mobility",
+        "active_slr":"Active Straight Leg Raise",
+        "stability_pushup":"Trunk Stability Push-Up",
+        "rotary":"Rotary",
+        "ankle_clearing":"Ankle Clearing",
+        "shoulder_clearing":"Shoulder Clearing",
+        "ext_clearing":"Extension Clearing",
+        "flex_clearing":"Flexion Clearing",
     }
 
     def fill_annotation(row, mapping):
@@ -180,7 +207,7 @@ with tab1:
         return None
 
     df["Annotation"] = df.apply(fill_annotation, mapping=video_activity_mapping, axis=1)
-    df["Annotation Sub-Type"] = df.apply(fill_annotation, mapping=walking_type_mapping, axis=1)
+    df["Annotation Sub-Type"] = df.apply(fill_annotation, mapping=activity_subtype_mapping, axis=1)
 
     with st.form(key="my_form"):
         st.title("Enter/Edit Annotations")
@@ -204,6 +231,10 @@ with tab1:
                         key = (MMCVideoActivity & participant_res & {'recording_timestamps':row['recording_timestamps']}).fetch1("KEY")
                         key.update({'tug_type': row["Annotation Sub-Type"]})
                         MMCTUGType.safe_insert(key, skip_duplicates=True)
+                    elif row["Annotation"] == "FMS":
+                        key = (MMCVideoActivity & participant_res & {'recording_timestamps':row['recording_timestamps']}).fetch1("KEY")
+                        key.update({'fms_type': row["Annotation Sub-Type"]})
+                        MMCFMSType.safe_insert(key, skip_duplicates=True)
                 if row["Assistive Device"] is not None:
                     key = (MultiCameraRecording & participant_res & {'recording_timestamps':row['recording_timestamps']}).fetch1("KEY")
                     key.update({'assistive_device': row["Assistive Device"]})
