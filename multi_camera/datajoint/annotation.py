@@ -109,7 +109,7 @@ class FMSTypeLookup(dj.Lookup):
 @schema
 class FMSType(dj.Manual):
     definition = """
-    # annotates the subtype of walking. This is only for FMS.
+    # annotates the subtype of FMS. This is only for FMS.
     -> VideoActivity 
     ---
     -> FMSTypeLookup
