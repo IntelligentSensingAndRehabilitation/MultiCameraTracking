@@ -18,15 +18,9 @@ make build
 ## MultiCameraTracking Setup
 
 1. Clone **[MultiCameraTracking](https://github.com/IntelligentSensingAndRehabilitation/MultiCameraTracking)**
-    
+
 2. Run `download_flir.sh` from the `MultiCameraTracking/docker/` directory
-    - To install Spinnaker apps locally (like **SpinView**) download latest Spinnaker SDK from the FLIR website
-        - https://www.flir.com/support-center/iis/machine-vision/downloads/spinnaker-sdk-download/spinnaker-sdk--download-files/
-    - Unzip the object
-        - tar -xzf archive.tar.gz
-    - Go into the unzipped directory and install spinnaker
-        - sudo sh install_spinnaker.sh
-    - There may be a pop-up that you need to accept, use **TAB** to navigate to <OK>and press **ENTER**
+    
 3. Create a **data** directory locally (this is where the videos and JSONs will be written)
 4. Create a **configs** directory locally (this is where the camera config files will be stored)
     - An example config.yaml file can be found [here](example_config.md)
@@ -43,4 +37,4 @@ make build
         DATAJOINT_EXTERNAL=/mnt/datajoint_external
         ```
         
-- Run `make build` from the root of **MultiCameraTracking** to build the Docker container
+7. Run `make build` from the root of **MultiCameraTracking** to build the Docker container

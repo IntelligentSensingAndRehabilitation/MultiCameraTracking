@@ -15,7 +15,7 @@
 | Product Link | Part Number | Price (est.) |  
 | ------------ | ----------- | ------------ |  
 | [6mm C-Series Fixed Focal Length Lens](https://www.edmundoptics.com/p/6mm-c-series-fixed-focal-length-lens/22381/) | 67-709 | $434 |  
-| [44-11mm FL High Resolution Varifocal Lens](https://www.edmundoptics.com/p/44-11mm-fl-high-resolution-varifocal-lens/23284/) | 68-665 | $525 |  
+| [4.4-11mm FL High Resolution Varifocal Lens](https://www.edmundoptics.com/p/44-11mm-fl-high-resolution-varifocal-lens/23284/) | 68-665 | $525 |  
 | [12mm UC-Series Fixed Focal Length Lens](https://www.edmundoptics.com/p/12mm-uc-series-fixed-focal-length-lens/2969/) | 33-303 | $225 |
 
 ## Adapters
@@ -45,7 +45,7 @@
 **CAT6 or above Ethernet Cables**
 | Product Link | Part Number | Price (est.) |  
 | ------------ | ----------- | ------------ |  
-| [Ercielook](https://www.amazon.com/Ethernet-Cable-Shielded-Internet-Faster/dp/B092L7S6YR?ref_=ast_sto_dp&th=1) | c7100 | $20 |
+| [Ercielook](https://www.amazon.com/Ethernet-Cable-Shielded-Internet-Faster/dp/B092L7S6YR?ref_=ast_sto_dp&th=1) | c7100 | $20 (depends on length)|
 
 ## Mounting Hardware
 
