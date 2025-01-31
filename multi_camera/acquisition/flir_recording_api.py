@@ -18,7 +18,6 @@ import yaml
 import pandas as pd
 import hashlib
 import platform
-import psutil
 
 
 # Data structures we will expose outside this library

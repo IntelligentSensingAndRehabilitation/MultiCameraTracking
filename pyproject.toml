@@ -29,7 +29,7 @@ dependencies = [
     "simple-pyspin>=0.1.1",
     "sqlalchemy>=2.0.35",
     "tqdm>4.6",
-    "flax>=0.10.2"
+    "flax"
 ]
 
 [tool.uv]
