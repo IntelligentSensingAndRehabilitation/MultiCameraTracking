@@ -4,8 +4,10 @@ All materials listed in this document can be found in [Required Hardware](acquis
 
 This BOM assumes you are using:
 - 6 cameras 
+- 4.4-11mm Varifocal Lens
 - Mounted with tripods
 - 50ft Cat7 Ethernet Cables
+- **Note**: Need an ethernet cable for each camera + 1 to connect from the network switch (4) to the ethernet adapter (5)
 
 ## Bill of Materials
 
