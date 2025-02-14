@@ -29,14 +29,11 @@ class SessionCalibration(dj.Computed):
 
     def make(self, key):
 
-        # get the recordings for this session
-        recordings = (Recording & key).fetch("KEY")
+        # Join the Recording and CalibratedRecording tables
+        joined_calibrated_recordings = (Recording * CalibratedRecording & key).fetch("KEY")
 
-        # use the multi_camera_recordings to get the calibrated recordings for this session
-        calibrated_recordings = (CalibratedRecording & recordings).fetch("KEY")
-
-        # get the calibrations from the calibrated recordings
-        calibrations = (Calibration & calibrated_recordings).fetch("KEY")
+        # get the calibrations from the joined_calibrated_recordings
+        calibrations = (Calibration & joined_calibrated_recordings).fetch("KEY")
 
         # insert the key into the SessionCalibration table
         self.insert1(key)
@@ -45,4 +42,4 @@ class SessionCalibration(dj.Computed):
         self.Grouping.insert([{**key, **cal} for cal in calibrations])
 
         # insert the recordings into the Recordings table
-        self.Recordings.insert([{**key, **rec} for rec in recordings])
+        self.Recordings.insert([{**key, **cal_rec} for cal_rec in joined_calibrated_recordings])
