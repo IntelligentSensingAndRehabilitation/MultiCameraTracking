@@ -539,6 +539,16 @@ def robust_triangulate_point_time_slice(camera_params, x, sigma, threshold, retu
     return jax.vmap(lambda _x: robust_triangulate_point_single(camera_params, _x, sigma, threshold, return_weights))(x)
 
 
+@jax.jit
+def scan_helper(carry, x):
+    camera_params, sigma, threshold = carry
+    return carry, robust_triangulate_point_time_slice(camera_params, x, sigma, threshold, return_weights=True)
+
+
+def scan_robust_triangulate_points(camera_params, points2d, sigma=150, threshold=0.5):
+    return jax.lax.scan(scan_helper, (camera_params, sigma, threshold), points2d)[1]
+
+
 def robust_triangulate_points(camera_params, points2d, sigma=150, threshold=0.5, return_weights=False, fast_inference=True):
     """
     Robustly triangulate keypoints for all time points and joints.
@@ -584,33 +594,15 @@ def robust_triangulate_points(camera_params, points2d, sigma=150, threshold=0.5,
     """
 
     # make sure sigma and threshold are jnp.array(float) to avoid retracing
-    sigma = jnp.array(sigma)
-    threshold = jnp.array(threshold)
+    sigma = jnp.array(sigma, dtype=jnp.float32)
+    threshold = jnp.array(threshold, dtype=jnp.float32)
+    return_weights = jnp.array(return_weights, dtype=jnp.bool)
 
     # Original shape: (num_cameras, T, J, 3). Reorder so that time is the first axis.
     points2d = jnp.transpose(points2d, (1, 2, 0, 3))  # now (T, J, num_cameras, 3)
 
-    if fast_inference:
-        # allow selecting how we vectorize the first (time) dimension
-
-        def vectorize(f):
-            # vectorize using a scan to avoid the compilation time of vmap
-            def scan_fn(carry, x):
-                return (carry + 1, f(x))
-
-            return lambda x: jax.lax.scan(scan_fn, 0, x)[1]
-
-    else:
-        vectorize = jax.vmap
-
-    # this will compute for all of the joints at a given time
-    # _robust_triangulate_point_single_time = jax.vmap(lambda x: robust_triangulate_point_single(camera_params, x, sigma, threshold, return_weights))
-    # this will compute for all of the times
-    # _robust_triangulate_point = vectorize(_robust_triangulate_point_single_time)
-
-    _robust_triangulate_point = vectorize(lambda x: robust_triangulate_point_time_slice(camera_params, x, sigma, threshold, return_weights))
-
-    results = _robust_triangulate_point(points2d)
+    # this always treats return_weights as True
+    results = scan_robust_triangulate_points(camera_params, points2d, sigma, threshold)
 
     if return_weights:
         # points comes back with dimension (T, J, 4). this is fine
@@ -621,7 +613,7 @@ def robust_triangulate_points(camera_params, points2d, sigma=150, threshold=0.5,
 
         return points3d, weights
 
-    return results
+    return results[0]
 
 
 def reprojection_error(camera_params, points2d, points3d):
