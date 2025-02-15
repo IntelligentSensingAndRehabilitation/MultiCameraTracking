@@ -381,8 +381,12 @@ def weiszfeld_geometric_median(points, max_iter=100, epsilon=1e-2):
     return jax.lax.while_loop(cond_fun, update, (0, median, median * 0.0))[1]
 
 
-def robust_triangulate_points(camera_params, points2d, sigma=150, threshold=0.5, return_weights=False, return_all=False):
-    r"""Triangulate points robustly accounting for agreement
+def robust_triangulate_points_old(camera_params, points2d, sigma=150, threshold=0.5, return_weights=False, return_all=False):
+    r"""
+    Older method to triangulate points robustly accounting for agreement
+
+    This specifically only works with vmap on both dimensions (time and joints) and thus must be recompiled
+    for each dataset
 
     This algorithm is based http://arxiv.org/abs/2203.15865
     Roy, Soumava Kumar, Leonardo Citraro, Sina Honari, and Pascal Fua. 2022.
@@ -443,6 +447,168 @@ def robust_triangulate_points(camera_params, points2d, sigma=150, threshold=0.5,
         return robust_points3d, robust_weights
 
     return robust_points3d
+
+
+@partial(jax.jit, static_argnames=("return_weight"))
+def robust_triangulate_point_single(camera_params, points2d, sigma=jnp.array(150.0), threshold=jnp.array(0.5), return_weight=False):
+    """
+    Robust triangulation for a single time point and a single joint.
+
+    Parameters
+    ----------
+    camera_params : dict
+        Calibrated camera parameters.
+    points2d : jnp.array of shape (N, 3)
+        Observations for N cameras for one time and joint. Each row is [u, v, confidence].
+    sigma : float, optional
+        Hyperparameter controlling weight decay (default 150).
+    threshold : float, optional
+        Confidence threshold below which observations are ignored (default 0.5).
+    return_weight : bool, optional
+        If True, also return the robust weight (confidence) for this time and joint.
+
+    Returns
+    -------
+    robust_point3d : jnp.array of shape (4,)
+        Triangulated 3D point (first three entries) and a robust confidence (last entry).
+    """
+    # The downstream functions (pairwise_triangulate and triangulate_point) expect
+    # an extra “time” dimension. We add one so that points2d becomes shape (N, 1, 3).
+    points2d = jnp.expand_dims(points2d, axis=1)  # shape: (N, 1, 3)
+    N = points2d.shape[0]
+
+    # Form all unique camera pairs.
+    permutations = jnp.array([(i, j) for i in range(1, N) for j in range(0, i)])
+
+    def single_pair(pair):
+        # pairwise_triangulate is assumed to take:
+        #   - pair: a 1D array with 2 camera indices
+        #   - camera_params: full calibration (a dict)
+        #   - points2d: of shape (N, 1, 3) (for all cameras)
+        #   - threshold: confidence threshold
+        return pairwise_triangulate(pair, camera_params, points2d, threshold)
+
+    # Compute triangulations for each camera pair.
+    # This returns an array of shape (num_pairs, 1, 4).
+    point3d_clusters = jax.vmap(single_pair)(permutations)
+    # Remove the dummy time axis: now shape becomes (num_pairs, 4).
+    point3d_clusters = jnp.squeeze(point3d_clusters, axis=1)
+
+    # Mark triangulated points with low confidence as NaN.
+    mask = point3d_clusters[..., -1] < threshold
+    point3d_clusters = jnp.where(mask[..., None], jnp.nan, point3d_clusters)
+
+    # Compute the geometric median (using only the first 3 coordinates).
+    robust_point = weiszfeld_geometric_median(point3d_clusters[:, :3])
+    # Compute the error (distance) for each pair.
+    pair_error = jnp.linalg.norm(point3d_clusters[:, :3] - robust_point, axis=-1)
+    # Compute robust weights from the pair errors.
+    robust_weights = compute_camera_weights(pair_error, permutations, sigma, N)  # shape: (N,)
+
+    # Update the confidence channel of the original points.
+    # Since points2d has shape (N, 1, 3), we expand robust_weights to shape (N, 1)
+    robust_weights = robust_weights[:, None]
+    robust_points2d = points2d.at[..., -1].set(robust_weights)
+
+    # Now triangulate the 3D point using the robust 2D observations.
+    # triangulate_point expects points2d with a time axis and returns an array with that extra axis.
+    robust_point3d = triangulate_point(camera_params, robust_points2d, return_confidence=True)
+    # Remove the dummy time axis (squeeze axis 0, which was introduced by our expand_dims).
+    robust_point3d = jnp.squeeze(robust_point3d, axis=0)  # now shape (4,)
+
+    # Replace any NaN confidence with zero.
+    conf = robust_point3d[-1]
+    conf = jnp.where(jnp.isnan(conf), 0.0, conf)
+    robust_point3d = robust_point3d.at[-1].set(conf)
+
+    if return_weight:
+        return robust_point3d, robust_weights
+
+    return robust_point3d
+
+
+def robust_triangulate_points(camera_params, points2d, sigma=150, threshold=0.5, return_weights=False, fast_inference=True):
+    """
+    Robustly triangulate keypoints for all time points and joints.
+
+    This algorithm is based http://arxiv.org/abs/2203.15865
+    Roy, Soumava Kumar, Leonardo Citraro, Sina Honari, and Pascal Fua. 2022.
+    “On Triangulation as a Form of Self-Supervision for 3D Human Pose Estimation.”
+
+    Which essentialy uses the euclidean from the median of all pairwise
+    viewpoint triangulations to determine whether to trust a camera and
+    how much. This should be a drop in replacement for triangulate_point.
+
+    This function expects 2D observations with shape:
+        (num_cameras, T, J, 3)
+    where T is the number of time steps, J is the number of joints, and the last
+    dimension is [u, v, confidence].
+
+    It processes each (time, joint) pair by calling robust_triangulate_point_single.
+    We always use fast inference here by employing a single lax.scan over all samples.
+
+    Parameters
+    ----------
+    camera_params : dict
+        Calibrated camera parameters.
+    points2d : jnp.array of shape (num_cameras, T, J, 3)
+        2D observations.
+    sigma : float, optional
+        Hyperparameter controlling weight decay (default 150).
+    threshold : float, optional
+        Confidence threshold (default 0.5).
+    return_weights : bool, optional
+        If True, also return the robust weights (confidence) for each (time, joint).
+    fast_inference : bool, optional
+        If True, use a single lax.scan to process all samples at once. For calling many times
+        with same dimensions, code will be more efficient with False and using vmap.
+
+    Returns
+    -------
+    robust_points3d : jnp.array of shape (T, J, 4)
+        Triangulated 3D keypoints (first 3 channels) with robust confidence (last channel).
+    (optional) robust_weights : jnp.array of shape (T, J)
+        The robust confidence values for each keypoint.
+    """
+
+    # make sure sigma and threshold are jnp.array(float) to avoid retracing
+    sigma = jnp.array(sigma)
+    threshold = jnp.array(threshold)
+
+    num_cameras, T, J, _ = points2d.shape
+    # Rearrange so that the time and joint axes come first:
+    # From shape (num_cameras, T, J, 3) to (T, J, num_cameras, 3)
+    points2d_t = jnp.transpose(points2d, (1, 2, 0, 3))
+    # Flatten the (time, joint) dimensions into one: shape (T*J, num_cameras, 3)
+    flat_points2d = jnp.reshape(points2d_t, (T * J, num_cameras, 3))
+
+    if fast_inference:
+
+        def vectorize(f):
+            # vectorize using a scan to avoid the compilation time of vmap
+            def scan_fn(carry, x):
+                return (carry + 1, f(x))
+
+            return lambda x: jax.lax.scan(scan_fn, 0, x)[1]
+
+    else:
+        vectorize = jax.vmap
+
+    _robust_triangulate_point_single = lambda x: robust_triangulate_point_single(camera_params, x, sigma, threshold, return_weight=return_weights)
+    _robust_triangulate_point_single = vectorize(_robust_triangulate_point_single)
+
+    result = _robust_triangulate_point_single(flat_points2d)
+
+    if return_weights:
+        # result is a tuple of two arrays
+        robust_points_flat, robust_weights_flat = result
+        robust_points3d = jnp.reshape(robust_points_flat, (T, J, 4))
+        robust_weights = jnp.reshape(robust_weights_flat, (num_cameras, T, J))
+        return robust_points3d, robust_weights
+    else:
+        robust_points_flat = result
+        robust_points3d = jnp.reshape(robust_points_flat, (T, J, 4))
+        return robust_points3d
 
 
 def reprojection_error(camera_params, points2d, points3d):
