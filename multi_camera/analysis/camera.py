@@ -32,7 +32,7 @@ def get_projection(camera_params, i):
 def project(camera_params, i, points):
     # make sure to use homogeneous coordinates
     if points.shape[-1] == 3:
-        points = jnp.concatenate([points, np.ones((*points.shape[:-1], 1))], axis=-1)
+        points = jnp.concatenate([points, jnp.ones((*points.shape[:-1], 1))], axis=-1)
 
     # last dimension ensures broadcasting works
     proj = get_projection(camera_params, i) @ points[..., None]
@@ -49,7 +49,7 @@ def project_distortion(camera_params, i, points):
 
     # make sure to use homogeneous coordinates
     if points.shape[-1] == 3:
-        points = jnp.concatenate([points, np.ones((*points.shape[:-1], 1))], axis=-1)
+        points = jnp.concatenate([points, jnp.ones((*points.shape[:-1], 1))], axis=-1)
 
     # transform the points into the camera perspective
     # last dimension ensures broadcasting works
@@ -57,8 +57,8 @@ def project_distortion(camera_params, i, points):
 
     distance = jnp.abs(transformed[..., 2])
 
-    xp = transformed[..., 0] / jnp.where(distance < 1e-1, 1e6, transformed[..., 2])
-    yp = transformed[..., 1] / jnp.where(distance < 1e-1, 1e6, transformed[..., 2])
+    xp = transformed[..., 0] / jnp.where(distance < 1e2, 1e6, transformed[..., 2])
+    yp = transformed[..., 1] / jnp.where(distance < 1e2, 1e6, transformed[..., 2])
     r2 = xp**2 + yp**2
     r2 = jnp.where(jnp.isnan(r2), 0, r2)
 
