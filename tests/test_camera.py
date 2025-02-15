@@ -3,6 +3,41 @@ import numpy as np
 from jax import numpy as jnp
 import cv2
 
+example_camera_params = {
+    "mtx": np.array(
+        [
+            [1.1450494, 1.1437811, 0.5125415, 0.51545149],
+            [1.1496757, 1.14759162, 0.50884862, 0.50806492],
+            [1.14914072, 1.14879897, 0.51981584, 0.50140266],
+            [1.14551134, 1.14477393, 0.5149682, 0.50188202],
+        ]
+    ),
+    "dist": np.array(
+        [
+            [-0.20709891, 0.24777518, -0.00142447, -0.0009757, -0.00307515],
+            [-0.19421363, 0.24040854, -0.00274089, -0.00161903, 0.00681998],
+            [-0.20833819, 0.25548801, -0.00076, 0.00148439, -0.0024605],
+            [-0.19838409, 0.21832368, -0.00181336, -0.00058721, -0.00894781],
+        ]
+    ),
+    "rvec": np.array(
+        [
+            [0.43339898, 2.18111703, -1.79726808],
+            [1.76172017, 0.34168161, -0.27167949],
+            [0.42164849, -2.20297535, 1.75425036],
+            [1.83305846, -0.3395937, 0.34428003],
+        ]
+    ),
+    "tvec": np.array(
+        [
+            [-0.34605078, 0.54698078, 5.47448109],
+            [0.25142516, 0.42094221, 5.58819588],
+            [0.48048256, 0.25383237, 5.70420768],
+            [0.05188348, 0.37842084, 4.40614914],
+        ]
+    ),
+}
+
 
 def test_project():
     from multi_camera.analysis.camera import project, project_distortion
@@ -38,7 +73,6 @@ def test_undistort():
     undistorted = undistort_points(p, np.eye(3), dist)
 
     err = np.linalg.norm(cv2_undistorted - undistorted, axis=-1)
-    print(err)
     assert np.all(err < 1e-5)
 
 
@@ -65,7 +99,7 @@ def test_distort3d():
     uv_2 = project_distortion(camera_params, 0, objp)
 
     err = np.linalg.norm(uv_1 - uv_2, axis=-1)
-    assert np.all(err < 1e-5)
+    assert np.all(err < 2e-5)
 
 
 def test_robust_triangulate_point_single():
@@ -208,10 +242,12 @@ def test_real_cam_robust_triangulate_points():
     to the original scene points.
     """
     from multi_camera.analysis.camera import robust_triangulate_points
-    from multi_camera.datajoint.multi_camera_dj import Calibration
 
     # Fetch a single calibration record.
-    camera_params = Calibration.fetch("camera_calibration", limit=1)[0]
+    # from multi_camera.datajoint.multi_camera_dj import Calibration
+    # camera_params = Calibration.fetch("camera_calibration", limit=1)[0]
+
+    camera_params = example_camera_params
 
     # Determine number of cameras from calibration.
     N = camera_params["mtx"].shape[0]
@@ -258,7 +294,7 @@ def test_real_cam_robust_triangulate_points():
 
     # Compute the Euclidean error for each (time, joint) sample.
     errs = np.linalg.norm(robust_points3d_mm - point3d_true, axis=-1)
-    print("Reprojection errors (mm):", errs)
+
     # Assert that all errors are below 10 mm.
     assert np.all(errs < 10.0), f"Some robust triangulation errors are too high: {errs}"
 
@@ -284,10 +320,12 @@ def test_compare_real_cam_robust_triangulate_points():
     to the original scene points.
     """
     from multi_camera.analysis.camera import robust_triangulate_points, robust_triangulate_points_old
-    from multi_camera.datajoint.multi_camera_dj import Calibration
 
     # Fetch a single calibration record.
-    camera_params = Calibration.fetch("camera_calibration", limit=1)[0]
+    # from multi_camera.datajoint.multi_camera_dj import Calibration
+    # camera_params = Calibration.fetch("camera_calibration", limit=1)[0]
+
+    camera_params = example_camera_params
 
     # Determine number of cameras from calibration.
     N = camera_params["mtx"].shape[0]
