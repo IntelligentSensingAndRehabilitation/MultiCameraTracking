@@ -541,12 +541,11 @@ def robust_triangulate_point_time_slice(points2d, camera_params, sigma, threshol
     return jax.vmap(lambda _x: robust_triangulate_point_single(camera_params, _x, sigma, threshold, return_weight=True))(points2d)
 
 
-def map_robust_triangulate_points(camera_params, points2d, sigma, threshold):
+def vmap_robust_triangulate_points(camera_params, points2d, sigma, threshold):
     from jax.tree_util import Partial
 
     map_fn = Partial(robust_triangulate_point_time_slice, camera_params=camera_params, sigma=sigma, threshold=threshold)
-    map = jax.jit(jax.lax.map, static_argnames=("batch_size"))
-    return map(map_fn, points2d)
+    return jax.vmap(map_fn)(points2d)
 
 
 def robust_triangulate_points(camera_params, points2d, sigma=150, threshold=0.5, return_weights=False, fast_inference=True):
@@ -600,8 +599,22 @@ def robust_triangulate_points(camera_params, points2d, sigma=150, threshold=0.5,
     # Original shape: (num_cameras, T, J, 3). Reorder so that time is the first axis.
     points2d = jnp.transpose(points2d, (1, 2, 0, 3))  # now (T, J, num_cameras, 3)
 
-    # this always treats return_weights as True
-    results = map_robust_triangulate_points(camera_params, points2d, sigma, threshold)
+    if fast_inference:
+        # ultimately, the map function above still triggers tracing for each unique number of
+        # timesteps, and the compilation time far exceeds the computation time. a simple for
+        # loop works out much better
+        points3d, weights = [], []
+        for t in range(points2d.shape[0]):
+            result = robust_triangulate_point_time_slice(points2d[t], camera_params, sigma, threshold)
+            points3d.append(result[0])
+            weights.append(result[1])
+        points3d = jnp.stack(points3d, axis=0)
+        weights = jnp.stack(weights, axis=0)
+        results = [points3d, weights]
+
+    else:
+        # this always treats return_weights as True
+        results = vmap_robust_triangulate_points(camera_params, points2d, sigma, threshold)
 
     if return_weights:
         # points comes back with dimension (T, J, 4). this is fine
