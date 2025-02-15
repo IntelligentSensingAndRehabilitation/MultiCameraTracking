@@ -527,26 +527,26 @@ def robust_triangulate_point_single(camera_params, points2d, sigma=jnp.array(150
     return robust_point3d
 
 
-@partial(jax.jit, static_argnames=("return_weights"))
-def robust_triangulate_point_time_slice(camera_params, x, sigma, threshold, return_weights):
+@jax.jit
+def robust_triangulate_point_time_slice(points2d, camera_params, sigma, threshold):
     """
     Helper to apply robust_triangulate_point_single to all joints at a single time point.
 
     We specifically create this intermediatry to allow it to be jitted and cached for a given number of cameras.
     Note the order of parameters remains consistent with other library functions having camera_params first,
     but this is designed to be vectorized over the time dimension.
+
+    Note: parameter order is changed as the thing we map over needs to be first
     """
-    return jax.vmap(lambda _x: robust_triangulate_point_single(camera_params, _x, sigma, threshold, return_weights))(x)
+    return jax.vmap(lambda _x: robust_triangulate_point_single(camera_params, _x, sigma, threshold, return_weight=True))(points2d)
 
 
-@jax.jit
-def scan_helper(carry, x):
-    camera_params, sigma, threshold = carry
-    return carry, robust_triangulate_point_time_slice(camera_params, x, sigma, threshold, return_weights=True)
+def map_robust_triangulate_points(camera_params, points2d, sigma, threshold):
+    from jax.tree_util import Partial
 
-
-def scan_robust_triangulate_points(camera_params, points2d, sigma=150, threshold=0.5):
-    return jax.lax.scan(scan_helper, (camera_params, sigma, threshold), points2d)[1]
+    map_fn = Partial(robust_triangulate_point_time_slice, camera_params=camera_params, sigma=sigma, threshold=threshold)
+    map = jax.jit(jax.lax.map, static_argnames=("batch_size"))
+    return map(map_fn, points2d)
 
 
 def robust_triangulate_points(camera_params, points2d, sigma=150, threshold=0.5, return_weights=False, fast_inference=True):
@@ -596,13 +596,12 @@ def robust_triangulate_points(camera_params, points2d, sigma=150, threshold=0.5,
     # make sure sigma and threshold are jnp.array(float) to avoid retracing
     sigma = jnp.array(sigma, dtype=jnp.float32)
     threshold = jnp.array(threshold, dtype=jnp.float32)
-    return_weights = jnp.array(return_weights, dtype=jnp.bool)
 
     # Original shape: (num_cameras, T, J, 3). Reorder so that time is the first axis.
     points2d = jnp.transpose(points2d, (1, 2, 0, 3))  # now (T, J, num_cameras, 3)
 
     # this always treats return_weights as True
-    results = scan_robust_triangulate_points(camera_params, points2d, sigma, threshold)
+    results = map_robust_triangulate_points(camera_params, points2d, sigma, threshold)
 
     if return_weights:
         # points comes back with dimension (T, J, 4). this is fine
