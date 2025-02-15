@@ -527,6 +527,18 @@ def robust_triangulate_point_single(camera_params, points2d, sigma=jnp.array(150
     return robust_point3d
 
 
+@partial(jax.jit, static_argnames=("return_weights"))
+def robust_triangulate_point_time_slice(camera_params, x, sigma, threshold, return_weights):
+    """
+    Helper to apply robust_triangulate_point_single to all joints at a single time point.
+
+    We specifically create this intermediatry to allow it to be jitted and cached for a given number of cameras.
+    Note the order of parameters remains consistent with other library functions having camera_params first,
+    but this is designed to be vectorized over the time dimension.
+    """
+    return jax.vmap(lambda _x: robust_triangulate_point_single(camera_params, _x, sigma, threshold, return_weights))(x)
+
+
 def robust_triangulate_points(camera_params, points2d, sigma=150, threshold=0.5, return_weights=False, fast_inference=True):
     """
     Robustly triangulate keypoints for all time points and joints.
@@ -575,14 +587,11 @@ def robust_triangulate_points(camera_params, points2d, sigma=150, threshold=0.5,
     sigma = jnp.array(sigma)
     threshold = jnp.array(threshold)
 
-    num_cameras, T, J, _ = points2d.shape
-    # Rearrange so that the time and joint axes come first:
-    # From shape (num_cameras, T, J, 3) to (T, J, num_cameras, 3)
-    points2d_t = jnp.transpose(points2d, (1, 2, 0, 3))
-    # Flatten the (time, joint) dimensions into one: shape (T*J, num_cameras, 3)
-    flat_points2d = jnp.reshape(points2d_t, (T * J, num_cameras, 3))
+    # Original shape: (num_cameras, T, J, 3). Reorder so that time is the first axis.
+    points2d = jnp.transpose(points2d, (1, 2, 0, 3))  # now (T, J, num_cameras, 3)
 
     if fast_inference:
+        # allow selecting how we vectorize the first (time) dimension
 
         def vectorize(f):
             # vectorize using a scan to avoid the compilation time of vmap
@@ -594,21 +603,25 @@ def robust_triangulate_points(camera_params, points2d, sigma=150, threshold=0.5,
     else:
         vectorize = jax.vmap
 
-    _robust_triangulate_point_single = lambda x: robust_triangulate_point_single(camera_params, x, sigma, threshold, return_weight=return_weights)
-    _robust_triangulate_point_single = vectorize(_robust_triangulate_point_single)
+    # this will compute for all of the joints at a given time
+    # _robust_triangulate_point_single_time = jax.vmap(lambda x: robust_triangulate_point_single(camera_params, x, sigma, threshold, return_weights))
+    # this will compute for all of the times
+    # _robust_triangulate_point = vectorize(_robust_triangulate_point_single_time)
 
-    result = _robust_triangulate_point_single(flat_points2d)
+    _robust_triangulate_point = vectorize(lambda x: robust_triangulate_point_time_slice(camera_params, x, sigma, threshold, return_weights))
+
+    results = _robust_triangulate_point(points2d)
 
     if return_weights:
-        # result is a tuple of two arrays
-        robust_points_flat, robust_weights_flat = result
-        robust_points3d = jnp.reshape(robust_points_flat, (T, J, 4))
-        robust_weights = jnp.reshape(robust_weights_flat, (num_cameras, T, J))
-        return robust_points3d, robust_weights
-    else:
-        robust_points_flat = result
-        robust_points3d = jnp.reshape(robust_points_flat, (T, J, 4))
-        return robust_points3d
+        # points comes back with dimension (T, J, 4). this is fine
+        points3d = results[0]
+
+        # however weights comes back with dimension (T, J, num_cameras, 1) and should be (num_cameras, T, J)
+        weights = results[1].transpose(2, 0, 1, 3).squeeze(-1)
+
+        return points3d, weights
+
+    return results
 
 
 def reprojection_error(camera_params, points2d, points3d):
