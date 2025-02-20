@@ -29,14 +29,20 @@ class SessionCalibration(dj.Computed):
 
     def make(self, key):
 
+        # Get a count of the number of calibrations associated with each recording
+        calibrations_per_recording = Recording.aggr(CalibratedRecording, n="count(*)")
+
+        # See if there are any recordings with more or less than one calibration
+        assert len(calibrations_per_recording & "n != 1") == 0, "Some recordings are not associated with exactly one calibration"
+
+        # insert the key into the SessionCalibration table
+        self.insert1(key)
+
         # Join the Recording and CalibratedRecording tables
         joined_calibrated_recordings = (Recording * CalibratedRecording & key).fetch("KEY")
 
         # get the calibrations from the joined_calibrated_recordings
         calibrations = (Calibration & joined_calibrated_recordings).fetch("KEY")
-
-        # insert the key into the SessionCalibration table
-        self.insert1(key)
 
         # insert the calibrations into the Grouping table
         self.Grouping.insert([{**key, **cal} for cal in calibrations])
