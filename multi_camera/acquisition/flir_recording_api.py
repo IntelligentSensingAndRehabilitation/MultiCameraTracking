@@ -339,7 +339,13 @@ def calculate_timespread_drift(timestamps):
         print(f"Timestamps showed a maximum spread of {np.max(spread) * 1000} ms")
         print(f"Timestamp standard deviation {ts['std'].max() -  ts['std'].min()} ms")
 
-    return np.max(spread) * 1000
+    max = np.max(spread) * 1000
+
+    # if max is nan or infinity, set to -1
+    if np.isnan(max) or np.isinf(max):
+        max = -1
+
+    return max
 
 def write_metadata_queue(json_queue: Queue, records_queue: Queue, json_file: str, config_metadata: dict):
     """
