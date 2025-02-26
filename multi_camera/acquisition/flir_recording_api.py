@@ -362,13 +362,17 @@ def write_metadata_queue(json_queue: Queue, records_queue: Queue, json_file: str
 
     local_times = []
 
+    chunk_data = config_metadata["chunk_data"]
+
     json_data = {}
     json_data["real_times"] = []
     json_data["timestamps"] = []
     json_data["frame_id"] = []
-    json_data["frame_id_abs"] = []
-    json_data["chunk_serial_data"] = []
-    json_data["serial_msg"] = []
+
+    if chunk_data:
+        json_data["frame_id_abs"] = []
+        json_data["chunk_serial_data"] = []
+        json_data["serial_msg"] = []
 
     bad_frame = 0
 
@@ -415,9 +419,11 @@ def write_metadata_queue(json_queue: Queue, records_queue: Queue, json_file: str
             local_times = [frame["local_times"]]
             json_data["timestamps"] = [frame["timestamps"]]
             json_data["frame_id"] = [frame["frame_id"]]
-            json_data["frame_id_abs"] = [frame["frame_id_abs"]]
-            json_data["chunk_serial_data"] = [frame["chunk_serial_data"]]
-            json_data["serial_msg"] = [frame["serial_msg"]]
+
+            if chunk_data:
+                json_data["frame_id_abs"] = [frame["frame_id_abs"]]
+                json_data["chunk_serial_data"] = [frame["chunk_serial_data"]]
+                json_data["serial_msg"] = [frame["serial_msg"]]
 
         else:
             # This means we are still writing to the same json file
@@ -425,9 +431,11 @@ def write_metadata_queue(json_queue: Queue, records_queue: Queue, json_file: str
             local_times.append(frame["local_times"])
             json_data["timestamps"].append(frame["timestamps"])
             json_data["frame_id"].append(frame["frame_id"])
-            json_data["frame_id_abs"].append(frame["frame_id_abs"])
-            json_data["chunk_serial_data"].append(frame["chunk_serial_data"])
-            json_data["serial_msg"].append(frame["serial_msg"])
+
+            if chunk_data:
+                json_data["frame_id_abs"].append(frame["frame_id_abs"])
+                json_data["chunk_serial_data"].append(frame["chunk_serial_data"])
+                json_data["serial_msg"].append(frame["serial_msg"])
 
         json_queue.task_done()
 
@@ -627,12 +635,15 @@ class FlirRecorder:
             self.chunk_data = self.camera_config["acquisition-settings"]["chunk_data"]
             self.camera_info = self.camera_config["camera-info"]
 
+            if self.chunk_data:
+                print(f"Extracting the following variables from chunk data: {self.chunk_data}")
+
         else:
             # If no config file is passed, use default values
             exposure_time = 15000
             frame_rate = 30
             self.gpio_settings = {'line0': 'Off', 'line2': 'Off', 'line3': 'Off'}
-            self.chunk_data = ['FrameID','SerialData']
+            self.chunk_data = []
             self.camera_info = {}
 
         # Updating the binning needed to run at 60 Hz. 
@@ -707,7 +718,8 @@ class FlirRecorder:
                 "camera_config_hash": self.get_config_hash(self.camera_config),
                 "acquisition_type": self.acquisition_type,
                 "video_segment_len": self.video_segment_len,
-                "system_info": self.get_system_info()
+                "system_info": self.get_system_info(),
+                "chunk_data": self.chunk_data
             }
         
         self.acquisition_type = "max_frames"
@@ -721,7 +733,8 @@ class FlirRecorder:
             "camera_config_hash": None,
             "acquisition_type": "max_frames",
             "video_segment_len": max_frames,
-            "system_info": self.get_system_info()
+            "system_info": self.get_system_info(),
+            "chunk_data": self.chunk_data
         }
     
     def update_filename(self):
@@ -753,13 +766,15 @@ class FlirRecorder:
 
         frame_metadata["timestamps"] = []
         frame_metadata["frame_id"] = []
-        frame_metadata["frame_id_abs"] = []
-        frame_metadata["chunk_serial_data"] = []
-        frame_metadata["serial_msg"] = []
         frame_metadata["camera_serials"] = []
         frame_metadata["exposure_times"] = []
         frame_metadata["frame_rates_requested"] = []
         frame_metadata["frame_rates_binning"] = []
+
+        if self.chunk_data:
+            frame_metadata["frame_id_abs"] = []
+            frame_metadata["chunk_serial_data"] = []
+            frame_metadata["serial_msg"] = []
 
         return frame_metadata
     
@@ -966,10 +981,12 @@ class FlirRecorder:
                         continue
                     
                     timestamp = im_ref.GetTimeStamp()
-                    chunk_data = im_ref.GetChunkData()
                     frame_id = im_ref.GetFrameID()
-                    frame_id_abs = chunk_data.GetFrameID()
-                    serial_msg, frame_count = self.process_serial_data(camera)
+
+                    if self.chunk_data:
+                        chunk_data = im_ref.GetChunkData()
+                        frame_id_abs = chunk_data.GetFrameID()
+                        serial_msg, frame_count = self.process_serial_data(camera)
 
                     # Check if the frame_id has incremented by 1
                     if frame_id != prev_frame_id + 1:
@@ -1004,12 +1021,15 @@ class FlirRecorder:
                         'image': im,
                         'timestamp': timestamp,
                         'frame_id': frame_id,
-                        'frame_id_abs': frame_id_abs,
-                        'serial_msg': serial_msg,
-                        'frame_count': frame_count,
                         'camera_serial': camera_serial,
                         'pixel_format': pixel_format
                     }
+
+                    if self.chunk_data:
+                        frame_data['frame_id_abs'] = frame_id_abs
+                        frame_data['serial_msg'] = serial_msg
+                        frame_data['frame_count'] = frame_count
+                        
                     # put the frame data into the acquisition queue
                     self.acquisition_queue[camera_serial].put(frame_data)
 
@@ -1075,13 +1095,15 @@ class FlirRecorder:
                     
                     self.frame_metadata['timestamps'].append(frame_data['timestamp'])
                     self.frame_metadata['frame_id'].append(frame_data['frame_id'])
-                    self.frame_metadata['frame_id_abs'].append(frame_data['frame_id_abs'])
-                    self.frame_metadata['chunk_serial_data'].append(frame_data['frame_count'])
-                    self.frame_metadata['serial_msg'].append(frame_data['serial_msg'])
                     self.frame_metadata['camera_serials'].append(camera_serial)
                     self.frame_metadata['exposure_times'].append(15000)
                     self.frame_metadata['frame_rates_binning'].append(30)
                     self.frame_metadata['frame_rates_requested'].append(30)
+
+                    if self.chunk_data:
+                        self.frame_metadata['frame_id_abs'].append(frame_data['frame_id_abs'])
+                        self.frame_metadata['chunk_serial_data'].append(frame_data['frame_count'])
+                        self.frame_metadata['serial_msg'].append(frame_data['serial_msg'])
 
                     if self.preview_callback:
                         real_time_images.append((frame_data['image'],self.pixel_format_conversion[frame_data['pixel_format']]))
