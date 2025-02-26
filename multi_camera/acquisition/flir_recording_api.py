@@ -289,7 +289,7 @@ def write_image_queue(
             out_video = cv2.VideoWriter(vid_file, fourcc, acquisition_fps, (im.shape[1], im.shape[0]))
             out_video.write(last_im)
 
-        elif frame_num % video_segment_len == 0 and acquisition_type == "continuous":
+        elif frame_num != 0 and frame_num % video_segment_len == 0 and acquisition_type == "continuous":
             # video_segment_num += 1
 
             out_video.release()
@@ -731,9 +731,11 @@ class FlirRecorder:
 
         if self.acquisition_type == "continuous":
             # Reset the progress bar after each video segment
-            if frame_idx % total_frames == 0:
+            if frame_idx != 0 and frame_idx % total_frames == 0:
                 frame_idx = 0
                 self.update_filename()
+
+        return frame_idx
     
     def initialize_frame_metadata(self):
             
@@ -824,6 +826,10 @@ class FlirRecorder:
 
         
         config_metadata = self._prepare_config_metadata(max_frames)
+
+        # Set max_frames = self.video_segment_len. self.video_segment_len is either set to max_frames or 
+        # a value from the config file.
+        max_frames = self.video_segment_len
 
         # Initializing an image queue for each camera
         self.image_queue_dict = {c.DeviceSerialNumber: Queue(max_frames) for c in self.cams}
@@ -1051,7 +1057,7 @@ class FlirRecorder:
                     acquisition_frames.append(self.acquisition_queue[c].get())
                     self.acquisition_queue[c].task_done()
 
-                self.update_progress(frame_idx, max_frames)
+                frame_idx = self.update_progress(frame_idx, max_frames)
                 self.increment_frame_counter()
 
                 real_time_images = []
