@@ -3,7 +3,7 @@ import simple_pyspin
 from simple_pyspin import Camera
 import numpy as np
 from tqdm import tqdm
-from datetime import datetime
+import datetime
 from queue import Queue
 from typing import List, Callable, Awaitable
 from pydantic import BaseModel
@@ -269,6 +269,8 @@ def write_image_queue(
 
         im = frame["im"]
 
+        print(f"IN WRITE QUEUE {serial} {frame_num} {frame['base_filename']}")
+
         if pixel_format == "BayerRG8":
             im = cv2.cvtColor(im, cv2.COLOR_BAYER_RG2RGB)
         elif pixel_format == "BayerBG8":
@@ -280,7 +282,11 @@ def write_image_queue(
 
         elif out_video is None and len(real_times) > 1:
             # Get the video file for the current frame
+            base_filename = frame["base_filename"]
             vid_file = frame["base_filename"] + f".{serial}.mp4"
+
+            vid_writer_print = f"starting new video file {vid_file}"
+            print(vid_writer_print)
 
             tqdm.write(f"Writing FPS: {acquisition_fps}")
 
@@ -289,18 +295,21 @@ def write_image_queue(
             out_video = cv2.VideoWriter(vid_file, fourcc, acquisition_fps, (im.shape[1], im.shape[0]))
             out_video.write(last_im)
 
-        elif frame_num != 0 and frame_num % video_segment_len == 0 and acquisition_type == "continuous":
+        elif frame['base_filename'] != base_filename:
+            # This means a new file should be started
+            print(f"NEW VIDEO START {frame['base_filename']} {base_filename} {frame_num}")
             # video_segment_num += 1
 
             out_video.release()
 
             # Get the video file for the current frame
             vid_file = frame["base_filename"] + f".{serial}.mp4"
+            print(f"starting new continuous video file {vid_file} {frame_num}")
 
             tqdm.write(f"Writing FPS: {acquisition_fps}")
 
             fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-            print("writing to", vid_file)
+            print(f"writing to {vid_file}")
             out_video = cv2.VideoWriter(vid_file, fourcc, acquisition_fps, (im.shape[1], im.shape[0]))
             out_video.write(im)
 
@@ -384,6 +393,7 @@ def write_metadata_queue(json_queue: Queue, records_queue: Queue, json_file: str
             bad_frame = frame["first_bad_frame"]
 
         if current_filename != frame["base_filename"]:
+            print(f"starting new json file {current_filename}, {frame['base_filename']}")
             
             # This means a new file should be started
             json_file = current_filename + ".json"
@@ -738,12 +748,41 @@ class FlirRecorder:
         }
     
     def update_filename(self):
+        print(f"CURRENT FILENAME: {self.video_base_file}")
         if self.video_base_file is not None:
-            now = datetime.now()
-            time_str = now.strftime("%Y%m%d_%H%M%S")
 
-            self.video_base_name = "_".join([self.video_root, time_str])
-            self.video_base_file = os.path.join(self.video_path, self.video_base_name)
+            self.video_base_file = self.video_base_file_next
+            self.video_base_name = self.video_base_name_next
+            
+            self.calculate_next_filename()
+            
+            print(f"NEW/NEXT FILENAME: {self.video_base_file} {self.video_base_file_next}")
+
+            
+
+    def calculate_next_filename(self):
+
+        # First get the YYYYMMDD_HHMMSS from self.video_base_name (which is formatted as {self.video_root}_{YYYYMMDD}_{HHMMSS})
+        time_str = "_".join(self.video_base_name.split("_")[-2:])
+
+        # Then add the acquisition video segment length / frame_rate to the time_str
+        # This is done by converting the time_str to a datetime object, adding the time delta, and then converting it back to a string
+        # Get the current datetime object
+        time_datetime = datetime.datetime.strptime(time_str, "%Y%m%d_%H%M%S")
+        # Calculate the time delta
+        time_delta = datetime.timedelta(seconds=round(self.video_segment_len / self.acquisition_frame_rate))
+
+        # Add the time delta to the current datetime object
+        new_time_datetime = time_datetime + time_delta
+
+        # Convert the new datetime object back to a string
+        new_time_str = new_time_datetime.strftime("%Y%m%d_%H%M%S")
+
+        # Then create the new filename by joining the video_root and the new time_str
+        new_filename = "_".join([self.video_root, new_time_str])
+
+        self.video_base_name_next = new_filename
+        self.video_base_file_next = os.path.join(self.video_path, self.video_base_name_next)
 
     def update_progress(self, frame_idx, total_frames):
         self.set_progress(frame_idx / total_frames)
@@ -752,15 +791,15 @@ class FlirRecorder:
             # Reset the progress bar after each video segment
             if frame_idx != 0 and frame_idx % total_frames == 0:
                 frame_idx = 0
-                self.update_filename()
+                # self.update_filename()
 
         return frame_idx
     
     def initialize_frame_metadata(self):
             
         # Get the current real time
-        real_time = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-        local_time = datetime.now()
+        real_time = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+        local_time = datetime.datetime.now()
 
         frame_metadata = {"real_times": real_time, "local_times": local_time, "base_filename": self.video_base_file}
 
@@ -844,6 +883,9 @@ class FlirRecorder:
             # Split the video_base_name to get the root and the date
             # self.video_datetime = "_".join(self.video_base_name.split("_")[-2:])
             self.video_root = "_".join(self.video_base_name.split("_")[:-2])
+            print(f"video_root: {self.video_root}")
+            print(f"video_path: {self.video_path}")
+            print(f"video_base_name: {self.video_base_name}")
 
         
         config_metadata = self._prepare_config_metadata(max_frames)
@@ -914,7 +956,8 @@ class FlirRecorder:
 
         print("Acquisition, Resulting, Exposure, DeviceLinkThroughputLimit:")
         for c in self.cams:
-            print(f"{c.DeviceSerialNumber}: {c.AcquisitionFrameRate}, {c.AcquisitionResultingFrameRate}, {c.ExposureTime}, {c.DeviceLinkThroughputLimit} ")
+            self.acquisition_frame_rate = c.AcquisitionFrameRate
+            print(f"{c.DeviceSerialNumber}: {self.acquisition_frame_rate}, {c.AcquisitionResultingFrameRate}, {c.ExposureTime}, {c.DeviceLinkThroughputLimit} ")
             print(f"Frame Size: {c.Width} {c.Height}")
             print(f"{c.GevSCPSPacketSize}, {c.GevSCPD}")
 
@@ -935,6 +978,11 @@ class FlirRecorder:
             self.first_bad_frame[c.DeviceSerialNumber] = -1
 
             self.cam_serials.append(c.DeviceSerialNumber)
+
+        if self.video_base_file is not None:
+            # Create the next filename as well by adding the video_segment_len / acquisition_frame_rate  to the current filename
+            self.calculate_next_filename()
+            print(f"video_base_file_next: {self.video_base_file_next}")
 
         # schedule a command to start in 250 ms in the future
         self.cams[0].TimestampLatch()
@@ -962,13 +1010,20 @@ class FlirRecorder:
 
             while self.acquisition_type == "continuous" or frame_idx < max_frames:
 
+                print(f"VIDEO BASE FILENAME {camera_serial} {self.video_base_file}")
+
                 if self.stop_frame_set.is_set():
                     # Check if the camera frame count is equal to the stop_frame
                     if frame_idx >= self.stop_frame:
 
-                        print(f"Stopping {camera_serial} recording\n")
+                        print(f"Stopping {camera_serial} recording\n{frame_idx},{self.stop_frame}")
                         self.acquisition_queue[camera_serial].put(None)
                         break
+
+                # Check if a new video segment should be started
+                if self.video_base_file is not None and frame_idx % self.video_segment_len == 0 and frame_idx != 0:
+                    print(f"Starting new video segment for {camera_serial} at frame {frame_idx}")
+                    self.update_filename()
 
                 try:
                     im_ref = camera.get_image()
@@ -1062,7 +1117,7 @@ class FlirRecorder:
                         print("setting stop frame")
                         self.set_stop_frame(cleanup_frames)
                     else:
-                        print("cleaning_up", frame_idx, self.stop_frame)
+                        print("cleaning_up", frame_idx, self.stop_frame, max_frames)
                         # print(f"{self.cam_serials}\n{[self.acquisition_queue[c].empty() for c in self.cam_serials]}")
 
                         # break out if frame_idx == stop_frame
@@ -1307,7 +1362,7 @@ if __name__ == "__main__":
     # time.sleep(5)
 
     # Get the timestamp that should be used for the file names
-    now = datetime.now()
+    now = datetime.datetime.now()
     time_str = now.strftime("%Y%m%d_%H%M%S")
     filename = f"{args.vid_file}_{time_str}.mp4"
 
