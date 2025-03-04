@@ -295,25 +295,46 @@ def write_image_queue(
             out_video = cv2.VideoWriter(vid_file, fourcc, acquisition_fps, (im.shape[1], im.shape[0]))
             out_video.write(last_im)
 
-        elif frame['base_filename'] != base_filename:
-            # This means a new file should be started
-            print(f"NEW VIDEO START {frame['base_filename']} {base_filename} {frame_num}")
-            # video_segment_num += 1
+        # elif frame['base_filename'] != base_filename:
+        #     # This means a new file should be started
+        #     print(f"NEW VIDEO START {frame['base_filename']} {base_filename} {frame_num}")
+        #     # video_segment_num += 1
 
-            out_video.release()
+        #     out_video.release()
 
-            # Get the video file for the current frame
-            vid_file = frame["base_filename"] + f".{serial}.mp4"
-            print(f"starting new continuous video file {vid_file} {frame_num}")
+        #     # Get the video file for the current frame
+        #     vid_file = frame["base_filename"] + f".{serial}.mp4"
+        #     print(f"starting new continuous video file {vid_file} {frame_num}")
 
-            tqdm.write(f"Writing FPS: {acquisition_fps}")
+        #     tqdm.write(f"Writing FPS: {acquisition_fps}")
 
-            fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-            print(f"writing to {vid_file}")
-            out_video = cv2.VideoWriter(vid_file, fourcc, acquisition_fps, (im.shape[1], im.shape[0]))
-            out_video.write(im)
+        #     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        #     print(f"writing to {vid_file}")
+        #     out_video = cv2.VideoWriter(vid_file, fourcc, acquisition_fps, (im.shape[1], im.shape[0]))
+        #     out_video.write(im)
 
         else:
+
+            # Check if the base_filename passed is the same as the previous one
+            # This means we are still writing to the same video file
+            if frame["base_filename"] != base_filename:
+                # This means a new file should be started
+                # release the previous video file
+                print("releasing video file")
+                out_video.release()
+
+                base_filename = frame["base_filename"]
+                # Get the video file for the current frame
+                vid_file = frame["base_filename"] + f".{serial}.mp4"
+
+                print(f"starting new video file {vid_file} {frame_num}")
+
+                tqdm.write(f"Writing FPS: {acquisition_fps}")
+
+                fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+                print(f"writing to {vid_file}")
+                out_video = cv2.VideoWriter(vid_file, fourcc, acquisition_fps, (im.shape[1], im.shape[0]))
+
             out_video.write(im)
 
         image_queue.task_done()
@@ -801,7 +822,7 @@ class FlirRecorder:
         real_time = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
         local_time = datetime.datetime.now()
 
-        frame_metadata = {"real_times": real_time, "local_times": local_time, "base_filename": self.video_base_file}
+        frame_metadata = {"real_times": real_time, "local_times": local_time}
 
         frame_metadata["timestamps"] = []
         frame_metadata["frame_id"] = []
@@ -1010,7 +1031,7 @@ class FlirRecorder:
 
             while self.acquisition_type == "continuous" or frame_idx < max_frames:
 
-                print(f"VIDEO BASE FILENAME {camera_serial} {self.video_base_file}")
+                # print(f"VIDEO BASE FILENAME {camera_serial} {self.video_base_file}")
 
                 if self.stop_frame_set.is_set():
                     # Check if the camera frame count is equal to the stop_frame
@@ -1077,7 +1098,8 @@ class FlirRecorder:
                         'timestamp': timestamp,
                         'frame_id': frame_id,
                         'camera_serial': camera_serial,
-                        'pixel_format': pixel_format
+                        'pixel_format': pixel_format,
+                        'base_filename': self.video_base_file,
                     }
 
                     if self.chunk_data:
@@ -1177,6 +1199,7 @@ class FlirRecorder:
 
                 # Put the frame metadata into the json queue
                 if self.video_base_file is not None:
+                    self.frame_metadata['base_filename'] = frame_data['base_filename']
                     self.json_queue.put(self.frame_metadata)
 
                 # Handle preview callback
