@@ -768,23 +768,22 @@ class FlirRecorder:
             "chunk_data": self.chunk_data
         }
     
-    def update_filename(self):
-        print(f"CURRENT FILENAME: {self.video_base_file}")
-        if self.video_base_file is not None:
-
-            self.video_base_file = self.video_base_file_next
-            self.video_base_name = self.video_base_name_next
+    def update_filename(self, current_filename):
+        print(f"CURRENT FILENAME: {current_filename}")
+        if current_filename is not None:
             
-            self.calculate_next_filename()
+            current_filename = self.calculate_next_filename(current_filename)
             
-            print(f"NEW/NEXT FILENAME: {self.video_base_file} {self.video_base_file_next}")
+            print(f"NEW/NEXT FILENAME: {current_filename}")
 
-            
+        return current_filename
 
-    def calculate_next_filename(self):
+    def calculate_next_filename(self, current_filename):
 
-        # First get the YYYYMMDD_HHMMSS from self.video_base_name (which is formatted as {self.video_root}_{YYYYMMDD}_{HHMMSS})
-        time_str = "_".join(self.video_base_name.split("_")[-2:])
+        base_name = current_filename.split("/")[-1]
+
+        # First get the YYYYMMDD_HHMMSS from base_name (which is formatted as {self.video_root}_{YYYYMMDD}_{HHMMSS})
+        time_str = "_".join(base_name.split("_")[-2:])
 
         # Then add the acquisition video segment length / frame_rate to the time_str
         # This is done by converting the time_str to a datetime object, adding the time delta, and then converting it back to a string
@@ -802,8 +801,9 @@ class FlirRecorder:
         # Then create the new filename by joining the video_root and the new time_str
         new_filename = "_".join([self.video_root, new_time_str])
 
-        self.video_base_name_next = new_filename
-        self.video_base_file_next = os.path.join(self.video_path, self.video_base_name_next)
+        new_file = os.path.join(self.video_path, new_filename)
+
+        return new_file
 
     def update_progress(self, frame_idx, total_frames):
         self.set_progress(frame_idx / total_frames)
@@ -1000,10 +1000,10 @@ class FlirRecorder:
 
             self.cam_serials.append(c.DeviceSerialNumber)
 
-        if self.video_base_file is not None:
-            # Create the next filename as well by adding the video_segment_len / acquisition_frame_rate  to the current filename
-            self.calculate_next_filename()
-            print(f"video_base_file_next: {self.video_base_file_next}")
+        # if self.video_base_file is not None:
+        #     # Create the next filename as well by adding the video_segment_len / acquisition_frame_rate  to the current filename
+        #     self.calculate_next_filename()
+        #     print(f"video_base_file_next: {self.video_base_file_next}")
 
         # schedule a command to start in 250 ms in the future
         self.cams[0].TimestampLatch()
@@ -1029,6 +1029,8 @@ class FlirRecorder:
             prev_frame_id = 0
             processed_frames = 0
 
+            current_filename = self.video_base_file
+
             while self.acquisition_type == "continuous" or frame_idx < max_frames:
 
                 # print(f"VIDEO BASE FILENAME {camera_serial} {self.video_base_file}")
@@ -1042,9 +1044,10 @@ class FlirRecorder:
                         break
 
                 # Check if a new video segment should be started
-                if self.video_base_file is not None and frame_idx % self.video_segment_len == 0 and frame_idx != 0:
+                if current_filename is not None and frame_idx % self.video_segment_len == 0 and frame_idx != 0:
+                    
                     print(f"Starting new video segment for {camera_serial} at frame {frame_idx}")
-                    self.update_filename()
+                    current_filename = self.update_filename(current_filename)
 
                 try:
                     im_ref = camera.get_image()
@@ -1085,12 +1088,12 @@ class FlirRecorder:
                 try:
                     im = im_ref.GetNDArray()
 
-                    if self.video_base_file is not None:
+                    if current_filename is not None:
                         self.image_queue_dict[camera_serial].put({
                             "im": im,
                             "real_times": 0,
                             "timestamps": timestamp,
-                            "base_filename": self.video_base_file
+                            "base_filename": current_filename
                         })
 
                     frame_data = {
@@ -1099,7 +1102,7 @@ class FlirRecorder:
                         'frame_id': frame_id,
                         'camera_serial': camera_serial,
                         'pixel_format': pixel_format,
-                        'base_filename': self.video_base_file,
+                        'base_filename': current_filename,
                     }
 
                     if self.chunk_data:
