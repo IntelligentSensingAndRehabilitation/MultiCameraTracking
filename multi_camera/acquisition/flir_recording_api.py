@@ -149,15 +149,6 @@ def init_camera(
                 print(f"Flipping image for camera {c.DeviceSerialNumber}")
                 c.ReverseX = True
                 c.ReverseY = True
-
-
-    # c.ReverseX = True
-    # c.ReverseY = True
-
-    # c.PixelFormat = "BayerBG8"  # BGR8 Mono8
-
-    # c.ReverseX = True
-    # c.ReverseY = True
     
     # Now applying desired binning to maximum frame size
     c.BinningHorizontal = binning
@@ -269,8 +260,6 @@ def write_image_queue(
 
         im = frame["im"]
 
-        print(f"IN WRITE QUEUE {serial} {frame_num} {frame['base_filename']}")
-
         if pixel_format == "BayerRG8":
             im = cv2.cvtColor(im, cv2.COLOR_BAYER_RG2RGB)
         elif pixel_format == "BayerBG8":
@@ -285,33 +274,12 @@ def write_image_queue(
             base_filename = frame["base_filename"]
             vid_file = frame["base_filename"] + f".{serial}.mp4"
 
-            vid_writer_print = f"starting new video file {vid_file}"
-            print(vid_writer_print)
-
             tqdm.write(f"Writing FPS: {acquisition_fps}")
 
             fourcc = cv2.VideoWriter_fourcc(*"mp4v")
 
             out_video = cv2.VideoWriter(vid_file, fourcc, acquisition_fps, (im.shape[1], im.shape[0]))
             out_video.write(last_im)
-
-        # elif frame['base_filename'] != base_filename:
-        #     # This means a new file should be started
-        #     print(f"NEW VIDEO START {frame['base_filename']} {base_filename} {frame_num}")
-        #     # video_segment_num += 1
-
-        #     out_video.release()
-
-        #     # Get the video file for the current frame
-        #     vid_file = frame["base_filename"] + f".{serial}.mp4"
-        #     print(f"starting new continuous video file {vid_file} {frame_num}")
-
-        #     tqdm.write(f"Writing FPS: {acquisition_fps}")
-
-        #     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        #     print(f"writing to {vid_file}")
-        #     out_video = cv2.VideoWriter(vid_file, fourcc, acquisition_fps, (im.shape[1], im.shape[0]))
-        #     out_video.write(im)
 
         else:
 
@@ -320,7 +288,6 @@ def write_image_queue(
             if frame["base_filename"] != base_filename:
                 # This means a new file should be started
                 # release the previous video file
-                print("releasing video file")
                 out_video.release()
 
                 base_filename = frame["base_filename"]
@@ -332,7 +299,6 @@ def write_image_queue(
                 tqdm.write(f"Writing FPS: {acquisition_fps}")
 
                 fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-                print(f"writing to {vid_file}")
                 out_video = cv2.VideoWriter(vid_file, fourcc, acquisition_fps, (im.shape[1], im.shape[0]))
 
             out_video.write(im)
@@ -414,7 +380,6 @@ def write_metadata_queue(json_queue: Queue, records_queue: Queue, json_file: str
             bad_frame = frame["first_bad_frame"]
 
         if current_filename != frame["base_filename"]:
-            print(f"starting new json file {current_filename}, {frame['base_filename']}")
             
             # This means a new file should be started
             json_file = current_filename + ".json"
@@ -769,16 +734,6 @@ class FlirRecorder:
         }
     
     def update_filename(self, current_filename):
-        print(f"CURRENT FILENAME: {current_filename}")
-        if current_filename is not None:
-            
-            current_filename = self.calculate_next_filename(current_filename)
-            
-            print(f"NEW/NEXT FILENAME: {current_filename}")
-
-        return current_filename
-
-    def calculate_next_filename(self, current_filename):
 
         base_name = current_filename.split("/")[-1]
 
@@ -812,7 +767,6 @@ class FlirRecorder:
             # Reset the progress bar after each video segment
             if frame_idx != 0 and frame_idx % total_frames == 0:
                 frame_idx = 0
-                # self.update_filename()
 
         return frame_idx
     
@@ -938,7 +892,6 @@ class FlirRecorder:
                     kwargs={
                         "vid_file": self.video_base_file,
                         "image_queue": self.image_queue_dict[serial],
-                        # "json_queue": self.json_queue_dict[serial],
                         "serial": serial,
                         "pixel_format": c.PixelFormat,
                         "acquisition_fps": c.AcquisitionFrameRate,
@@ -1000,11 +953,6 @@ class FlirRecorder:
 
             self.cam_serials.append(c.DeviceSerialNumber)
 
-        # if self.video_base_file is not None:
-        #     # Create the next filename as well by adding the video_segment_len / acquisition_frame_rate  to the current filename
-        #     self.calculate_next_filename()
-        #     print(f"video_base_file_next: {self.video_base_file_next}")
-
         # schedule a command to start in 250 ms in the future
         self.cams[0].TimestampLatch()
         value = self.cams[0].TimestampLatchValue
@@ -1033,13 +981,11 @@ class FlirRecorder:
 
             while self.acquisition_type == "continuous" or frame_idx < max_frames:
 
-                # print(f"VIDEO BASE FILENAME {camera_serial} {self.video_base_file}")
-
                 if self.stop_frame_set.is_set():
                     # Check if the camera frame count is equal to the stop_frame
                     if frame_idx >= self.stop_frame:
 
-                        print(f"Stopping {camera_serial} recording\n{frame_idx},{self.stop_frame}")
+                        print(f"Stopping {camera_serial} recording: {frame_idx},{self.stop_frame}")
                         self.acquisition_queue[camera_serial].put(None)
                         break
 
@@ -1143,7 +1089,6 @@ class FlirRecorder:
                         self.set_stop_frame(cleanup_frames)
                     else:
                         print("cleaning_up", frame_idx, self.stop_frame, max_frames)
-                        # print(f"{self.cam_serials}\n{[self.acquisition_queue[c].empty() for c in self.cam_serials]}")
 
                         # break out if frame_idx == stop_frame
                         if frame_idx == self.stop_frame:
