@@ -1,20 +1,32 @@
 # Example config.yaml file
 
-Config files should follow the format below. `camera_serial_number` should be updated with the serial numbers of the cameras that should be used for acquisition.
+Config files should follow the format below.
+
+Things you should check/change before using the config file:
+- `camera_serial_number` should be updated with the serial numbers of the cameras that should be used for acquisition.
+- `lens_info` is simply metainfo
+- You can optionally add the `flip_image` field for a given camera. If you do not include the `flip_image` field, or if you have `flip_image: False`, the image will not be flipped
+- Most use cases utilize `max-frame` for `acquisition-type`. `max-frame` will record until `N frames` (set in the GUI) are recorded or the stop button is pressed. `continuous` will only stop if the stop button is pressed. `continuous` will record for `N=video_segment_len` frames and then start a new video segment and continue recording.
+- In `acquisition-settings`, generally only `video_segment_len` and `chunk_data` are modified. If you don't need `chunk data`, you can set it to `[]`
+- Set relevant `gpio-settings`
+- Add any additional `meta-info`
 
 
 ```
 ---
  camera-info:
-   camera_serial_number (ex: 23336091):
+   21182016:
      lens_info: "F1.4/6mm"
-   camera_serial_number:
+   22343864:
+     lens_info: "F1.6/4.4-11mm"
+   22343863:
      lens_info: "F1.4/6mm"
-   .
-   .
-   .
-   camera_serial_number:
+   21132272:
      lens_info: "F1.4/6mm"
+     flip_image: True
+   22047081:
+     lens_info: "F1.4/6mm"
+     flip_image: False
 
  acquisition-type: 'max-frame' # 'max-frame' or 'continuous'
 
