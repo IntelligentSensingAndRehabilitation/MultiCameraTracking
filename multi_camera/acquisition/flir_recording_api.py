@@ -272,7 +272,7 @@ def write_image_queue(
         elif out_video is None and len(real_times) > 1:
             # Get the video file for the current frame
             base_filename = frame["base_filename"]
-            vid_file = frame["base_filename"] + f".{serial}.mp4"
+            vid_file = base_filename + f".{serial}.mp4"
 
             tqdm.write(f"Writing FPS: {acquisition_fps}")
 
@@ -292,9 +292,7 @@ def write_image_queue(
 
                 base_filename = frame["base_filename"]
                 # Get the video file for the current frame
-                vid_file = frame["base_filename"] + f".{serial}.mp4"
-
-                print(f"starting new video file {vid_file} {frame_num}")
+                vid_file = base_filename + f".{serial}.mp4"
 
                 tqdm.write(f"Writing FPS: {acquisition_fps}")
 
@@ -858,10 +856,6 @@ class FlirRecorder:
             # Split the video_base_name to get the root and the date
             # self.video_datetime = "_".join(self.video_base_name.split("_")[-2:])
             self.video_root = "_".join(self.video_base_name.split("_")[:-2])
-            print(f"video_root: {self.video_root}")
-            print(f"video_path: {self.video_path}")
-            print(f"video_base_name: {self.video_base_name}")
-
         
         config_metadata = self._prepare_config_metadata(max_frames)
 
@@ -991,9 +985,8 @@ class FlirRecorder:
 
                 # Check if a new video segment should be started
                 if current_filename is not None and frame_idx % self.video_segment_len == 0 and frame_idx != 0:
-                    
-                    print(f"Starting new video segment for {camera_serial} at frame {frame_idx}")
                     current_filename = self.update_filename(current_filename)
+                    print(f"{frame_idx} {camera_serial}: Starting new video segment: {current_filename}")
 
                 try:
                     im_ref = camera.get_image()
