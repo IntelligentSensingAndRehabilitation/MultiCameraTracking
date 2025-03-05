@@ -68,7 +68,7 @@ INTERFACESv4="interface_name"
 ```
 ### Configure Network Interface with nmcli
 
-Replace `eth0` in the command below with interface_name below
+Replace `eth0` in the command below with `interface_name` below
 
 ```
 nmcli con add type ethernet con-name DHCP-Server ifname eth0 autoconnect no ipv4.method manual ipv4.addresses 192.168.1.1/24 ipv4.gateway 192.168.1.1 ipv4.dns "8.8.8.8,8.8.4.4"

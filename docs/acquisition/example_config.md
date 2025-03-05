@@ -16,7 +16,7 @@ Config files should follow the format below. `camera_serial_number` should be up
    camera_serial_number:
      lens_info: "F1.4/6mm"
 
- acquisition-type: 'continuous' # 'max-frame' or 'continuous'
+ acquisition-type: 'max-frame' # 'max-frame' or 'continuous'
 
  acquisition-settings:
     exposure_time: 15000 # in microseconds
