@@ -3,7 +3,7 @@
 Config files should follow the format below.
 
 Things you should check/change before using the config file:
-- `camera_serial_number` should be updated with the serial numbers of the cameras that should be used for acquisition.
+- Serial numbers (`21182016, 22343864, etc.` in the example below) should be updated with the serial numbers of the cameras that should be used for acquisition.
 - `lens_info` is simply metainfo
 - You can optionally add the `flip_image` field for a given camera. If you do not include the `flip_image` field, or if you have `flip_image: False`, the image will not be flipped
 - Most use cases utilize `max-frame` for `acquisition-type`. `max-frame` will record until `N frames` (set in the GUI) are recorded or the stop button is pressed. `continuous` will only stop if the stop button is pressed. `continuous` will record for `N=video_segment_len` frames and then start a new video segment and continue recording.
