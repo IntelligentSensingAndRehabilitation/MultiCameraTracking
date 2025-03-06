@@ -3,7 +3,7 @@ import simple_pyspin
 from simple_pyspin import Camera
 import numpy as np
 from tqdm import tqdm
-from datetime import datetime
+import datetime
 from queue import Queue
 from typing import List, Callable, Awaitable
 from pydantic import BaseModel
@@ -18,7 +18,6 @@ import yaml
 import pandas as pd
 import hashlib
 import platform
-import psutil
 
 
 # Data structures we will expose outside this library
@@ -150,15 +149,6 @@ def init_camera(
                 print(f"Flipping image for camera {c.DeviceSerialNumber}")
                 c.ReverseX = True
                 c.ReverseY = True
-
-
-    # c.ReverseX = True
-    # c.ReverseY = True
-
-    # c.PixelFormat = "BayerBG8"  # BGR8 Mono8
-
-    # c.ReverseX = True
-    # c.ReverseY = True
     
     # Now applying desired binning to maximum frame size
     c.BinningHorizontal = binning
@@ -281,7 +271,8 @@ def write_image_queue(
 
         elif out_video is None and len(real_times) > 1:
             # Get the video file for the current frame
-            vid_file = frame["base_filename"] + f".{serial}.mp4"
+            base_filename = frame["base_filename"]
+            vid_file = base_filename + f".{serial}.mp4"
 
             tqdm.write(f"Writing FPS: {acquisition_fps}")
 
@@ -290,22 +281,24 @@ def write_image_queue(
             out_video = cv2.VideoWriter(vid_file, fourcc, acquisition_fps, (im.shape[1], im.shape[0]))
             out_video.write(last_im)
 
-        elif frame_num % video_segment_len == 0 and acquisition_type == "continuous":
-            # video_segment_num += 1
-
-            out_video.release()
-
-            # Get the video file for the current frame
-            vid_file = frame["base_filename"] + f".{serial}.mp4"
-
-            tqdm.write(f"Writing FPS: {acquisition_fps}")
-
-            fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-            print("writing to", vid_file)
-            out_video = cv2.VideoWriter(vid_file, fourcc, acquisition_fps, (im.shape[1], im.shape[0]))
-            out_video.write(im)
-
         else:
+
+            # Check if the base_filename passed is the same as the previous one
+            # This means we are still writing to the same video file
+            if frame["base_filename"] != base_filename:
+                # This means a new file should be started
+                # release the previous video file
+                out_video.release()
+
+                base_filename = frame["base_filename"]
+                # Get the video file for the current frame
+                vid_file = base_filename + f".{serial}.mp4"
+
+                tqdm.write(f"Writing FPS: {acquisition_fps}")
+
+                fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+                out_video = cv2.VideoWriter(vid_file, fourcc, acquisition_fps, (im.shape[1], im.shape[0]))
+
             out_video.write(im)
 
         image_queue.task_done()
@@ -340,7 +333,13 @@ def calculate_timespread_drift(timestamps):
         print(f"Timestamps showed a maximum spread of {np.max(spread) * 1000} ms")
         print(f"Timestamp standard deviation {ts['std'].max() -  ts['std'].min()} ms")
 
-    return np.max(spread) * 1000
+    max = np.max(spread) * 1000
+
+    # if max is nan or infinity, set to -1
+    if np.isnan(max) or np.isinf(max):
+        max = -1
+
+    return max
 
 def write_metadata_queue(json_queue: Queue, records_queue: Queue, json_file: str, config_metadata: dict):
     """
@@ -357,13 +356,17 @@ def write_metadata_queue(json_queue: Queue, records_queue: Queue, json_file: str
 
     local_times = []
 
+    chunk_data = config_metadata["chunk_data"]
+
     json_data = {}
     json_data["real_times"] = []
     json_data["timestamps"] = []
     json_data["frame_id"] = []
-    json_data["frame_id_abs"] = []
-    json_data["chunk_serial_data"] = []
-    json_data["serial_msg"] = []
+
+    if chunk_data:
+        json_data["frame_id_abs"] = []
+        json_data["chunk_serial_data"] = []
+        json_data["serial_msg"] = []
 
     bad_frame = 0
 
@@ -410,9 +413,11 @@ def write_metadata_queue(json_queue: Queue, records_queue: Queue, json_file: str
             local_times = [frame["local_times"]]
             json_data["timestamps"] = [frame["timestamps"]]
             json_data["frame_id"] = [frame["frame_id"]]
-            json_data["frame_id_abs"] = [frame["frame_id_abs"]]
-            json_data["chunk_serial_data"] = [frame["chunk_serial_data"]]
-            json_data["serial_msg"] = [frame["serial_msg"]]
+
+            if chunk_data:
+                json_data["frame_id_abs"] = [frame["frame_id_abs"]]
+                json_data["chunk_serial_data"] = [frame["chunk_serial_data"]]
+                json_data["serial_msg"] = [frame["serial_msg"]]
 
         else:
             # This means we are still writing to the same json file
@@ -420,9 +425,11 @@ def write_metadata_queue(json_queue: Queue, records_queue: Queue, json_file: str
             local_times.append(frame["local_times"])
             json_data["timestamps"].append(frame["timestamps"])
             json_data["frame_id"].append(frame["frame_id"])
-            json_data["frame_id_abs"].append(frame["frame_id_abs"])
-            json_data["chunk_serial_data"].append(frame["chunk_serial_data"])
-            json_data["serial_msg"].append(frame["serial_msg"])
+
+            if chunk_data:
+                json_data["frame_id_abs"].append(frame["frame_id_abs"])
+                json_data["chunk_serial_data"].append(frame["chunk_serial_data"])
+                json_data["serial_msg"].append(frame["serial_msg"])
 
         json_queue.task_done()
 
@@ -622,12 +629,15 @@ class FlirRecorder:
             self.chunk_data = self.camera_config["acquisition-settings"]["chunk_data"]
             self.camera_info = self.camera_config["camera-info"]
 
+            if self.chunk_data:
+                print(f"Extracting the following variables from chunk data: {self.chunk_data}")
+
         else:
             # If no config file is passed, use default values
             exposure_time = 15000
             frame_rate = 30
             self.gpio_settings = {'line0': 'Off', 'line2': 'Off', 'line3': 'Off'}
-            self.chunk_data = ['FrameID','SerialData']
+            self.chunk_data = []
             self.camera_info = {}
 
         # Updating the binning needed to run at 60 Hz. 
@@ -702,7 +712,8 @@ class FlirRecorder:
                 "camera_config_hash": self.get_config_hash(self.camera_config),
                 "acquisition_type": self.acquisition_type,
                 "video_segment_len": self.video_segment_len,
-                "system_info": self.get_system_info()
+                "system_info": self.get_system_info(),
+                "chunk_data": self.chunk_data
             }
         
         self.acquisition_type = "max_frames"
@@ -716,43 +727,66 @@ class FlirRecorder:
             "camera_config_hash": None,
             "acquisition_type": "max_frames",
             "video_segment_len": max_frames,
-            "system_info": self.get_system_info()
+            "system_info": self.get_system_info(),
+            "chunk_data": self.chunk_data
         }
     
-    def update_filename(self):
-        if self.video_base_file is not None:
-            now = datetime.now()
-            time_str = now.strftime("%Y%m%d_%H%M%S")
+    def update_filename(self, current_filename):
 
-            self.video_base_name = "_".join([self.video_root, time_str])
-            self.video_base_file = os.path.join(self.video_path, self.video_base_name)
+        base_name = current_filename.split("/")[-1]
+
+        # First get the YYYYMMDD_HHMMSS from base_name (which is formatted as {self.video_root}_{YYYYMMDD}_{HHMMSS})
+        time_str = "_".join(base_name.split("_")[-2:])
+
+        # Then add the acquisition video segment length / frame_rate to the time_str
+        # This is done by converting the time_str to a datetime object, adding the time delta, and then converting it back to a string
+        # Get the current datetime object
+        time_datetime = datetime.datetime.strptime(time_str, "%Y%m%d_%H%M%S")
+        # Calculate the time delta
+        time_delta = datetime.timedelta(seconds=round(self.video_segment_len / self.acquisition_frame_rate))
+
+        # Add the time delta to the current datetime object
+        new_time_datetime = time_datetime + time_delta
+
+        # Convert the new datetime object back to a string
+        new_time_str = new_time_datetime.strftime("%Y%m%d_%H%M%S")
+
+        # Then create the new filename by joining the video_root and the new time_str
+        new_filename = "_".join([self.video_root, new_time_str])
+
+        new_file = os.path.join(self.video_path, new_filename)
+
+        return new_file
 
     def update_progress(self, frame_idx, total_frames):
         self.set_progress(frame_idx / total_frames)
 
         if self.acquisition_type == "continuous":
             # Reset the progress bar after each video segment
-            if frame_idx % total_frames == 0:
+            if frame_idx != 0 and frame_idx % total_frames == 0:
                 frame_idx = 0
-                self.update_filename()
+
+        return frame_idx
     
     def initialize_frame_metadata(self):
             
         # Get the current real time
-        real_time = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-        local_time = datetime.now()
+        real_time = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+        local_time = datetime.datetime.now()
 
-        frame_metadata = {"real_times": real_time, "local_times": local_time, "base_filename": self.video_base_file}
+        frame_metadata = {"real_times": real_time, "local_times": local_time}
 
         frame_metadata["timestamps"] = []
         frame_metadata["frame_id"] = []
-        frame_metadata["frame_id_abs"] = []
-        frame_metadata["chunk_serial_data"] = []
-        frame_metadata["serial_msg"] = []
         frame_metadata["camera_serials"] = []
         frame_metadata["exposure_times"] = []
         frame_metadata["frame_rates_requested"] = []
         frame_metadata["frame_rates_binning"] = []
+
+        if self.chunk_data:
+            frame_metadata["frame_id_abs"] = []
+            frame_metadata["chunk_serial_data"] = []
+            frame_metadata["serial_msg"] = []
 
         return frame_metadata
     
@@ -822,9 +856,12 @@ class FlirRecorder:
             # Split the video_base_name to get the root and the date
             # self.video_datetime = "_".join(self.video_base_name.split("_")[-2:])
             self.video_root = "_".join(self.video_base_name.split("_")[:-2])
-
         
         config_metadata = self._prepare_config_metadata(max_frames)
+
+        # Set max_frames = self.video_segment_len. self.video_segment_len is either set to max_frames or 
+        # a value from the config file.
+        max_frames = self.video_segment_len
 
         # Initializing an image queue for each camera
         self.image_queue_dict = {c.DeviceSerialNumber: Queue(max_frames) for c in self.cams}
@@ -849,7 +886,6 @@ class FlirRecorder:
                     kwargs={
                         "vid_file": self.video_base_file,
                         "image_queue": self.image_queue_dict[serial],
-                        # "json_queue": self.json_queue_dict[serial],
                         "serial": serial,
                         "pixel_format": c.PixelFormat,
                         "acquisition_fps": c.AcquisitionFrameRate,
@@ -888,7 +924,8 @@ class FlirRecorder:
 
         print("Acquisition, Resulting, Exposure, DeviceLinkThroughputLimit:")
         for c in self.cams:
-            print(f"{c.DeviceSerialNumber}: {c.AcquisitionFrameRate}, {c.AcquisitionResultingFrameRate}, {c.ExposureTime}, {c.DeviceLinkThroughputLimit} ")
+            self.acquisition_frame_rate = c.AcquisitionFrameRate
+            print(f"{c.DeviceSerialNumber}: {self.acquisition_frame_rate}, {c.AcquisitionResultingFrameRate}, {c.ExposureTime}, {c.DeviceLinkThroughputLimit} ")
             print(f"Frame Size: {c.Width} {c.Height}")
             print(f"{c.GevSCPSPacketSize}, {c.GevSCPD}")
 
@@ -934,15 +971,22 @@ class FlirRecorder:
             prev_frame_id = 0
             processed_frames = 0
 
+            current_filename = self.video_base_file
+
             while self.acquisition_type == "continuous" or frame_idx < max_frames:
 
                 if self.stop_frame_set.is_set():
                     # Check if the camera frame count is equal to the stop_frame
                     if frame_idx >= self.stop_frame:
 
-                        print(f"Stopping {camera_serial} recording\n")
+                        print(f"Stopping {camera_serial} recording: {frame_idx},{self.stop_frame}")
                         self.acquisition_queue[camera_serial].put(None)
                         break
+
+                # Check if a new video segment should be started
+                if current_filename is not None and frame_idx % self.video_segment_len == 0 and frame_idx != 0:
+                    current_filename = self.update_filename(current_filename)
+                    print(f"{frame_idx} {camera_serial}: Starting new video segment: {current_filename}")
 
                 try:
                     im_ref = camera.get_image()
@@ -955,10 +999,12 @@ class FlirRecorder:
                         continue
                     
                     timestamp = im_ref.GetTimeStamp()
-                    chunk_data = im_ref.GetChunkData()
                     frame_id = im_ref.GetFrameID()
-                    frame_id_abs = chunk_data.GetFrameID()
-                    serial_msg, frame_count = self.process_serial_data(camera)
+
+                    if self.chunk_data:
+                        chunk_data = im_ref.GetChunkData()
+                        frame_id_abs = chunk_data.GetFrameID()
+                        serial_msg, frame_count = self.process_serial_data(camera)
 
                     # Check if the frame_id has incremented by 1
                     if frame_id != prev_frame_id + 1:
@@ -981,24 +1027,28 @@ class FlirRecorder:
                 try:
                     im = im_ref.GetNDArray()
 
-                    if self.video_base_file is not None:
+                    if current_filename is not None:
                         self.image_queue_dict[camera_serial].put({
                             "im": im,
                             "real_times": 0,
                             "timestamps": timestamp,
-                            "base_filename": self.video_base_file
+                            "base_filename": current_filename
                         })
 
                     frame_data = {
                         'image': im,
                         'timestamp': timestamp,
                         'frame_id': frame_id,
-                        'frame_id_abs': frame_id_abs,
-                        'serial_msg': serial_msg,
-                        'frame_count': frame_count,
                         'camera_serial': camera_serial,
-                        'pixel_format': pixel_format
+                        'pixel_format': pixel_format,
+                        'base_filename': current_filename,
                     }
+
+                    if self.chunk_data:
+                        frame_data['frame_id_abs'] = frame_id_abs
+                        frame_data['serial_msg'] = serial_msg
+                        frame_data['frame_count'] = frame_count
+                        
                     # put the frame data into the acquisition queue
                     self.acquisition_queue[camera_serial].put(frame_data)
 
@@ -1031,8 +1081,7 @@ class FlirRecorder:
                         print("setting stop frame")
                         self.set_stop_frame(cleanup_frames)
                     else:
-                        print("cleaning_up", frame_idx, self.stop_frame)
-                        # print(f"{self.cam_serials}\n{[self.acquisition_queue[c].empty() for c in self.cam_serials]}")
+                        print("cleaning_up", frame_idx, self.stop_frame, max_frames)
 
                         # break out if frame_idx == stop_frame
                         if frame_idx == self.stop_frame:
@@ -1052,7 +1101,7 @@ class FlirRecorder:
                     acquisition_frames.append(self.acquisition_queue[c].get())
                     self.acquisition_queue[c].task_done()
 
-                self.update_progress(frame_idx, max_frames)
+                frame_idx = self.update_progress(frame_idx, max_frames)
                 self.increment_frame_counter()
 
                 real_time_images = []
@@ -1064,13 +1113,15 @@ class FlirRecorder:
                     
                     self.frame_metadata['timestamps'].append(frame_data['timestamp'])
                     self.frame_metadata['frame_id'].append(frame_data['frame_id'])
-                    self.frame_metadata['frame_id_abs'].append(frame_data['frame_id_abs'])
-                    self.frame_metadata['chunk_serial_data'].append(frame_data['frame_count'])
-                    self.frame_metadata['serial_msg'].append(frame_data['serial_msg'])
                     self.frame_metadata['camera_serials'].append(camera_serial)
                     self.frame_metadata['exposure_times'].append(15000)
                     self.frame_metadata['frame_rates_binning'].append(30)
                     self.frame_metadata['frame_rates_requested'].append(30)
+
+                    if self.chunk_data:
+                        self.frame_metadata['frame_id_abs'].append(frame_data['frame_id_abs'])
+                        self.frame_metadata['chunk_serial_data'].append(frame_data['frame_count'])
+                        self.frame_metadata['serial_msg'].append(frame_data['serial_msg'])
 
                     if self.preview_callback:
                         real_time_images.append((frame_data['image'],self.pixel_format_conversion[frame_data['pixel_format']]))
@@ -1089,6 +1140,7 @@ class FlirRecorder:
 
                 # Put the frame metadata into the json queue
                 if self.video_base_file is not None:
+                    self.frame_metadata['base_filename'] = frame_data['base_filename']
                     self.json_queue.put(self.frame_metadata)
 
                 # Handle preview callback
@@ -1274,7 +1326,7 @@ if __name__ == "__main__":
     # time.sleep(5)
 
     # Get the timestamp that should be used for the file names
-    now = datetime.now()
+    now = datetime.datetime.now()
     time_str = now.strftime("%Y%m%d_%H%M%S")
     filename = f"{args.vid_file}_{time_str}.mp4"
 

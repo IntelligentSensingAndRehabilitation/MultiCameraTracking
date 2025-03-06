@@ -2,13 +2,16 @@
 
 Use the links below to navigate:
 
-## [Required Hardware](acquisition/acquisition_hardware.md)
+## Acquisition Hardware
+1. [Required Hardware](acquisition/acquisition_hardware.md)
+2. [Bill of Materials (BOM)](acquisition/bill_of_materials.md)
 
-## Acquisition Setup Guides
+## Acquisition Software Setup Guides
 1. [General System Setup and Requirements](acquisition/general_system_setup.md)
 2. [Docker Setup](acquisition/docker_setup.md)
 3. [DHCP Server Setup](acquisition/dhcp_setup.md)
-4. [Acquisition Software Setup](acquisition/acquisition_software_setup.md)
+4. [Spinnaker App Setup](acquisition/spinnaker_app_setup.md)
+5. [Acquisition Software Setup](acquisition/acquisition_software_setup.md)
 
 ## [Acquisition Startup Guide](acquisition/acquisition_startup.md)
 

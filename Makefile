@@ -12,7 +12,7 @@ build-annotate:
 	docker compose build annotate
 
 run:
-	docker compose run mocap
+	docker compose run --rm mocap
 
 test:
 	docker compose run --rm test
