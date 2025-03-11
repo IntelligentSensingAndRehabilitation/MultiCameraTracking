@@ -1,10 +1,10 @@
 import numpy as np
+import os
 from scipy import interpolate
 from dataclasses import dataclass
 
-
-model_path = '/home/isr/app/packages/EasyMocap/data/smplx'
-
+smplx_path: str = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../model_data/smplx/")
+model_path = os.getenv("SMPLX_PATH", smplx_path)
 
 def mvmp_association_and_tracking(dataset, keypoints='body25'):
     """

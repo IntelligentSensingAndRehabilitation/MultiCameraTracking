@@ -1,8 +1,8 @@
 import os
 from typing import List
 
-model_path: str = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../model_data/smpl_clean/")
-
+smpl_clean_path: str = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../model_data/smpl_clean/")
+model_path = os.getenv("SMPL_CLEAN_PATH", smpl_clean_path)
 
 def get_unannotated_recordings():
     from multi_camera.datajoint.easymocap import EasymocapSmpl, EasymocapTracking
