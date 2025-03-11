@@ -811,6 +811,8 @@ class FlirRecorder:
                         frame_count = 0
                         for i, b in enumerate(split_chunk):
                             frame_count |= (b & 0x7F) << (7 * i)
+                    else:
+                        print("")
 
                 frame_metadata["timestamps"].append(timestamp)
                 frame_metadata["frame_id"].append(frame_id)
