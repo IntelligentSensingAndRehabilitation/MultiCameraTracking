@@ -44,7 +44,7 @@ def assign_calibration():
     CalibratedRecording.insert(matches.fetch("KEY"), skip_duplicates=True)
 
 
-def preannotation_session_pipeline(keys: List[Dict] = None, bridging: bool = True):
+def preannotation_session_pipeline(keys: List[Dict] = None, bridging: bool = True, easy_mocap: bool = False):
     """
     Perform the initial scene reconstruction for annotation
 
@@ -71,10 +71,12 @@ def preannotation_session_pipeline(keys: List[Dict] = None, bridging: bool = Tru
     # now run easymocap
     print("populating video info")
     VideoInfo.populate(SingleCameraVideo * MultiCameraRecording & keys, reserve_jobs=True)
-    print("populating easymocaptracking")
-    EasymocapTracking.populate(MultiCameraRecording * CalibratedRecording & keys, reserve_jobs=True, suppress_errors=True)
-    print("populating easymocapsmpl")
-    EasymocapSmpl.populate(MultiCameraRecording * CalibratedRecording & keys, reserve_jobs=True, suppress_errors=True)
+
+    if easy_mocap:
+        print("populating easymocaptracking")
+        EasymocapTracking.populate(MultiCameraRecording * CalibratedRecording & keys, reserve_jobs=True, suppress_errors=True)
+        print("populating easymocapsmpl")
+        EasymocapSmpl.populate(MultiCameraRecording * CalibratedRecording & keys, reserve_jobs=True, suppress_errors=True)
 
 
 def postannotation_session_pipeline(
@@ -121,6 +123,7 @@ def postannotation_session_pipeline(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--post_annotation", action="store_true", help="Run post-annotation pipeline")
+    parser.add_argument("--run_easymocap", action="store_true", help="Run the EasyMocap steps")
     parser.add_argument("--participant_id", help="Participant ID", required=False)
     parser.add_argument("--session_date", help="Session Date (YYYY-MM-DD)", required=False)
     args = parser.parse_args()
@@ -159,7 +162,7 @@ if __name__ == "__main__":
         else:
             keys = (SingleCameraVideo & Recording - EasymocapSmpl & (Recording & "participant_id NOT IN (72,73,504)")).fetch("KEY")
 
-        preannotation_session_pipeline(keys)
+        preannotation_session_pipeline(keys, easy_mocap=args.run_easymocap)
 
         if args.session_date:
             print("Session Date: ", args.session_date)
