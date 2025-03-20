@@ -4,7 +4,7 @@ import glob
 import numpy as np
 import pandas as pd
 from pose_pipeline import BlurredVideo
-from portable_biomechanics_sessions.mmc_linkage import RecordingLink
+
 from multi_camera.datajoint.multi_camera_dj import (
     MultiCameraRecording,
     SingleCameraVideo,
