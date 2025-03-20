@@ -705,7 +705,12 @@ class FlirRecorder:
         """Prepare configuration metadata."""
         if self.camera_config:
             self.acquisition_type = self.camera_config["acquisition-type"]
-            self.video_segment_len = self.camera_config["acquisition-settings"]["video_segment_len"]
+
+            if self.acquisition_type == "continuous":
+                self.video_segment_len = self.camera_config["acquisition-settings"]["video_segment_len"]
+            else:
+                self.video_segment_len = max_frames
+
             return {
                 "meta_info": self.camera_config["meta-info"],
                 "camera_info": self.camera_config["camera-info"],
