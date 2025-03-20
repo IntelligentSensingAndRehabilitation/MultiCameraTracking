@@ -41,9 +41,17 @@ class MCTDataset(MVBase):
 
         self.images = images
 
+        assert len(SingleCameraVideo & key) == len((bottom_up * SingleCameraVideo & key)), "Missing BottomUpPeople OpenPose computations for some cameras"
+        assert len(SingleCameraVideo & key) > 0, "No cameras found for this recording"
         # TODO: should support general bottom up class and thus other types of keypoints
         self.keypoints, self.cams = (bottom_up * SingleCameraVideo & key).fetch('keypoints', 'camera_name')
         self.calibration, calibration_cameras = (Calibration & key).fetch1('camera_calibration', 'camera_names')
+
+        n_frames = [len(k) for k in self.keypoints]
+        zero_frames = [self.cams[i] for i, n in enumerate(n_frames) if n == 0]
+        if len(zero_frames) > 0:
+            missing = (Video & (SingleCameraVideo & key & f"camera_name IN ({','.join(zero_frames)})")).fetch("KEY")
+            raise ValueError(f"Missing keypoints for {zero_frames}. {missing}")
 
         calibration_idx = np.array([calibration_cameras.index(c) for c in self.cams])
         if len(calibration_idx) != len(self.cams):
