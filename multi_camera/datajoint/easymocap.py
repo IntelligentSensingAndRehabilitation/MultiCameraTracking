@@ -1,8 +1,5 @@
 import numpy as np
 import datajoint as dj
-from easymocap.dataset.base import MVBase
-from easymocap.dataset import CONFIG
-from easymocap.mytools.file_utils import get_bbox_from_pose
 
 from pose_pipeline import Video, VideoInfo, BottomUpPeople
 from .multi_camera_dj import schema, MultiCameraRecording, SingleCameraVideo, Calibration, CalibratedRecording
@@ -11,110 +8,121 @@ from .multi_camera_dj import schema, MultiCameraRecording, SingleCameraVideo, Ca
 bottom_up = (BottomUpPeople & {'bottom_up_method_name': 'Bridging_OpenPose'})
 #bottom_up = (BottomUpPeople & {'bottom_up_method_name': 'OpenPose_HR'})
 
-def _build_camera(params, index=0):
-    from multi_camera.analysis.camera import get_intrinsic, get_extrinsic, get_projection
-    cam = {}
+try:
+    # NOTE: we do not want to require EasyMocap to access the data. This is a workaround although
+    # really this could all migrate into the analysis module, but would then introduce DJ dependencies
+    # into the analysis, which is a practice we attempt to avoid.
 
-    params = params.copy()
-    params['tvec'] = params['tvec']  / 1000.0 # have the final matrices end up in meters
+    from easymocap.dataset.base import MVBase
+    from easymocap.dataset import CONFIG
+    from easymocap.mytools.file_utils import get_bbox_from_pose
 
-    #cam['K'] = np.array(params[index]['matrix'])
-    cam['K'] = np.array(get_intrinsic(params, index))
-    cam['RT'] = np.array(get_extrinsic(params, index)[:3])
-    cam['P'] = np.array(get_projection(params, index))
+    def _build_camera(params, index=0):
+        from multi_camera.analysis.camera import get_intrinsic, get_extrinsic, get_projection
+        cam = {}
 
-    cam['invK'] = np.linalg.inv(cam['K'])
-    cam['Rvec'] = params['rvec'][index, :, None]
-    cam['T'] = cam['RT'][:3, -1, None]
-    cam['R'] = cam['RT'][:, :3]
-    cam['center'] = - params['rvec'][index].T @  cam['T']
-    cam['dist'] = params['dist'][index]
-    return cam
+        params = params.copy()
+        params['tvec'] = params['tvec']  / 1000.0 # have the final matrices end up in meters
 
+        #cam['K'] = np.array(params[index]['matrix'])
+        cam['K'] = np.array(get_intrinsic(params, index))
+        cam['RT'] = np.array(get_extrinsic(params, index)[:3])
+        cam['P'] = np.array(get_projection(params, index))
 
-class MCTDataset(MVBase):
-    """
-    Provides an EasyMocap compatible interface to MultiCamera / PosePipe
-    """
-
-    def __init__(self, key, filter2d=None, images=False):
-
-        self.images = images
-
-        assert len(SingleCameraVideo & key) == len((bottom_up * SingleCameraVideo & key)), "Missing BottomUpPeople OpenPose computations for some cameras"
-        assert len(SingleCameraVideo & key) > 0, "No cameras found for this recording"
-        # TODO: should support general bottom up class and thus other types of keypoints
-        self.keypoints, self.cams = (bottom_up * SingleCameraVideo & key).fetch('keypoints', 'camera_name')
-        self.calibration, calibration_cameras = (Calibration & key).fetch1('camera_calibration', 'camera_names')
-
-        n_frames = [len(k) for k in self.keypoints]
-        zero_frames = [self.cams[i] for i, n in enumerate(n_frames) if n == 0]
-        if len(zero_frames) > 0:
-            missing = (Video & (SingleCameraVideo & key & f"camera_name IN ({','.join(zero_frames)})")).fetch("KEY")
-            raise ValueError(f"Missing keypoints for {zero_frames}. {missing}")
-
-        calibration_idx = np.array([calibration_cameras.index(c) for c in self.cams])
-        if len(calibration_idx) != len(self.cams):
-            print(f'Keeping cameras: {calibration_idx}')
-        for k in self.calibration.keys():
-            self.calibration[k] = self.calibration[k][calibration_idx]
-        calibration_cameras = self.cams
-
-        if self.images:
-            import pims
-            videos = (Video * bottom_up * SingleCameraVideo & key).fetch('video')
-            self.caps = [pims.Video(v) for v in videos]
-
-        self.frames = np.unique((VideoInfo * SingleCameraVideo & key).fetch('num_frames'))
-        #assert len(self.frames) == 1
-        self.frames = np.min(self.frames)
-        self.width = np.unique((VideoInfo * SingleCameraVideo & key).fetch('width'))[0]
-        self.height = np.unique((VideoInfo * SingleCameraVideo & key).fetch('height'))[0]
-
-        # set some default values. these fields are expected and would be created by
-        # calling the parent class constructor, if it wouldn't break for us
-        self.kpts_type = 'body25' # openpose
-        self.config = CONFIG[self.kpts_type]
-        self.ret_crop = False
-        self.undis = True
-        self.nViews = len(self.cams)
-
-        # set up cameras
-        self.cameras = {c: _build_camera(self.calibration, i) for i, c in enumerate(calibration_cameras)}
-        self.cameras['basenames'] = calibration_cameras
-        self.Pall = np.stack([self.cameras[cam]['K'] @ np.hstack((self.cameras[cam]['R'], self.cameras[cam]['T'])) for cam in self.cams])
-
-        # some additional variables normally set in parent to reproduce complete behavior
-        self.filter2d = filter2d
-        if filter2d is not None:
-            self.filter2d = make_filter(filter2d)
+        cam['invK'] = np.linalg.inv(cam['K'])
+        cam['Rvec'] = params['rvec'][index, :, None]
+        cam['T'] = cam['RT'][:3, -1, None]
+        cam['R'] = cam['RT'][:, :3]
+        cam['center'] = - params['rvec'][index].T @  cam['T']
+        cam['dist'] = params['dist'][index]
+        return cam
 
 
-    def __len__(self) -> int:
-        return self.frames
+    class MCTDataset(MVBase):
+        """
+        Provides an EasyMocap compatible interface to MultiCamera / PosePipe
+        """
 
-    def __getitem__(self, index: int):
-        if self.images:
-            images = [np.array(c[index]) for c in self.caps]
-        else:
-            images = []
+        def __init__(self, key, filter2d=None, images=False):
 
-        def _parse_people(keypoints):
-            # split into dictionary format needed downstream
-            if keypoints is None:
-                return []
-            return [{'keypoints': k.copy(), 'bbox': get_bbox_from_pose(k)} for k in keypoints] # iterate over first axis
+            self.images = images
 
-        # reformat all the multi
-        annots = [_parse_people(k[index]) for k in self.keypoints]
+            assert len(SingleCameraVideo & key) == len((bottom_up * SingleCameraVideo & key)), "Missing BottomUpPeople OpenPose computations for some cameras"
+            assert len(SingleCameraVideo & key) > 0, "No cameras found for this recording"
+            # TODO: should support general bottom up class and thus other types of keypoints
+            self.keypoints, self.cams = (bottom_up * SingleCameraVideo & key).fetch('keypoints', 'camera_name')
+            self.calibration, calibration_cameras = (Calibration & key).fetch1('camera_calibration', 'camera_names')
 
-        if self.undis:
+            n_frames = [len(k) for k in self.keypoints]
+            zero_frames = [self.cams[i] for i, n in enumerate(n_frames) if n == 0]
+            if len(zero_frames) > 0:
+                missing = (Video & (SingleCameraVideo & key & f"camera_name IN ({','.join(zero_frames)})")).fetch("KEY")
+                raise ValueError(f"Missing keypoints for {zero_frames}. {missing}")
+
+            calibration_idx = np.array([calibration_cameras.index(c) for c in self.cams])
+            if len(calibration_idx) != len(self.cams):
+                print(f'Keeping cameras: {calibration_idx}')
+            for k in self.calibration.keys():
+                self.calibration[k] = self.calibration[k][calibration_idx]
+            calibration_cameras = self.cams
+
             if self.images:
-                images = self.undistort(images)
-            annots = self.undis_det(annots)
+                import pims
+                videos = (Video * bottom_up * SingleCameraVideo & key).fetch('video')
+                self.caps = [pims.Video(v) for v in videos]
 
-        return images, annots
+            self.frames = np.unique((VideoInfo * SingleCameraVideo & key).fetch('num_frames'))
+            #assert len(self.frames) == 1
+            self.frames = np.min(self.frames)
+            self.width = np.unique((VideoInfo * SingleCameraVideo & key).fetch('width'))[0]
+            self.height = np.unique((VideoInfo * SingleCameraVideo & key).fetch('height'))[0]
 
+            # set some default values. these fields are expected and would be created by
+            # calling the parent class constructor, if it wouldn't break for us
+            self.kpts_type = 'body25' # openpose
+            self.config = CONFIG[self.kpts_type]
+            self.ret_crop = False
+            self.undis = True
+            self.nViews = len(self.cams)
+
+            # set up cameras
+            self.cameras = {c: _build_camera(self.calibration, i) for i, c in enumerate(calibration_cameras)}
+            self.cameras['basenames'] = calibration_cameras
+            self.Pall = np.stack([self.cameras[cam]['K'] @ np.hstack((self.cameras[cam]['R'], self.cameras[cam]['T'])) for cam in self.cams])
+
+            # some additional variables normally set in parent to reproduce complete behavior
+            self.filter2d = filter2d
+            if filter2d is not None:
+                self.filter2d = make_filter(filter2d)
+
+
+        def __len__(self) -> int:
+            return self.frames
+
+        def __getitem__(self, index: int):
+            if self.images:
+                images = [np.array(c[index]) for c in self.caps]
+            else:
+                images = []
+
+            def _parse_people(keypoints):
+                # split into dictionary format needed downstream
+                if keypoints is None:
+                    return []
+                return [{'keypoints': k.copy(), 'bbox': get_bbox_from_pose(k)} for k in keypoints] # iterate over first axis
+
+            # reformat all the multi
+            annots = [_parse_people(k[index]) for k in self.keypoints]
+
+            if self.undis:
+                if self.images:
+                    images = self.undistort(images)
+                annots = self.undis_det(annots)
+
+            return images, annots
+
+except ImportError:
+    print("EasyMocap not installed. Will not be able to populate new entries")
 
 @schema
 class EasymocapTracking(dj.Computed):
