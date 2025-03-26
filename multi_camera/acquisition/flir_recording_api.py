@@ -163,7 +163,7 @@ def init_camera(
     c.GainAuto = "Continuous"
     # c.Gain = 10
 
-    c.ImageCompressionMode = "Off"  # Lossless might get frame rate up but not working currently
+    # c.ImageCompressionMode = "Off"  # Lossless might get frame rate up but not working currently
     # c.IspEnable = True  # if trying to adjust the color transformations  this is needed
 
     if jumbo_packet:
@@ -278,7 +278,10 @@ def write_image_queue(
 
             fourcc = cv2.VideoWriter_fourcc(*"mp4v")
 
-            out_video = cv2.VideoWriter(vid_file, fourcc, acquisition_fps, (im.shape[1], im.shape[0]))
+            if pixel_format == "Mono8":
+                out_video = cv2.VideoWriter(vid_file, fourcc, acquisition_fps, (im.shape[1], im.shape[0]), isColor=False)
+            else:
+                out_video = cv2.VideoWriter(vid_file, fourcc, acquisition_fps, (im.shape[1], im.shape[0]))
             out_video.write(last_im)
 
         else:
@@ -297,7 +300,11 @@ def write_image_queue(
                 tqdm.write(f"Writing FPS: {acquisition_fps}")
 
                 fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-                out_video = cv2.VideoWriter(vid_file, fourcc, acquisition_fps, (im.shape[1], im.shape[0]))
+
+                if pixel_format == "Mono8":
+                    out_video = cv2.VideoWriter(vid_file, fourcc, acquisition_fps, (im.shape[1], im.shape[0]), isColor=False)
+                else:
+                    out_video = cv2.VideoWriter(vid_file, fourcc, acquisition_fps, (im.shape[1], im.shape[0]))
 
             out_video.write(im)
 
@@ -486,7 +493,8 @@ class FlirRecorder:
         self.set_status("Uninitialized")
 
         self.pixel_format_conversion = {'BayerRG8': cv2.COLOR_BAYER_RG2RGB, 
-                                        'BayerBG8': cv2.COLOR_BAYER_BG2RGB}
+                                        'BayerBG8': cv2.COLOR_BAYER_BG2RGB,
+                                        'Mono8': cv2.COLOR_GRAY2RGB}
 
     def get_config_hash(self,yaml_content,hash_len=10):
 
@@ -666,7 +674,14 @@ class FlirRecorder:
 
         self.cams.sort(key=lambda x: x.DeviceSerialNumber)
 
-        self.pixel_format = self.cams[0].PixelFormat
+        # Get the pixel format for each camera 
+        pixel_formats = [c.PixelFormat for c in self.cams]
+        # Ensure that all cameras have the same pixel format
+        assert len(set(pixel_formats)) == 1, "All cameras must have the same pixel format."
+        pixel_format = pixel_formats[0]
+        # Ensure the pixel format is present in pixel_format_conversion
+        assert pixel_format in self.pixel_format_conversion, f"{pixel_format} is an unrecognized pixel format."
+        self.pixel_format = pixel_format
 
         self.set_status("Idle")
 
