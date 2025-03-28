@@ -1,8 +1,12 @@
-FROM peabody124/posepipe
+FROM ubuntu:22.04
 
 ARG DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update
+
+RUN apt-get install -y --no-install-recommends curl screen python3 python3-pip python3-setuptools git g++ wget make \
+    libprotobuf-dev protobuf-compiler libopencv-dev libgoogle-glog-dev libboost-all-dev libhdf5-dev libatlas-base-dev \
+    vim libgtk2.0-dev libgtk-3-dev build-essential cmake mysql-client ffmpeg
 
 ### Install items needed for frontend (Node.js, npm)
 
@@ -29,15 +33,12 @@ RUN git clone https://github.com/peabody124/EasyMocap
 RUN pip install --upgrade pip
 RUN pip install -e /EasyMocap
 
-### Install for biomechanical visualization
-# from https://github.com/facebookresearch/pytorch3d/blob/main/INSTALL.md#3-install-wheels-for-linux
-RUN pip3 install fvcore iopath torch trimesh pyvista
+RUN git clone --branch dependency_update https://github.com/IntelligentSensingAndRehabilitation/PosePipeline.git
+RUN pip install -e /PosePipeline
 
 ### Install MultiCameraTracking package and dependencies
 
 WORKDIR /Mocap
-COPY requirements.txt .
-RUN pip3 install -r requirements.txt
 COPY pyproject.toml README.md /Mocap/
 COPY multi_camera /Mocap/multi_camera
 COPY model_data /Mocap/model_data
