@@ -230,20 +230,6 @@ function createScene(system) {
         scene.add(smplGroup);
     }
 
-    if (system.biomechanics) {
-        console.log("biomechanics: ", system.biomechanics)
-
-        const bones = createBiomechanicalMesh(system.biomechanics.meshes)
-
-        const biomechanicsGroup = new THREE.Group();
-        biomechanicsGroup.name = 'biomechanics';
-        bones.forEach((bone) => {
-            biomechanicsGroup.add(bone);
-        })
-
-        scene.add(biomechanicsGroup);
-    }
-
     if (system.states.contact) {
         /* add contact point spheres  */
         for (let i = 0; i < system.states.contact.pos[0].length; i++) {
@@ -547,65 +533,6 @@ function createSmplTrajectory(system, scene) {
     return new THREE.AnimationClip('Action', -1, keyframeTracks);
 };
 
-function createBiomechanicalMesh(meshData) {
-    const boneMeshes = [];
-
-    for (const [name, data] of Object.entries(meshData)) {
-        console.log("Creating mesh for " + name);
-
-        const vertices = data.vertices;
-        const faces = data.faces;
-
-        const geometry = new THREE.BufferGeometry();
-
-        const positions = new Float32Array(vertices.length * 3);
-        // Convert the coordinate system.
-        vertices.forEach(function (vertice, i) {
-            positions[i * 3] = vertice[0];
-            positions[i * 3 + 1] = vertice[1];
-            positions[i * 3 + 2] = vertice[2];
-        });
-
-        const indices = new Uint16Array(faces.flat());
-        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-        geometry.setIndex(new THREE.BufferAttribute(indices, 1));
-        geometry.computeVertexNormals();
-
-        const material = new THREE.MeshPhongMaterial({ color: 0x775533 });
-        const mesh = new THREE.Mesh(geometry, material);
-        mesh.name = name;
-        boneMeshes.push(mesh);
-    }
-
-    return boneMeshes;
-}
-
-function createBiomechanicalTrajectory(trajectoryData, dt) {
-    const tracks = [];
-
-    for (const [name, data] of Object.entries(trajectoryData)) {
-        console.log("Creating trajectory for " + name);
-
-        const times = data.positions.map((_, index) => index * dt);
-        const posTrack = new THREE.VectorKeyframeTrack(
-            `scene/${name}.position`,
-            times,
-            data.positions.flat()
-        );
-        const rotTrack = new THREE.QuaternionKeyframeTrack(
-            `scene/${name}.quaternion`,
-            times,
-            data.rotations.flat()
-        );
-
-        tracks.push(posTrack);
-        tracks.push(rotTrack);
-    }
-
-    return new THREE.AnimationClip('Action', -1, tracks);
-}
-
 export {
-    createScene, createTrajectory, createKeypointTrajectory, createSmplTrajectory,
-    createBiomechanicalMesh, createBiomechanicalTrajectory
+    createScene, createTrajectory, createKeypointTrajectory, createSmplTrajectory
 };
