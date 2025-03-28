@@ -52,11 +52,6 @@ RUN pip install -e /EasyMocap
 RUN git clone --branch dependency_update https://github.com/IntelligentSensingAndRehabilitation/PosePipeline.git
 RUN pip install -e /PosePipeline
 
-### Install for biomechanical visualization
-# from https://github.com/facebookresearch/pytorch3d/blob/main/INSTALL.md#3-install-wheels-for-linux
-RUN pip3 install fvcore iopath torch trimesh pyvista
-# RUN pip3 install --no-index --no-cache-dir pytorch3d -f https://dl.fbaipublicfiles.com/pytorch3d/packaging/wheels/py38_cu117_pyt201/download.html
-
 RUN apt-get install -y libtbb-dev
 RUN pip3 install tbb
 RUN pip3 install --upgrade tbb
@@ -82,18 +77,6 @@ RUN mkdir -p /configs
 # A hack currently, to have a local .datajoint_config.json replace the default one from posepipe
 COPY datajoint_config.json /root/.datajoint_config.json
 
-### Install for biomechanical visualization
-# from https://github.com/facebookresearch/pytorch3d/blob/main/INSTALL.md#3-install-wheels-for-linux
-# RUN pip3 install fvcore iopath torch trimesh pyvista
-# RUN pip3 install --no-index --no-cache-dir pytorch3d -f https://dl.fbaipublicfiles.com/pytorch3d/packaging/wheels/py38_cu117_pyt201/download.html
-
-# need to use this specific version for now
-# COPY docker/nimblephysics-0.8.73-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl /
-# RUN pip3 install /nimblephysics-0.8.73-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
-
-RUN pip install nimblephysics
-#RUN pip3 install nimblephysics
-
 COPY run_tests.sh /Mocap/run_tests.sh
 
 RUN pip3 install pytest
@@ -105,4 +88,3 @@ COPY run_reset.sh /Mocap/run_reset.sh
 
 # # Run bash script to start front end and back end
 ENTRYPOINT ["/bin/bash"]
-# CMD ["/Mocap/start_acquisition_gui.sh"]
