@@ -6,8 +6,9 @@ import tempfile
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 from mpl_toolkits.mplot3d import Axes3D
-from pose_pipeline import OpenPosePerson, TopDownPerson, LiftingPerson
-
+from pose_pipeline import OpenPosePerson, TopDownPerson, LiftingPerson, Video, VideoInfo
+import shutil
+from multi_camera.datajoint.multi_camera_dj import SingleCameraVideo,MultiCameraRecording
 
 def center_skeleton(keypoints3d, joints):
     joints = [j.upper() for j in joints]
@@ -651,3 +652,94 @@ def make_reprojection_video(
     if return_results:
         return compressed_filename, results
     return compressed_filename
+
+
+def render_raw_collated(
+    key: dict,
+    portrait_width=288,
+    return_results=False,
+):
+    """
+    Create a video showing the synchronized camera views without cropping.
+    """
+    recording_fn = (MultiCameraRecording & key).fetch1("video_base_filename")
+    videos = MultiCameraRecording * SingleCameraVideo & key
+    video_keys = (SingleCameraVideo.proj() * videos).fetch("KEY")
+
+    width = np.unique((VideoInfo & video_keys).fetch("width"))[0]
+    height = np.unique((VideoInfo & video_keys).fetch("height"))[0] 
+    fps = np.unique((VideoInfo & video_keys).fetch("fps"))[0]
+
+    total_frames = np.min((VideoInfo & video_keys).fetch("num_frames"))
+    videos = [(Video & v).fetch1("video") for v in video_keys]
+
+    def make_frames(video_idx):
+        video = videos[video_idx]
+        cap = cv2.VideoCapture(video)
+        results = []
+        
+        if video_idx == 0:
+            iter = tqdm(range(total_frames), desc=f"Extracting frames {recording_fn}")
+        else:
+            iter = range(total_frames)
+
+        for frame_idx in iter:
+            ret, frame = cap.read()
+            if not ret:
+                print(f"Frame {frame_idx} could not be read from video {video_idx}")
+                continue
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            
+            # Resize frame to target width while maintaining aspect ratio
+            scale = portrait_width / frame.shape[1]
+            target_height = int(frame.shape[0] * scale)
+            frame = cv2.resize(frame, (portrait_width, target_height))
+            
+            results.append(frame)
+        
+        cap.release()
+        return results
+
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        results = list(executor.map(make_frames, range(len(video_keys))))
+
+    def images_to_grid(images, n_cols=5):
+        n_rows = int(np.ceil(len(images) / n_cols))
+        grid = np.zeros(
+            (n_rows * images[0].shape[0], n_cols * images[0].shape[1], 3),
+            dtype=np.uint8,
+        )
+        for i, img in enumerate(images):
+            row = i // n_cols
+            col = i % n_cols
+            grid[
+                row * img.shape[0] : (row + 1) * img.shape[0],
+                col * img.shape[1] : (col + 1) * img.shape[1],
+                :,
+            ] = img
+        return grid
+
+    results = [images_to_grid(r) for r in zip(*results)]
+
+    fd, filename = tempfile.mkstemp(suffix=".mp4")
+    os.close(fd)
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    writer = cv2.VideoWriter(filename, fourcc, fps, (results[0].shape[1], results[0].shape[0]))
+    
+    for frame in tqdm(results, desc="Writing"):
+        writer.write(cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
+    writer.release()
+
+    from pose_pipeline.utils.video_format import compress
+    compressed_filename = compress(filename)
+    os.remove(filename)
+
+    output_dir = 'renamed_videos'
+    os.makedirs(output_dir, exist_ok=True)
+    output_filename = f"{key['video_base_filename']}.mp4"
+    output_path = os.path.join(output_dir, output_filename)
+    shutil.move(compressed_filename, output_path)
+
+    if return_results:
+        return output_path, results
+    return output_path
