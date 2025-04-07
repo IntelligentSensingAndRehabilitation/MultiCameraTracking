@@ -71,12 +71,12 @@ def get_global_state() -> GlobalState:
     return _global_state
 
 
-def db_dependency():
-    db = get_db()
-    try:
-        yield db
-    finally:
-        db.close()
+# def db_dependency():
+#     db = get_db()
+#     try:
+#         yield db
+#     finally:
+#         db.close()
 
 
 class ConnectionManager:
@@ -130,14 +130,14 @@ async def lifespan(app: FastAPI):
 
     state = get_global_state()
 
-    db = get_db()
+    # db = get_db()
 
-    # adding a try/except here to catch the case where the database is not available
-    # this can happen if the database is not running or if the network is down
-    try:
-        synchronize_to_datajoint(db)
-    except Exception as e:  
-        annotation_logger.error(f"Could not synchronize to datajoint: {e}")
+    # # adding a try/except here to catch the case where the database is not available
+    # # this can happen if the database is not running or if the network is down
+    # try:
+    #     synchronize_to_datajoint(db)
+    # except Exception as e:  
+    #     annotation_logger.error(f"Could not synchronize to datajoint: {e}")
         
 
     yield
