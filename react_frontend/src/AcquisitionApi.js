@@ -53,7 +53,7 @@ export const useEffectOnce = (effect) => {
     }, []);
 };
 
-export const AquisitionApi = (props) => {
+export const AcquisitionApi = (props) => {
 
     const [participant, setParticipant] = useState("");
     const [cameraStatusList, setCameraStatusList] = useState([]);
