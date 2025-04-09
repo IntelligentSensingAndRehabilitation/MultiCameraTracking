@@ -83,7 +83,7 @@ def postannotation_session_pipeline(
     keys: List[Dict] = None,
     tracking_method_name: str = "Easymocap",
     top_down_method_name: str = "Bridging_bml_movi_87",
-    reconstruction_method_name: str = "Implicit Optimization KP Conf, MaxHuber=10",
+    reconstruction_method_name: str = "Robust Triangulation",
     date_filter: str = None,
 ):
     """
@@ -133,12 +133,10 @@ if __name__ == "__main__":
             print("Session Date: ", args.session_date)
             postannotation_session_pipeline(date_filter=args.session_date)
             postannotation_session_pipeline(top_down_method_name="MMPose_RTMPose_Cocktail14",
-                                            reconstruction_method_name="Robust Triangulation",
                                             date_filter=args.session_date)
         else:
             postannotation_session_pipeline()
-            postannotation_session_pipeline(top_down_method_name="MMPose_RTMPose_Cocktail14",
-                                            reconstruction_method_name="Robust Triangulation")
+            postannotation_session_pipeline(top_down_method_name="MMPose_RTMPose_Cocktail14")
     else:
         # assign_calibration()
 
@@ -168,16 +166,7 @@ if __name__ == "__main__":
             print("Session Date: ", args.session_date)
             postannotation_session_pipeline(date_filter=args.session_date)
             postannotation_session_pipeline(top_down_method_name="MMPose_RTMPose_Cocktail14",
-                                            reconstruction_method_name="Robust Triangulation",
                                             date_filter=args.session_date)
         else:
             postannotation_session_pipeline()
-            postannotation_session_pipeline(top_down_method_name="MMPose_RTMPose_Cocktail14",
-                                            reconstruction_method_name="Robust Triangulation")
-
-    # assign_calibration()
-    # keys = (SingleCameraVideo & Recording - EasymocapSmpl & (Recording & 'participant_id NOT IN (72,73,504)')).fetch('KEY')
-    # keys = (SingleCameraVideo & Recording - EasymocapSmpl & (Recording & 'participant_id IN (505)')).fetch('KEY')
-    # preannotation_session_pipeline(keys)
-    # postannotation_session_pipeline()
-    # postannotation_session_pipeline(top_down_method_name="MMPoseHalpe")
+            postannotation_session_pipeline(top_down_method_name="MMPose_RTMPose_Cocktail14")
