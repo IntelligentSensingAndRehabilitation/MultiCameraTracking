@@ -20,4 +20,7 @@ Use the links below to navigate:
 2. [Annotation Startup Guide](annotation/annotation_startup.md)
 3. [(Optional) Windows Modifications](annotation/windows_modifications.md)
 
+## Calibration
+1. [Calibration Procedure](calibration/calibration_procedure.md)
+
 
