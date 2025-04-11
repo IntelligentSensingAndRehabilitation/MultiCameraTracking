@@ -9,7 +9,7 @@ import { GUI } from 'lil-gui';
 
 import { Animator } from './animator.js';
 import { Selector } from './selector.js';
-import { createScene, createTrajectory, createSmplTrajectory, createBiomechanicalMesh, createBiomechanicalTrajectory } from './system.js';
+import { createScene, createTrajectory, createSmplTrajectory } from './system.js';
 
 function downloadDataUri(name, uri) {
     let link = document.createElement('a');
@@ -95,9 +95,6 @@ class Viewer {
         if (system.smpl) {
             this.trajectory = createSmplTrajectory(system, this.scene);
             //this.smplMeshes = this.scene.getObjectById("smpl").children;
-        } else if (system.biomechanics) {
-            const trajectoryData = system.biomechanics.trajectories;
-            this.trajectory = createBiomechanicalTrajectory(trajectoryData, system.dt)
         } else {
             this.trajectory = createTrajectory(system);
         }
@@ -229,11 +226,7 @@ class Viewer {
         this.selector.addEventListener(
             'deselect', (evt) => this.setSelected(evt.object, false));
 
-        if (system.biomechanics) {
-            console.log('setting up follower')
-            const biomechanicsGroup = this.scene.getObjectByName('biomechanics')
-            this.target = biomechanicsGroup.children[0];
-        } else if (system.smpl) {
+        if (system.smpl) {
             // TODO: this code doesn't actually work because the morphTragets use
             // absolute positions but the "position" of the mesh element doesn't
             // get updated. To get this working, we will need to extract an average

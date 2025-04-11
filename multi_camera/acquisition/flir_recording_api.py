@@ -606,7 +606,7 @@ class FlirRecorder:
                 # Break out of the loop after finding the interface and cameras
                 break
 
-        print(f"Using interface {i} with {selected_cams} cameras. In use: {current_iface.IsInUse()}")
+        print(f"Using interface {i} with {selected_cams} cameras. In use: {current_iface.IsCameraInUse()}")
 
         iface_list.Clear()
 

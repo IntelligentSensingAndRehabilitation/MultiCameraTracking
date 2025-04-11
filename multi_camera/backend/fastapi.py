@@ -714,53 +714,6 @@ async def get_smpl(
 
     return SMPLData(ids=[0], frames=-1, type="smpl", faces=res["faces"], meshes=res["vertices"])
 
-
-# code for working with biomechanical data
-
-
-@api_router.get("/biomechanics_trials", response_model=List[ReconstructionTrials])
-async def get_biomechanics_trials() -> List[ReconstructionTrials]:
-    from .biomechanics import get_biomechanics_trials
-
-    trials = get_biomechanics_trials()
-    trials = [ReconstructionTrials(**trial) for trial in trials]
-    return trials
-
-
-class MeshData(BaseModel):
-    vertices: List[List[float]]
-    faces: List[List[int]]
-
-
-class TrajectoryData(BaseModel):
-    positions: List[List[float]]
-    rotations: List[List[float]]
-
-
-class BiomechanicsData(BaseModel):
-    meshes: Dict[str, MeshData]
-    trajectories: Dict[str, TrajectoryData]
-
-
-@api_router.get("/biomechanics")
-async def get_biomechanics(filename: str = Query(None, description="Name of the file to be used.")):
-    from .biomechanics import get_biomechanics_trajectory
-
-    # fetch the data dictionary for this trial
-    res = get_biomechanics_trajectory(filename)
-
-    meshes = res["meshes"]
-    traj = res["trajectories"]
-
-    # repackage the data with Pydantic
-    meshes = {k: MeshData(vertices=v["vertices"], faces=v["faces"]) for k, v in meshes.items()}
-    traj = {k: TrajectoryData(positions=v["positions"], rotations=v["rotations"]) for k, v in traj.items()}
-
-    data = BiomechanicsData(meshes=meshes, trajectories=traj)
-
-    return data
-
-
 app.include_router(api_router)
 
 

@@ -1,8 +1,8 @@
-FROM peabody124/posepipe
+FROM ubuntu:22.04
 
 ### Install Spinnaker
 
-COPY docker/flir/spinnaker-3.1.0.79-amd64 /spinnaker
+COPY docker/flir/spinnaker-4.2.0.46-amd64 /spinnaker
 COPY docker/flir/*.whl /spinnaker
 
 
@@ -10,7 +10,10 @@ ARG DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update
 
-RUN apt-get install -y libusb-1.0-0 qtbase5-dev qt5-default qtchooser qt5-qmake qtbase5-dev-tools curl screen
+RUN apt-get install -y --no-install-recommends libusb-1.0-0 qtbase5-dev qtchooser qt5-qmake qtbase5-dev-tools \
+    curl screen python3 python3-pip python3-setuptools git g++ wget make libprotobuf-dev protobuf-compiler libopencv-dev \
+    libgoogle-glog-dev libboost-all-dev libhdf5-dev libatlas-base-dev vim libgtk2.0-dev libgtk-3-dev build-essential \
+    cmake mysql-client ffmpeg
 
 RUN echo 'debconf debconf/frontend select Noninteractive' | debconf-set-selections && \
     echo libgentl libspinnaker/accepted-flir-eula boolean true | debconf-set-selections && \
@@ -46,10 +49,8 @@ RUN git clone https://github.com/peabody124/EasyMocap
 RUN pip install --upgrade pip
 RUN pip install -e /EasyMocap
 
-### Install for biomechanical visualization
-# from https://github.com/facebookresearch/pytorch3d/blob/main/INSTALL.md#3-install-wheels-for-linux
-RUN pip3 install fvcore iopath torch trimesh pyvista
-RUN pip3 install --no-index --no-cache-dir pytorch3d -f https://dl.fbaipublicfiles.com/pytorch3d/packaging/wheels/py38_cu117_pyt201/download.html
+RUN git clone --branch dependency_update https://github.com/IntelligentSensingAndRehabilitation/PosePipeline.git
+RUN pip install -e /PosePipeline
 
 RUN apt-get install -y libtbb-dev
 RUN pip3 install tbb
@@ -76,22 +77,14 @@ RUN mkdir -p /configs
 # A hack currently, to have a local .datajoint_config.json replace the default one from posepipe
 COPY datajoint_config.json /root/.datajoint_config.json
 
-### Install for biomechanical visualization
-# from https://github.com/facebookresearch/pytorch3d/blob/main/INSTALL.md#3-install-wheels-for-linux
-RUN pip3 install fvcore iopath torch trimesh pyvista
-RUN pip3 install --no-index --no-cache-dir pytorch3d -f https://dl.fbaipublicfiles.com/pytorch3d/packaging/wheels/py38_cu117_pyt201/download.html
-
-# need to use this specific version for now
-COPY docker/nimblephysics-0.8.73-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl /
-RUN pip3 install /nimblephysics-0.8.73-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
-#RUN pip3 install nimblephysics
-
 COPY run_tests.sh /Mocap/run_tests.sh
 
 RUN pip3 install pytest
+
+RUN pip install --upgrade numpy
+RUN pip install --upgrade opencv-python opencv-contrib-python
 
 COPY run_reset.sh /Mocap/run_reset.sh
 
 # # Run bash script to start front end and back end
 ENTRYPOINT ["/bin/bash"]
-# CMD ["/Mocap/start_acquisition_gui.sh"]

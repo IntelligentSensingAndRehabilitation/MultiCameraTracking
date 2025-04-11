@@ -53,7 +53,7 @@ export const useEffectOnce = (effect) => {
     }, []);
 };
 
-export const AquisitionApi = (props) => {
+export const AcquisitionApi = (props) => {
 
     const [participant, setParticipant] = useState("");
     const [cameraStatusList, setCameraStatusList] = useState([]);
@@ -241,26 +241,6 @@ export const AquisitionApi = (props) => {
         return response.data;
     };
 
-    // Biomechanics functions
-
-    async function fetchBiomechanicsTrials() {
-        // Get a list of all biomechanics trials
-        const recordings = await axios.get(`${API_BASE_URL}/biomechanics_trials`);
-        return recordings.data;
-    }
-
-    async function fetchBiomechanics(filename) {
-        // Fetch the biomechanics data for the given recording
-        console.log("Fetching biomechanics for: " + filename)
-        const response = await axios.get(`${API_BASE_URL}/biomechanics`, {
-            params: {
-                filename: filename,
-            }
-        });
-        console.log("Received biomechanics: ", response.data)
-        return response.data;
-    }
-
     // SMPL functions
 
     async function fetchSmplTrials(selectedModel) {
@@ -438,8 +418,6 @@ export const AquisitionApi = (props) => {
         changeComment,
         runCalibration,
         processSession,
-        fetchBiomechanicsTrials,
-        fetchBiomechanics,
         fetchSmplTrials,
         fetchSmpl,
     }}> {props.children} </AcquisitionState.Provider >)

@@ -1,20 +1,5 @@
 # Acquisition Software Installation Guide
 
-
-
-
-## PosePipeline Setup
-
-PosePipeline is used as the base image of the acquisition software
-
-1. Clone **[PosePipeline](https://github.com/IntelligentSensingAndRehabilitation/PosePipeline)**
-2. In the root of PosePipeline, make copy of 'Example_dj_local_conf.json' and rename to 'datajoint_config.json'
-3. In the root of PosePipeline run:
-
-```
-make build
-```
-
 ## MultiCameraTracking Setup
 
 1. Clone **[MultiCameraTracking](https://github.com/IntelligentSensingAndRehabilitation/MultiCameraTracking)**
@@ -25,6 +10,7 @@ make build
 4. Create a **configs** directory locally (this is where the camera config files will be stored)
     - An example config.yaml file can be found [here](example_config.md)
 5. Copy `datajoint_config.json` from **PosePipeline** into the root of **MultiCameraTracking**
+    - In **PosePipeline**, this file is called `Example_dj_local_conf.json` so rename it to `datajoint_config.json`
     - In `datajoint_config.json` update the `"stores" > "localattach" > "location"`" to point to `"/datajoint_external"`
 6. Create a `.env` file in the root of the **MultiCameraTracking** repo
     - Fill in the `.env` file with the following info, corresponding to your setup
@@ -37,4 +23,4 @@ make build
         DATAJOINT_EXTERNAL=/mnt/datajoint_external
         ```
         
-7. Run `make build` from the root of **MultiCameraTracking** to build the Docker container
+7. Run `make build-mocap` from the root of **MultiCameraTracking** to build the Docker container
