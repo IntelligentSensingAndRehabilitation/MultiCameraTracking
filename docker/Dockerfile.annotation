@@ -29,7 +29,7 @@ RUN git clone https://github.com/peabody124/EasyMocap
 RUN pip install --upgrade pip
 RUN pip install -e /EasyMocap
 
-RUN git clone --branch dependency_update https://github.com/IntelligentSensingAndRehabilitation/PosePipeline.git
+RUN git clone https://github.com/IntelligentSensingAndRehabilitation/PosePipeline.git
 RUN pip install -e /PosePipeline
 
 ### Install MultiCameraTracking package and dependencies
