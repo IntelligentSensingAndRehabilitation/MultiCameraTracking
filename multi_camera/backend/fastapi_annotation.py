@@ -70,15 +70,6 @@ def get_global_state() -> GlobalState:
     # print("Getting global state: ", _global_state)
     return _global_state
 
-
-# def db_dependency():
-#     db = get_db()
-#     try:
-#         yield db
-#     finally:
-#         db.close()
-
-
 class ConnectionManager:
     def __init__(self):
         self.active_connections: list[WebSocket] = []
@@ -129,16 +120,6 @@ async def lifespan(app: FastAPI):
     annotation_logger.info("Starting annotation system")
 
     state = get_global_state()
-
-    # db = get_db()
-
-    # # adding a try/except here to catch the case where the database is not available
-    # # this can happen if the database is not running or if the network is down
-    # try:
-    #     synchronize_to_datajoint(db)
-    # except Exception as e:  
-    #     annotation_logger.error(f"Could not synchronize to datajoint: {e}")
-        
 
     yield
 
