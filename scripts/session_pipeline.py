@@ -159,9 +159,3 @@ if __name__ == "__main__":
             keys = (SingleCameraVideo & Recording - EasymocapSmpl & (MultiCameraRecording * Recording & "participant_id NOT IN (72,73,504)")).fetch("KEY")
 
         preannotation_session_pipeline(keys, easy_mocap=args.run_easymocap)
-
-        if args.session_date:
-            print("Session Date: ", args.session_date)
-            postannotation_session_pipeline(date_filter=args.session_date)
-        else:
-            postannotation_session_pipeline()
