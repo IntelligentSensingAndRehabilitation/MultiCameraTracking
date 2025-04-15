@@ -16,8 +16,6 @@ from multi_camera.datajoint.easymocap import EasymocapTracking, EasymocapSmpl
 from multi_camera.utils.standard_pipelines import reconstruction_pipeline
 import argparse
 
-# pose_pipeline.set_environmental_variables()
-
 pose_pipeline.env.pytorch_memory_limit()
 pose_pipeline.env.tensorflow_memory_limit()
 pose_pipeline.env.jax_memory_limit()
@@ -122,10 +120,11 @@ def postannotation_session_pipeline(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument("--participant_id", type=str, default=None, help="Participant ID", required=False)
+    parser.add_argument("--project", type=str, default=None, help="Video Project", required=False)
+    parser.add_argument("--session_date", help="Session Date (YYYY-MM-DD)", required=False)
     parser.add_argument("--post_annotation", action="store_true", help="Run post-annotation pipeline")
     parser.add_argument("--run_easymocap", action="store_true", help="Run the EasyMocap steps")
-    parser.add_argument("--participant_id", help="Participant ID", required=False)
-    parser.add_argument("--session_date", help="Session Date (YYYY-MM-DD)", required=False)
     args = parser.parse_args()
 
     if args.post_annotation:
@@ -141,6 +140,8 @@ if __name__ == "__main__":
         passed_args = []
         if args.participant_id:
             passed_args.append(f"participant_id IN ({args.participant_id})")
+        if args.project:
+            passed_args.append(f"video_project IN ({args.project})")
         if args.session_date:
             passed_args.append(f"recording_timestamps LIKE '{args.session_date}%'")
 
@@ -153,9 +154,9 @@ if __name__ == "__main__":
             filter = None
 
         if filter:
-            keys = (SingleCameraVideo & Recording - EasymocapSmpl & (Recording & filter)).fetch("KEY")
+            keys = (SingleCameraVideo & Recording - EasymocapSmpl & (MultiCameraRecording * Recording & filter)).fetch("KEY")
         else:
-            keys = (SingleCameraVideo & Recording - EasymocapSmpl & (Recording & "participant_id NOT IN (72,73,504)")).fetch("KEY")
+            keys = (SingleCameraVideo & Recording - EasymocapSmpl & (MultiCameraRecording * Recording & "participant_id NOT IN (72,73,504)")).fetch("KEY")
 
         preannotation_session_pipeline(keys, easy_mocap=args.run_easymocap)
 
