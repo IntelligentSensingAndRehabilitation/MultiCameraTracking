@@ -247,7 +247,6 @@ def write_image_queue(
 
     timestamps = []
     real_times = []
-    frame_spreads = []
 
     out_video = None
 
@@ -292,6 +291,9 @@ def write_image_queue(
                 # This means a new file should be started
                 # release the previous video file
                 out_video.release()
+
+                timestamps = [frame["timestamps"]]
+                real_times = [frame["real_times"]]
 
                 base_filename = frame["base_filename"]
                 # Get the video file for the current frame
