@@ -41,7 +41,7 @@ services:
     build:
       context: .
       dockerfile: ./docker/Dockerfile.annotation
-    image: peabody124/mocap_split_dev
+    image: standalone_annotation
     tty: true
     stdin_open: true
     environment:
