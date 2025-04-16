@@ -678,12 +678,10 @@ class FlirRecorder:
 
         # Get the pixel format for each camera 
         pixel_formats = [c.PixelFormat for c in self.cams]
-        # Ensure that all cameras have the same pixel format
-        assert len(set(pixel_formats)) == 1, "All cameras must have the same pixel format."
-        pixel_format = pixel_formats[0]
+
+        unrecognized = [pf for pf in pixel_formats if pf not in self.pixel_format_conversion]
         # Ensure the pixel format is present in pixel_format_conversion
-        assert pixel_format in self.pixel_format_conversion, f"{pixel_format} is an unrecognized pixel format."
-        self.pixel_format = pixel_format
+        assert not unrecognized, f"Unrecognized pixel format(s): {pixel_format}"
 
         self.set_status("Idle")
 
