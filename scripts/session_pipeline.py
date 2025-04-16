@@ -78,7 +78,7 @@ def preannotation_session_pipeline(keys: List[Dict] = None, bridging: bool = Tru
 
 
 def postannotation_session_pipeline(
-    keys: List[Dict] = None,
+    keys: List[Dict],
     tracking_method_name: str = "Easymocap",
     top_down_method_name: str = "Bridging_bml_movi_87",
     reconstruction_method_name: str = "Robust Triangulation",
@@ -120,24 +120,24 @@ if __name__ == "__main__":
     parser.add_argument("--run_easymocap", action="store_true", help="Run the EasyMocap steps")
     args = parser.parse_args()
 
+    # create a filter for the recording table based on if participant_id and/or session_date is set
+    passed_args = []
+    if args.participant_id:
+        passed_args.append(f"participant_id IN ({args.participant_id})")
+    if args.project:
+        passed_args.append(f"video_project IN ({args.project})")
+    if args.session_date:
+        passed_args.append(f"recording_timestamps LIKE '{args.session_date}%'")
+
+    if len(passed_args) > 1:
+        # concatenate the filters with an AND
+        filter = " AND ".join(passed_args)
+    elif len(passed_args) == 1:
+        filter = passed_args[0]
+    else:
+        filter = None
+
     if args.post_annotation:
-        # create a filter for the recording table based on if participant_id and/or session_date is set
-        passed_args = []
-        if args.participant_id:
-            passed_args.append(f"participant_id IN ({args.participant_id})")
-        if args.project:
-            passed_args.append(f"video_project IN ({args.project})")
-        if args.session_date:
-            passed_args.append(f"recording_timestamps LIKE '{args.session_date}%'")
-
-        if len(passed_args) > 1:
-            # concatenate the filters with an AND
-            filter = " AND ".join(passed_args)
-        elif len(passed_args) == 1:
-            filter = passed_args[0]
-        else:
-            filter = None
-
         if filter:
             keys = Video * SingleCameraVideo * PersonBbox * TrackingBboxMethodLookup & (MultiCameraRecording * Recording & filter)
         else:
@@ -145,23 +145,6 @@ if __name__ == "__main__":
 
             postannotation_session_pipeline(keys)
     else:
-        # create a filter for the recording table based on if participant_id and/or session_date is set
-        passed_args = []
-        if args.participant_id:
-            passed_args.append(f"participant_id IN ({args.participant_id})")
-        if args.project:
-            passed_args.append(f"video_project IN ({args.project})")
-        if args.session_date:
-            passed_args.append(f"recording_timestamps LIKE '{args.session_date}%'")
-
-        if len(passed_args) > 1:
-            # concatenate the filters with an AND
-            filter = " AND ".join(passed_args)
-        elif len(passed_args) == 1:
-            filter = passed_args[0]
-        else:
-            filter = None
-
         if filter:
             keys = (SingleCameraVideo & Recording - EasymocapSmpl & (MultiCameraRecording * Recording & filter)).fetch("KEY")
         else:
