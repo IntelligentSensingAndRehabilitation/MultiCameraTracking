@@ -247,7 +247,6 @@ def write_image_queue(
 
     timestamps = []
     real_times = []
-    frame_spreads = []
 
     out_video = None
 
@@ -292,6 +291,9 @@ def write_image_queue(
                 # This means a new file should be started
                 # release the previous video file
                 out_video.release()
+
+                timestamps = [frame["timestamps"]]
+                real_times = [frame["real_times"]]
 
                 base_filename = frame["base_filename"]
                 # Get the video file for the current frame
@@ -676,12 +678,10 @@ class FlirRecorder:
 
         # Get the pixel format for each camera 
         pixel_formats = [c.PixelFormat for c in self.cams]
-        # Ensure that all cameras have the same pixel format
-        assert len(set(pixel_formats)) == 1, "All cameras must have the same pixel format."
-        pixel_format = pixel_formats[0]
+
+        unrecognized = [pf for pf in pixel_formats if pf not in self.pixel_format_conversion]
         # Ensure the pixel format is present in pixel_format_conversion
-        assert pixel_format in self.pixel_format_conversion, f"{pixel_format} is an unrecognized pixel format."
-        self.pixel_format = pixel_format
+        assert not unrecognized, f"Unrecognized pixel format(s): {pixel_format}"
 
         self.set_status("Idle")
 
