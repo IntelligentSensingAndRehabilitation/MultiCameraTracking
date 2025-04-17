@@ -3,7 +3,7 @@ from typing import List, Dict
 import pose_pipeline
 from pose_pipeline.pipeline import Video, VideoInfo, TopDownMethodLookup, PersonBbox, TrackingBboxMethodLookup
 from pose_pipeline.utils.standard_pipelines import bottom_up_pipeline, top_down_pipeline
-from multi_camera.datajoint.sessions import Subject, Recording
+from multi_camera.datajoint.sessions import Session, Recording
 from multi_camera.datajoint.multi_camera_dj import (
     MultiCameraRecording,
     PersonKeypointReconstruction,
@@ -41,6 +41,17 @@ def assign_calibration():
 
     CalibratedRecording.insert(matches.fetch("KEY"), skip_duplicates=True)
 
+def populate_session_calibration(keys: List[Dict] = None):
+    """
+    Populate the SessionCalibration table to link Recordings and Calibrations
+    """
+    from multi_camera.datajoint.sessions import Session
+    from multi_camera.datajoint.session_calibrations import SessionCalibration
+
+    if keys is None:
+        keys = Session().fetch("KEY")
+
+    SessionCalibration.populate(keys, suppress_errors=True, display_progress=True)
 
 def preannotation_session_pipeline(keys: List[Dict] = None, bridging: bool = True, easy_mocap: bool = False):
     """
@@ -122,20 +133,31 @@ if __name__ == "__main__":
 
     # create a filter for the recording table based on if participant_id and/or session_date is set
     passed_args = []
+    session_args = []
     if args.participant_id:
         passed_args.append(f"participant_id IN ({args.participant_id})")
+        session_args.append(f"participant_id IN ({args.participant_id})")
     if args.project:
         passed_args.append(f"video_project IN ({args.project})")
     if args.session_date:
-        passed_args.append(f"recording_timestamps LIKE '{args.session_date}%'")
+        passed_args.append(f"session_date LIKE '{args.session_date}%'")
+        session_args.append(f"session_date LIKE '{args.session_date}%'")
 
     if len(passed_args) > 1:
         # concatenate the filters with an AND
         filter = " AND ".join(passed_args)
+        session_filter = " AND ".join(session_args)
     elif len(passed_args) == 1:
         filter = passed_args[0]
+        session_filter = session_args[0]
     else:
         filter = None
+        session_filter = None
+
+    if session_filter:
+        keys = (Session & session_filter).fetch("KEY")
+    
+    populate_session_calibration(keys)
 
     if args.post_annotation:
         if filter:
