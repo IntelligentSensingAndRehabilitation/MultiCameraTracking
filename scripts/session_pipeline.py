@@ -154,10 +154,11 @@ if __name__ == "__main__":
         filter = None
         session_filter = None
 
+    session_keys = None
     if session_filter:
-        keys = (Session & session_filter).fetch("KEY")
+        session_keys = (Session & session_filter).fetch("KEY")
     
-    populate_session_calibration(keys)
+    populate_session_calibration(session_keys)
 
     if args.post_annotation:
         if filter:
