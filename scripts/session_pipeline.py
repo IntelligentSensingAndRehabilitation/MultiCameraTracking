@@ -1,4 +1,6 @@
 from typing import List, Dict
+import datetime
+import sys
 
 import pose_pipeline
 from pose_pipeline.pipeline import Video, VideoInfo, TopDownMethodLookup, PersonBbox, TrackingBboxMethodLookup
@@ -124,52 +126,56 @@ def postannotation_session_pipeline(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--participant_id", type=str, default=None, help="Participant ID", required=False)
-    parser.add_argument("--project", type=str, default=None, help="Video Project", required=False)
+    parser.add_argument("--participant_id", type=str, default=None, help="Participant ID, comma-separated", required=False)
+    parser.add_argument("--project", type=str, default=None, help="Video Project(s), comma-separated", required=False)
     parser.add_argument("--session_date", help="Session Date (YYYY-MM-DD)", required=False)
     parser.add_argument("--post_annotation", action="store_true", help="Run post-annotation pipeline")
     parser.add_argument("--run_easymocap", action="store_true", help="Run the EasyMocap steps")
     args = parser.parse_args()
 
     # create a filter for the recording table based on if participant_id and/or session_date is set
-    passed_args = []
-    session_args = []
+    filters = []
+    session_filters = []
+
     if args.participant_id:
-        passed_args.append(f"participant_id IN ({args.participant_id})")
-        session_args.append(f"participant_id IN ({args.participant_id})")
+        participant_ids = [id.strip() for id in args.participant_id.split(",")]
+        quoted_ids = ", ".join(f"'{id}'" for id in participant_ids)
+        filters.append(f"participant_id IN ({quoted_ids})")
+        session_filters.append(f"participant_id IN ({quoted_ids})")
     if args.project:
-        passed_args.append(f"video_project IN ({args.project})")
+        projects = [proj.strip() for proj in args.project.split(",")]
+        quoted_projects = ", ".join(f"'{proj}'" for proj in projects)
+        filters.append(f"video_project IN ({quoted_projects})")
     if args.session_date:
-        passed_args.append(f"session_date LIKE '{args.session_date}%'")
-        session_args.append(f"session_date LIKE '{args.session_date}%'")
+        try:
+            datetime.datetime.strptime(args.session_date, "%Y-%m-%d")
+            filters.append(f"session_date LIKE '{args.session_date}%'")
+            session_filters.append(f"session_date LIKE '{args.session_date}%'")
+        except ValueError:
+            print(f"Error: Invalid date format '{args.session_date}'. Use YYYY-MM-DD.")
+            sys.exit(1)
 
-    if len(passed_args) > 1:
-        # concatenate the filters with an AND
-        filter = " AND ".join(passed_args)
-        session_filter = " AND ".join(session_args)
-    elif len(passed_args) == 1:
-        filter = passed_args[0]
-        session_filter = session_args[0]
+    # Concatenate filters with AND
+    filter_str = " AND ".join(filters) if filters else None
+    session_filter_str = " AND ".join(session_filters) if session_filters else None
+
+    if session_filter_str:
+        session_keys = (Session & session_filter_str).fetch("KEY")
     else:
-        filter = None
-        session_filter = None
-
-    session_keys = None
-    if session_filter:
-        session_keys = (Session & session_filter).fetch("KEY")
+        session_keys = None
     
     populate_session_calibration(session_keys)
 
     if args.post_annotation:
-        if filter:
-            keys = Video * SingleCameraVideo * PersonBbox * TrackingBboxMethodLookup & (MultiCameraRecording * Recording & filter)
+        if filter_str:
+            keys = Video * SingleCameraVideo * PersonBbox * TrackingBboxMethodLookup & (MultiCameraRecording * Recording & filter_str)
         else:
             keys = Video * SingleCameraVideo * PersonBbox * TrackingBboxMethodLookup
 
             postannotation_session_pipeline(keys)
     else:
-        if filter:
-            keys = (SingleCameraVideo & Recording - EasymocapSmpl & (MultiCameraRecording * Recording & filter)).fetch("KEY")
+        if filter_str:
+            keys = (SingleCameraVideo & Recording - EasymocapSmpl & (MultiCameraRecording * Recording & filter_str)).fetch("KEY")
         else:
             keys = (SingleCameraVideo & Recording - EasymocapSmpl & (MultiCameraRecording * Recording & "participant_id NOT IN (72,73,504)")).fetch("KEY")
 
