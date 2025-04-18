@@ -100,8 +100,7 @@ def postannotation_session_pipeline(
     Run the person reconstruction pipeline on the set of recordings
 
     Args:
-        keys (List[Dict], optional): list of recording keys. Defaults to None, in which case it
-            will run on all recordings that have not been reconstructed with the given method.
+        keys (List[Dict]): Datajoint Table Object.
         tracking_method_name (str, optional): name of the tracking method. Defaults to "Easymocap".
         top_down_method_name (str, optional): name of the top down method. Defaults to "Bridging_bml_movi_87".
         reconstruction_method_name (str, optional): name of the reconstruction method. Defaults to "Implicit Optimization KP Conf, MaxHuber=10".
@@ -114,10 +113,10 @@ def postannotation_session_pipeline(
 
     annotated = CalibratedRecording & (keys & {"tracking_method_name": tracking_method_name})
 
-    keys = (CalibratedRecording & Recording & annotated - (PersonKeypointReconstruction & filt)).fetch("KEY")
+    not_reconstructed = (CalibratedRecording & Recording & annotated - (PersonKeypointReconstruction & filt)).fetch("KEY")
 
     reconstruction_pipeline(
-        keys,
+        not_reconstructed,
         top_down_method_name=top_down_method_name,
         reconstruction_method_name=reconstruction_method_name,
         reserve_jobs=True,
