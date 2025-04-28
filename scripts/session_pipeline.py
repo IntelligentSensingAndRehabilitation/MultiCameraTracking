@@ -171,7 +171,7 @@ if __name__ == "__main__":
         else:
             keys = Video * SingleCameraVideo * PersonBbox * TrackingBboxMethodLookup
 
-            postannotation_session_pipeline(keys)
+        postannotation_session_pipeline(keys)
     else:
         if filter_str:
             keys = (SingleCameraVideo & Recording - EasymocapSmpl & (MultiCameraRecording * Recording & filter_str)).fetch("KEY")
