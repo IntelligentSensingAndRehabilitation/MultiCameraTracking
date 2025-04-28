@@ -20,6 +20,8 @@ from multi_camera.datajoint.annotation import (
     FMSType as MMCFMSType,
     TUGTypeLookup as MMCTUGTypeLookup,
     FMSTypeLookup as MMCFMSTypeLookup,
+    CUETTypeLookup as MMCCUETTypeLookup,
+    CUETType as MMCCUETType,
     AssistiveDevice as MMCAssistiveDevice,
 )
 import base64
@@ -89,6 +91,7 @@ with tab1:
     df["Annotation"] = None
     df["Annotation Sub-Type"] = None
     df["Assistive Device"] = None
+    df["Activity Side"] = None
 
     # configure column options
     my_column_config.update(
@@ -110,6 +113,13 @@ with tab1:
         {
             "Assistive Device": st.column_config.SelectboxColumn(
                 options=list(AssistiveDeviceLookup.fetch("assistive_device"))
+            )
+        }
+    )
+    my_column_config.update(
+        {
+            "Activity Side": st.column_config.SelectboxColumn(
+                options=['Left', 'Right', 'Both']
             )
         }
     )
@@ -221,6 +231,7 @@ with tab1:
                 if row["Annotation"] is not None:
                     key = (MultiCameraRecording & participant_res & {'recording_timestamps':row['recording_timestamps']}).fetch1("KEY")
                     key.update({'video_activity': row["Annotation"]})
+                    key.update({'activity_side': row["Activity Side"]})
                     MMCVideoActivity.insert1(key, skip_duplicates=True)
                 if row["Annotation Sub-Type"] is not None:
                     if row["Annotation"] == "Overground Walking":
@@ -298,6 +309,7 @@ with tab2:
     df["Video Activity"] = None
     df["Walking Type"] = None
     df["Assistive Device"] = None
+    df["Activity Side"] = None
     for row in df.iterrows():
         try:
             va = (MMCVideoActivity & {'recording_timestamps':row[1]['recording_timestamps']}).fetch1("video_activity")
@@ -309,6 +321,9 @@ with tab2:
             
             ad = (MMCAssistiveDevice & {'recording_timestamps':row[1]['recording_timestamps']}).fetch1("assistive_device")
             df.loc[row[0], "Assistive Device"] = ad
+
+            a_side = (MMCVideoActivity & {'recording_timestamps':row[1]['recording_timestamps']}).fetch1("activity_side")
+            df.loc[row[0], "Activity Side"] = a_side
         except Exception as e:
             pass
 
