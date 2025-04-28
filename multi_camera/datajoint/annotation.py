@@ -5,13 +5,6 @@ import numpy as np
 schema = dj.schema('multicamera_tracking_annotation')
 
 @schema
-class SideLookup(dj.Lookup):
-    definition = """
-    activity_side: varchar(32)
-    """
-    contents = zip(["Left", "Right", "Both"])
-
-@schema
 class VideoActivityLookup(dj.Lookup):
     definition = """
     video_activity: varchar(32) # the activity someone is doing in a video
@@ -48,7 +41,7 @@ class VideoActivity(dj.Manual):
     -> MultiCameraRecording
     ---
     -> VideoActivityLookup
-    -> SideLookup
+    activity_side = NULL : enum('Left', 'Right', 'Both') # the side of the activity
     """
 
     def get_walking(self=None):
