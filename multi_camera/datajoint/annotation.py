@@ -5,6 +5,13 @@ import numpy as np
 schema = dj.schema('multicamera_tracking_annotation')
 
 @schema
+class SideLookup(dj.Lookup):
+    definition = """
+    activity_side: varchar(32)
+    """
+    contents = zip(["Left", "Right", "Both"])
+
+@schema
 class VideoActivityLookup(dj.Lookup):
     definition = """
     video_activity: varchar(32) # the activity someone is doing in a video
@@ -41,6 +48,7 @@ class VideoActivity(dj.Manual):
     -> MultiCameraRecording
     ---
     -> VideoActivityLookup
+    -> SideLookup
     """
 
     def get_walking(self=None):
@@ -123,6 +131,45 @@ class FMSType(dj.Manual):
             FMSType.insert1(keys, **kwargs)
         else:
             FMSType.insert(keys, **kwargs)
+
+@schema
+class CUETTypeLookup(dj.Lookup):
+    definition = """
+    cuet_type: varchar(32)
+    """
+    contents = zip(["Reach Forward", 
+                    "Reach Up", 
+                    "Reach Down",
+                    "Lift Up",
+                    "Push Down",
+                    "Wrist Up",
+                    "Acquire-Release",
+                    "Grasp",
+                    "Lateral Pinch",
+                    "Pull",
+                    "Push",
+                    "Container",
+                    "2-Finger Pinch",
+                    "3-Finger Pinch",
+                    ]
+                )
+    
+@schema
+class CUETType(dj.Manual):
+    definition = """
+    # annotates the subtype of CUET. This is only for CUET.
+    -> VideoActivity
+    ---
+    -> CUETTypeLookup
+    """
+    def safe_insert(keys, **kwargs):
+        possible_strings = ['CUET']
+        activities = np.unique((VideoActivity & keys).fetch("video_activity"))
+        assert np.isin(activities, possible_strings).all(), "Only CUET is allowed for this table"
+        if len(keys) == 1 or type(keys) == dict:
+            CUETType.insert1(keys, **kwargs)
+        else:
+            CUETType.insert(keys, **kwargs)
 
 
 @schema
