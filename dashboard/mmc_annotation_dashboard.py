@@ -167,6 +167,7 @@ with tab1:
         "CUET_8_":"CUET_Grasp",
         "CUET_9_":"CUET_LateralPinch",
         "CUET_10_11_":"CUET_PullPush",
+        "CUET_10-11_":"CUET_PullPush",
         "CUET_12_":"CUET_Container",
         "CUET_13_":"CUET_2FingerPinch",
         "CUET_14_":"CUET_3FingerPinch",
