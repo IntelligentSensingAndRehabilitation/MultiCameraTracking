@@ -28,7 +28,19 @@ class VideoActivityLookup(dj.Lookup):
             "PST Closed",
             "Ramp",
             "cognitive TUG",
-            "L-test",
+            "L-test"
+            "FACIAL_ROM_BrowsRest",
+            "FACIAL_ROM_BrowsRaised",
+            "FACIAL_ROM_FurrowBrow",
+            "FACIAL_ROM_EyesOpen",
+            "FACIAL_ROM_EyesWideOpen",
+            "FACIAL_ROM_EyesClosed",
+            "FACIAL_ROM_LipsRestClosed",
+            "FACIAL_ROM_MouthClosed",
+            "FACIAL_ROM_Smile",
+            "FACIAL_ROM_Pucker",
+            "FACIAL_ROM_PuckerStretch",
+            "FACIAL_ROM_MouthWideOpen",
             "Other",
         ]
     )
