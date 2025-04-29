@@ -207,8 +207,8 @@ with tab1:
         "lips_rest_closed":"FACIAL_ROM_LipsRestClosed",
         "mouth_closed":"FACIAL_ROM_MouthClosed",
         "smile":"FACIAL_ROM_Smile",
-        "pucker":"FACIAL_ROM_Pucker",
-        "pucker_stretch":"FACIAL_ROM_PuckerStretch",
+        # "pucker":"FACIAL_ROM_Pucker",
+        # "pucker_stretch":"FACIAL_ROM_PuckerStretch",
         "mouth_wide_open":"FACIAL_ROM_MouthWideOpen",
 
     }
@@ -243,7 +243,11 @@ with tab1:
     }
     activity_side_mapping = {
         "_L_": "Left",
-        "_R_": "Right"
+        "_R_": "Right",
+        "left": "Left",
+        "right": "Right",
+        "both": "Both",
+        "bilateral": "Both",
     }
 
     def fill_annotation(row, mapping):
