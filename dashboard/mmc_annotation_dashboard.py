@@ -188,6 +188,19 @@ with tab1:
         "shoulder_clearing":"FMS",
         "ext_clearing":"FMS",
         "flex_clearing":"FMS",
+        "brows_rest":"FACIAL_ROM_BrowsRest",
+        "brows_raised":"FACIAL_ROM_BrowsRaised",
+        "furrow_brow":"FACIAL_ROM_FurrowBrow",
+        "eyes_open":"FACIAL_ROM_EyesOpen",
+        "eyes_wide_open":"FACIAL_ROM_EyesWideOpen",
+        "eyes_closed":"FACIAL_ROM_EyesClosed",
+        "lips_rest_closed":"FACIAL_ROM_LipsRestClosed",
+        "mouth_closed":"FACIAL_ROM_MouthClosed",
+        "smile":"FACIAL_ROM_Smile",
+        "pucker":"FACIAL_ROM_Pucker",
+        "pucker_stretch":"FACIAL_ROM_PuckerStretch",
+        "mouth_wide_open":"FACIAL_ROM_MouthWideOpen",
+
     }
     activity_subtype_mapping = {
         "fast": "Fast",
