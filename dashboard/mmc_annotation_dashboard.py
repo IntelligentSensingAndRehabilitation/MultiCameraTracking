@@ -231,6 +231,10 @@ with tab1:
         "ext_clearing":"Extension Clearing",
         "flex_clearing":"Flexion Clearing",
     }
+    activity_side_mapping = {
+        "_L_": "Left",
+        "_R_": "Right"
+    }
 
     def fill_annotation(row, mapping):
         for keyword, value in mapping.items():
@@ -243,6 +247,7 @@ with tab1:
 
     df["Annotation"] = df.apply(fill_annotation, mapping=video_activity_mapping, axis=1)
     df["Annotation Sub-Type"] = df.apply(fill_annotation, mapping=activity_subtype_mapping, axis=1)
+    df["Activity Side"] = df.apply(fill_annotation, mapping=activity_side_mapping, axis=1)
 
     with st.form(key="my_form"):
         st.title("Enter/Edit Annotations")

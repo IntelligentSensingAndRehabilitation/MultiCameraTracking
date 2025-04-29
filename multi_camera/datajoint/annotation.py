@@ -28,6 +28,7 @@ class VideoActivityLookup(dj.Lookup):
             "PST Closed",
             "Ramp",
             "cognitive TUG",
+            "Wheelchair Propulsion",
             "L-test"
             "FACIAL_ROM_BrowsRest",
             "FACIAL_ROM_BrowsRaised",
@@ -41,6 +42,33 @@ class VideoActivityLookup(dj.Lookup):
             "FACIAL_ROM_Pucker",
             "FACIAL_ROM_PuckerStretch",
             "FACIAL_ROM_MouthWideOpen",
+            "FMS",
+            "FMS_ActiveStraightLegRaise",
+            "FMS_AnkleClearingTest",
+            "FMS_DeepSquat",
+            "FMS_HurdleStep",
+            "FMS_InlineLunge",
+            "FMS_RotaryStability",
+            "FMS_ShoulderClearingTest",
+            "FMS_ShoulderMobility",
+            "FMS_SingleLegSquat",
+            "FMS_SpinalExtensionClearingTest",
+            "FMS_SpinalFlexionClearingTest",
+            "FMS_TrunkStabilityPushUp",
+            "CUET",
+            "CUET_2FingerPinch",
+            "CUET_3FingerPinch",
+            "CUET_AcquireRelease",
+            "CUET_Container",
+            "CUET_Grasp",
+            "CUET_LateralPinch",
+            "CUET_LiftUp",
+            "CUET_PullPush",
+            "CUET_PushDown",
+            "CUET_ReachDown",
+            "CUET_ReachForward",
+            "CUET_ReachUp",
+            "CUET_WristUp",
             "Other",
         ]
     )
@@ -111,71 +139,6 @@ class TUGType(dj.Manual):
             TUGType.insert1(keys, **kwargs)
         else:
             TUGType.insert(keys, **kwargs)
-
-@schema
-class FMSTypeLookup(dj.Lookup):
-    definition = """
-    fms_type: varchar(32)
-    """
-    contents = zip(["SLS", "Deep Squat", "Hurdle", "Lunge", "Shoulder Mobility", "Active Straight Leg Raise", "Trunk Stability Push-Up", "Rotary", "Ankle Clearing", "Shoulder Clearing", "Flexion Clearing", "Extension Clearing"])
-
-@schema
-class FMSType(dj.Manual):
-    definition = """
-    # annotates the subtype of FMS. This is only for FMS.
-    -> VideoActivity 
-    ---
-    -> FMSTypeLookup
-    """
-
-    def safe_insert(keys, **kwargs):
-        possible_strings = ['FMS']
-        activities = np.unique((VideoActivity & keys).fetch("video_activity"))
-        assert np.isin(activities, possible_strings).all(), "Only FMS is allowed for this table"
-        if len(keys) == 1 or type(keys) == dict:
-            FMSType.insert1(keys, **kwargs)
-        else:
-            FMSType.insert(keys, **kwargs)
-
-@schema
-class CUETTypeLookup(dj.Lookup):
-    definition = """
-    cuet_type: varchar(32)
-    """
-    contents = zip(["Reach Forward", 
-                    "Reach Up", 
-                    "Reach Down",
-                    "Lift Up",
-                    "Push Down",
-                    "Wrist Up",
-                    "Acquire-Release",
-                    "Grasp",
-                    "Lateral Pinch",
-                    "Pull",
-                    "Push",
-                    "Container",
-                    "2-Finger Pinch",
-                    "3-Finger Pinch",
-                    ]
-                )
-    
-@schema
-class CUETType(dj.Manual):
-    definition = """
-    # annotates the subtype of CUET. This is only for CUET.
-    -> VideoActivity
-    ---
-    -> CUETTypeLookup
-    """
-    def safe_insert(keys, **kwargs):
-        possible_strings = ['CUET']
-        activities = np.unique((VideoActivity & keys).fetch("video_activity"))
-        assert np.isin(activities, possible_strings).all(), "Only CUET is allowed for this table"
-        if len(keys) == 1 or type(keys) == dict:
-            CUETType.insert1(keys, **kwargs)
-        else:
-            CUETType.insert(keys, **kwargs)
-
 
 @schema
 class AssistiveDeviceLookup(dj.Lookup):
