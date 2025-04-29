@@ -17,11 +17,7 @@ from multi_camera.datajoint.annotation import (
     VideoActivity as MMCVideoActivity,
     WalkingType as MMCWalkingType,
     TUGType as MMCTUGType,
-    FMSType as MMCFMSType,
     TUGTypeLookup as MMCTUGTypeLookup,
-    FMSTypeLookup as MMCFMSTypeLookup,
-    CUETTypeLookup as MMCCUETTypeLookup,
-    CUETType as MMCCUETType,
     AssistiveDevice as MMCAssistiveDevice,
 )
 import base64
@@ -105,7 +101,7 @@ with tab1:
     my_column_config.update(
         {
             "Annotation Sub-Type": st.column_config.SelectboxColumn(
-                options=list(WalkingTypeLookup.fetch("walking_type")) + list(MMCTUGTypeLookup.fetch("tug_type")) + list(MMCFMSTypeLookup.fetch("fms_type"))
+                options=list(WalkingTypeLookup.fetch("walking_type")) + list(MMCTUGTypeLookup.fetch("tug_type"))
             )
         }
     )
@@ -127,7 +123,7 @@ with tab1:
     def validate_annotations(df):
         for index, row in df.iterrows():            
             if row['Annotation Sub-Type'] is not None:
-                if row['Annotation'] not in ['Overground Walking','TUG', 'FMS'] and row['Annotation'] is not None:
+                if row['Annotation'] not in ['Overground Walking','TUG'] and row['Annotation'] is not None:
                     print(row['Annotation'] == None)
                     print('\n\n\n')
                     st.error("Annotation Sub-Type can only be set for Overground Walking and TUG. Please correct this.")
@@ -176,18 +172,32 @@ with tab1:
         "CUET_14":"CUET_3FingerPinch",
         "circuit":"Mixed",
         "circuits":"Mixed",
-        "single_leg_squat":"FMS",
-        "deep_squat":"FMS",
-        "hurdle":"FMS",
-        "lunge":"FMS",
-        "shoulder_mob":"FMS",
-        "active_slr":"FMS",
-        "stability_pushup":"FMS",
-        "rotary":"FMS",
-        "ankle_clearing":"FMS",
-        "shoulder_clearing":"FMS",
-        "ext_clearing":"FMS",
-        "flex_clearing":"FMS",
+        'deep_squat': 'FMS_DeepSquat',
+        'hurdle': 'FMS_HurdleStep',
+        'hurdle_step': 'FMS_HurdleStep',
+        'lunge': 'FMS_InlineLunge',
+        'in_line_lunge': 'FMS_InlineLunge',
+        'ankle_clearing': 'FMS_AnkleClearingTest',
+        'shoulder_mob': 'FMS_ShoulderMobility',
+        'shoulder_mobilty': 'FMS_ShoulderMobility',
+        'shoulder_mobility': 'FMS_ShoulderMobility',
+        'active_slr': 'FMS_ActiveStraightLegRaise',
+        'active_straight_leg_raise': 'FMS_ActiveStraightLegRaise',
+        'trunk_stability_push_up': 'FMS_TrunkStabilityPushUp',
+        'trunk_stabilty_push_up': 'FMS_TrunkStabilityPushUp',
+        'stability_pushup': 'FMS_TrunkStabilityPushUp',
+        'extension_clearing': 'FMS_SpinalExtensionClearingTest',
+        'ext_clearing': 'FMS_SpinalExtensionClearingTest',
+        'lumbar_ext_clearing': 'FMS_SpinalExtensionClearingTest',
+        'flexsion_clearing': 'FMS_SpinalFlexionClearingTest',
+        'flexion_clearing': 'FMS_SpinalFlexionClearingTest',
+        'flex_clearing': 'FMS_SpinalFlexionClearingTest',
+        'lumbar_flex_clearing': 'FMS_SpinalFlexionClearingTest',
+        'rotary_stability': 'FMS_RotaryStability',
+        'rotary': 'FMS_RotaryStability',
+        'single_leg_squat': 'FMS_SingleLegSquat',
+        'sigle_leg_squat': 'FMS_SingleLegSquat',
+        'shoulder_clearing': 'FMS_ShoulderClearingTest',
         "brows_rest":"FACIAL_ROM_BrowsRest",
         "brows_raised":"FACIAL_ROM_BrowsRaised",
         "furrow_brow":"FACIAL_ROM_FurrowBrow",
@@ -272,10 +282,6 @@ with tab1:
                         key = (MMCVideoActivity & participant_res & {'recording_timestamps':row['recording_timestamps']}).fetch1("KEY")
                         key.update({'tug_type': row["Annotation Sub-Type"]})
                         MMCTUGType.safe_insert(key, skip_duplicates=True)
-                    elif row["Annotation"] == "FMS":
-                        key = (MMCVideoActivity & participant_res & {'recording_timestamps':row['recording_timestamps']}).fetch1("KEY")
-                        key.update({'fms_type': row["Annotation Sub-Type"]})
-                        MMCFMSType.safe_insert(key, skip_duplicates=True)
                 if row["Assistive Device"] is not None:
                     key = (MultiCameraRecording & participant_res & {'recording_timestamps':row['recording_timestamps']}).fetch1("KEY")
                     key.update({'assistive_device': row["Assistive Device"]})
