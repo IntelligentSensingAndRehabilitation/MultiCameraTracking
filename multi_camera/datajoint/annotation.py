@@ -69,6 +69,9 @@ class VideoActivityLookup(dj.Lookup):
             "CUET_ReachForward",
             "CUET_ReachUp",
             "CUET_WristUp",
+            "CUET_ManipulateChip",
+            "CUET_Calculator",
+            "CUET_Phone",
             "Other",
         ]
     )
