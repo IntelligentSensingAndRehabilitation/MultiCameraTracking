@@ -2,7 +2,7 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 
-from multi_camera.datajoint.utils.session_stats import get_project_stats_counts
+from multi_camera.datajoint.utils.session_stats import get_project_stats_counts, get_stats
 
 from multi_camera.datajoint.sessions import Recording
 from multi_camera.datajoint.multi_camera_dj import MultiCameraRecording
@@ -28,6 +28,19 @@ st.set_page_config(  # Alternate names: setup_page, page, layout
 # Fetch stats with caching
 stats = fetch_all_project_stats()
 
-event = st.dataframe(stats, on_select="rerun", key="data", selection_mode=["multi-row", "multi-column"])
+st.header("Processing stages for the projects")
+st.write("Select check box by project and a column to get list of recordings")
 
-st.write("Selected project:", event.selection)
+h = 20
+event = st.dataframe(stats, on_select="rerun", key="data", selection_mode=["multi-row", "multi-column"], height=len(stats) * h, row_height=h)
+
+if len(event.selection.rows) > 0 and len(event.selection.columns) > 0:
+    for i in event.selection.rows:
+        print(i)
+        project = MultiCameraRecording & {'video_project': stats.index[i]}
+        project_stats = get_stats(project)
+        for j in event.selection.columns:
+            st.write("Selected project:", stats.index[i], " and column ", j)
+            query = project_stats[j]
+            df = pd.DataFrame((MultiCameraRecording * query).fetch(as_dict=True))
+            st.dataframe(df)

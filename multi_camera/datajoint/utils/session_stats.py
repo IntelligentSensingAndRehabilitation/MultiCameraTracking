@@ -18,7 +18,7 @@ def get_stats(filter):
         "Number of recordings": Recording & filter,
         "Number of videos missing bottom up": (Recording * SingleCameraVideo - bottom_up) & filter,
         "Number missing calibration": missing & filter,
-        "Calibrated awaiting initial reconstruction": (Recording & CalibratedRecording - EasymocapSmpl) & filter - PersonKeypointReconstruction,
+        "Calibrated awaiting initial reconstruction": (Recording & CalibratedRecording - EasymocapTracking) & filter,
         "Empty tracks": (Recording & (CalibratedRecording * EasymocapTracking & 'num_tracks=0') & filter),
         "Easymocap awaiting EasymocapSmpl": (Recording & CalibratedRecording * EasymocapTracking) & filter - EasymocapSmpl,
         "Reconstructed awaiting annotation": (Recording & CalibratedRecording * EasymocapSmpl) & filter - (SingleCameraVideo * PersonBbox),
@@ -33,3 +33,7 @@ def get_project_stats_counts(project):
     stats = get_stats(filter)
     counts = {k: len(v) for k, v in stats.items()}
     return {'Project': project, **counts}
+
+
+def get_quality_stats(filter):
+    pass
