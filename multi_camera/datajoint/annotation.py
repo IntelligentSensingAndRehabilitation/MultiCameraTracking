@@ -28,7 +28,50 @@ class VideoActivityLookup(dj.Lookup):
             "PST Closed",
             "Ramp",
             "cognitive TUG",
-            "L-test",
+            "Wheelchair Propulsion",
+            "L-test"
+            "FACIAL_ROM_BrowsRest",
+            "FACIAL_ROM_BrowsRaised",
+            "FACIAL_ROM_FurrowBrow",
+            "FACIAL_ROM_EyesOpen",
+            "FACIAL_ROM_EyesWideOpen",
+            "FACIAL_ROM_EyesClosed",
+            "FACIAL_ROM_LipsRestClosed",
+            "FACIAL_ROM_MouthClosed",
+            "FACIAL_ROM_Smile",
+            "FACIAL_ROM_Pucker",
+            "FACIAL_ROM_PuckerStretch",
+            "FACIAL_ROM_MouthWideOpen",
+            "FMS",
+            "FMS_ActiveStraightLegRaise",
+            "FMS_AnkleClearingTest",
+            "FMS_DeepSquat",
+            "FMS_HurdleStep",
+            "FMS_InlineLunge",
+            "FMS_RotaryStability",
+            "FMS_ShoulderClearingTest",
+            "FMS_ShoulderMobility",
+            "FMS_SingleLegSquat",
+            "FMS_SpinalExtensionClearingTest",
+            "FMS_SpinalFlexionClearingTest",
+            "FMS_TrunkStabilityPushUp",
+            "CUET",
+            "CUET_2FingerPinch",
+            "CUET_3FingerPinch",
+            "CUET_AcquireRelease",
+            "CUET_Container",
+            "CUET_Grasp",
+            "CUET_LateralPinch",
+            "CUET_LiftUp",
+            "CUET_PullPush",
+            "CUET_PushDown",
+            "CUET_ReachDown",
+            "CUET_ReachForward",
+            "CUET_ReachUp",
+            "CUET_WristUp",
+            "CUET_ManipulateChip",
+            "CUET_Calculator",
+            "CUET_Phone",
             "Other",
         ]
     )
@@ -41,6 +84,7 @@ class VideoActivity(dj.Manual):
     -> MultiCameraRecording
     ---
     -> VideoActivityLookup
+    activity_side = NULL : enum('Left', 'Right', 'Both') # the side of the activity
     """
 
     def get_walking(self=None):
@@ -98,32 +142,6 @@ class TUGType(dj.Manual):
             TUGType.insert1(keys, **kwargs)
         else:
             TUGType.insert(keys, **kwargs)
-
-@schema
-class FMSTypeLookup(dj.Lookup):
-    definition = """
-    fms_type: varchar(32)
-    """
-    contents = zip(["SLS", "Deep Squat", "Hurdle", "Lunge", "Shoulder Mobility", "Active Straight Leg Raise", "Trunk Stability Push-Up", "Rotary", "Ankle Clearing", "Shoulder Clearing", "Flexion Clearing", "Extension Clearing"])
-
-@schema
-class FMSType(dj.Manual):
-    definition = """
-    # annotates the subtype of FMS. This is only for FMS.
-    -> VideoActivity 
-    ---
-    -> FMSTypeLookup
-    """
-
-    def safe_insert(keys, **kwargs):
-        possible_strings = ['FMS']
-        activities = np.unique((VideoActivity & keys).fetch("video_activity"))
-        assert np.isin(activities, possible_strings).all(), "Only FMS is allowed for this table"
-        if len(keys) == 1 or type(keys) == dict:
-            FMSType.insert1(keys, **kwargs)
-        else:
-            FMSType.insert(keys, **kwargs)
-
 
 @schema
 class AssistiveDeviceLookup(dj.Lookup):

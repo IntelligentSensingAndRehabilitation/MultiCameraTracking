@@ -17,9 +17,7 @@ from multi_camera.datajoint.annotation import (
     VideoActivity as MMCVideoActivity,
     WalkingType as MMCWalkingType,
     TUGType as MMCTUGType,
-    FMSType as MMCFMSType,
     TUGTypeLookup as MMCTUGTypeLookup,
-    FMSTypeLookup as MMCFMSTypeLookup,
     AssistiveDevice as MMCAssistiveDevice,
 )
 import base64
@@ -89,6 +87,7 @@ with tab1:
     df["Annotation"] = None
     df["Annotation Sub-Type"] = None
     df["Assistive Device"] = None
+    df["Activity Side"] = None
 
     # configure column options
     my_column_config.update(
@@ -102,7 +101,7 @@ with tab1:
     my_column_config.update(
         {
             "Annotation Sub-Type": st.column_config.SelectboxColumn(
-                options=list(WalkingTypeLookup.fetch("walking_type")) + list(MMCTUGTypeLookup.fetch("tug_type")) + list(MMCFMSTypeLookup.fetch("fms_type"))
+                options=list(WalkingTypeLookup.fetch("walking_type")) + list(MMCTUGTypeLookup.fetch("tug_type"))
             )
         }
     )
@@ -113,11 +112,18 @@ with tab1:
             )
         }
     )
+    my_column_config.update(
+        {
+            "Activity Side": st.column_config.SelectboxColumn(
+                options=['Left', 'Right', 'Both']
+            )
+        }
+    )
 
     def validate_annotations(df):
         for index, row in df.iterrows():            
             if row['Annotation Sub-Type'] is not None:
-                if row['Annotation'] not in ['Overground Walking','TUG', 'FMS'] and row['Annotation'] is not None:
+                if row['Annotation'] not in ['Overground Walking','TUG'] and row['Annotation'] is not None:
                     print(row['Annotation'] == None)
                     print('\n\n\n')
                     st.error("Annotation Sub-Type can only be set for Overground Walking and TUG. Please correct this.")
@@ -147,25 +153,68 @@ with tab1:
         "PST_open": "PST Open",
         "PS_closed": "PST Closed",
         "PS_open": "PST Open",
-        "LTest":"L-test",
-        "ltest":"L-test",
-        "l test":"L-test",
+        "LTest": "L-test",
+        "ltest": "L-test",
+        "l test": "L-test",
         "_FGA_": "Overground Walking",
-        "CUET":"CUET",
-        "circuit":"Mixed",
-        "circuits":"Mixed",
-        "single_leg_squat":"FMS",
-        "deep_squat":"FMS",
-        "hurdle":"FMS",
-        "lunge":"FMS",
-        "shoulder_mob":"FMS",
-        "active_slr":"FMS",
-        "stability_pushup":"FMS",
-        "rotary":"FMS",
-        "ankle_clearing":"FMS",
-        "shoulder_clearing":"FMS",
-        "ext_clearing":"FMS",
-        "flex_clearing":"FMS",
+        "CUET_1_": "CUET_ReachForward",
+        "CUET_2_": "CUET_ReachUp",
+        "CUET_3_": "CUET_ReachDown",
+        "CUET_4_": "CUET_LiftUp",
+        "CUET_5_": "CUET_PushDown",
+        "CUET_6_": "CUET_WristUp",
+        "CUET_7_": "CUET_AcquireRelease",
+        "CUET_8_": "CUET_Grasp",
+        "CUET_9_": "CUET_LateralPinch",
+        "CUET_10_11_": "CUET_PullPush",
+        "CUET_10-11_": "CUET_PullPush",
+        "CUET_12_": "CUET_Container",
+        "CUET_13_": "CUET_2FingerPinch",
+        "CUET_14_": "CUET_3FingerPinch",
+        "CUET_15_": "CUET_ManipulateChip",
+        "CUET_16_": "CUET_Calculator",
+        "CUET_17_": "CUET_Phone",
+        "circuit": "Mixed",
+        "circuits": "Mixed",
+        'deep_squat': 'FMS_DeepSquat',
+        'hurdle': 'FMS_HurdleStep',
+        'hurdle_step': 'FMS_HurdleStep',
+        'lunge': 'FMS_InlineLunge',
+        'in_line_lunge': 'FMS_InlineLunge',
+        'ankle_clearing': 'FMS_AnkleClearingTest',
+        'shoulder_mob': 'FMS_ShoulderMobility',
+        'shoulder_mobilty': 'FMS_ShoulderMobility',
+        'shoulder_mobility': 'FMS_ShoulderMobility',
+        'active_slr': 'FMS_ActiveStraightLegRaise',
+        'active_straight_leg_raise': 'FMS_ActiveStraightLegRaise',
+        'trunk_stability_push_up': 'FMS_TrunkStabilityPushUp',
+        'trunk_stabilty_push_up': 'FMS_TrunkStabilityPushUp',
+        'stability_pushup': 'FMS_TrunkStabilityPushUp',
+        'extension_clearing': 'FMS_SpinalExtensionClearingTest',
+        'ext_clearing': 'FMS_SpinalExtensionClearingTest',
+        'lumbar_ext_clearing': 'FMS_SpinalExtensionClearingTest',
+        'flexsion_clearing': 'FMS_SpinalFlexionClearingTest',
+        'flexion_clearing': 'FMS_SpinalFlexionClearingTest',
+        'flex_clearing': 'FMS_SpinalFlexionClearingTest',
+        'lumbar_flex_clearing': 'FMS_SpinalFlexionClearingTest',
+        'rotary_stability': 'FMS_RotaryStability',
+        'rotary': 'FMS_RotaryStability',
+        'single_leg_squat': 'FMS_SingleLegSquat',
+        'sigle_leg_squat': 'FMS_SingleLegSquat',
+        'shoulder_clearing': 'FMS_ShoulderClearingTest',
+        "brows_rest": "FACIAL_ROM_BrowsRest",
+        "brows_raised": "FACIAL_ROM_BrowsRaised",
+        "furrow_brow": "FACIAL_ROM_FurrowBrow",
+        "eyes_open": "FACIAL_ROM_EyesOpen",
+        "eyes_wide_open": "FACIAL_ROM_EyesWideOpen",
+        "eyes_closed": "FACIAL_ROM_EyesClosed",
+        "lips_rest_closed": "FACIAL_ROM_LipsRestClosed",
+        "mouth_closed": "FACIAL_ROM_MouthClosed",
+        "smile": "FACIAL_ROM_Smile",
+        # "pucker": "FACIAL_ROM_Pucker",
+        # "pucker_stretch": "FACIAL_ROM_PuckerStretch",
+        "mouth_wide_open": "FACIAL_ROM_MouthWideOpen",
+
     }
     activity_subtype_mapping = {
         "fast": "Fast",
@@ -196,6 +245,14 @@ with tab1:
         "ext_clearing":"Extension Clearing",
         "flex_clearing":"Flexion Clearing",
     }
+    activity_side_mapping = {
+        "_L_": "Left",
+        "_R_": "Right",
+        "left": "Left",
+        "right": "Right",
+        "both": "Both",
+        "bilateral": "Both",
+    }
 
     def fill_annotation(row, mapping):
         for keyword, value in mapping.items():
@@ -208,6 +265,7 @@ with tab1:
 
     df["Annotation"] = df.apply(fill_annotation, mapping=video_activity_mapping, axis=1)
     df["Annotation Sub-Type"] = df.apply(fill_annotation, mapping=activity_subtype_mapping, axis=1)
+    df["Activity Side"] = df.apply(fill_annotation, mapping=activity_side_mapping, axis=1)
 
     with st.form(key="my_form"):
         st.title("Enter/Edit Annotations")
@@ -221,6 +279,7 @@ with tab1:
                 if row["Annotation"] is not None:
                     key = (MultiCameraRecording & participant_res & {'recording_timestamps':row['recording_timestamps']}).fetch1("KEY")
                     key.update({'video_activity': row["Annotation"]})
+                    key.update({'activity_side': row["Activity Side"]})
                     MMCVideoActivity.insert1(key, skip_duplicates=True)
                 if row["Annotation Sub-Type"] is not None:
                     if row["Annotation"] == "Overground Walking":
@@ -231,10 +290,6 @@ with tab1:
                         key = (MMCVideoActivity & participant_res & {'recording_timestamps':row['recording_timestamps']}).fetch1("KEY")
                         key.update({'tug_type': row["Annotation Sub-Type"]})
                         MMCTUGType.safe_insert(key, skip_duplicates=True)
-                    elif row["Annotation"] == "FMS":
-                        key = (MMCVideoActivity & participant_res & {'recording_timestamps':row['recording_timestamps']}).fetch1("KEY")
-                        key.update({'fms_type': row["Annotation Sub-Type"]})
-                        MMCFMSType.safe_insert(key, skip_duplicates=True)
                 if row["Assistive Device"] is not None:
                     key = (MultiCameraRecording & participant_res & {'recording_timestamps':row['recording_timestamps']}).fetch1("KEY")
                     key.update({'assistive_device': row["Assistive Device"]})
@@ -298,6 +353,7 @@ with tab2:
     df["Video Activity"] = None
     df["Walking Type"] = None
     df["Assistive Device"] = None
+    df["Activity Side"] = None
     for row in df.iterrows():
         try:
             va = (MMCVideoActivity & {'recording_timestamps':row[1]['recording_timestamps']}).fetch1("video_activity")
@@ -309,6 +365,9 @@ with tab2:
             
             ad = (MMCAssistiveDevice & {'recording_timestamps':row[1]['recording_timestamps']}).fetch1("assistive_device")
             df.loc[row[0], "Assistive Device"] = ad
+
+            a_side = (MMCVideoActivity & {'recording_timestamps':row[1]['recording_timestamps']}).fetch1("activity_side")
+            df.loc[row[0], "Activity Side"] = a_side
         except Exception as e:
             pass
 

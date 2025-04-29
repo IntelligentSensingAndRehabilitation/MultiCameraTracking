@@ -130,8 +130,27 @@ if __name__ == "__main__":
     parser.add_argument("--session_date", help="Session Date (YYYY-MM-DD)", required=False)
     parser.add_argument("--post_annotation", action="store_true", help="Run post-annotation pipeline")
     parser.add_argument("--run_easymocap", action="store_true", help="Run the EasyMocap steps")
+    parser.add_argument("--top_down_method_name", type=str, default="Bridging_bml_movi_87", help="Top down method name")
+    parser.add_argument("--reconstruction_method_name", type=str, default="Robust Triangulation", help="Reconstruction method name")
+    parser.add_argument("--tracking_method_name", type=str, default="Easymocap", help="Tracking method name")
     args = parser.parse_args()
 
+    post_annotation_args = {}
+    if args.top_down_method_name:
+        top_down = len(TopDownMethodLookup & {"top_down_method_name": args.top_down_method_name})
+        assert top_down == 1, f"{top_down} matching records found in TopDownMethodLookup for: {args.top_down_method_name}"
+        post_annotation_args["top_down_method_name"] = args.top_down_method_name
+
+    if args.reconstruction_method_name:
+        reconstruction = len(PersonKeypointReconstructionMethodLookup & {"reconstruction_method_name": args.reconstruction_method_name})
+        assert reconstruction == 1, f"{reconstruction} matching records found in PersonKeypointReconstructionMethodLookup for: {args.reconstruction_method_name}"
+        post_annotation_args["reconstruction_method_name"] = args.reconstruction_method_name
+
+    if args.tracking_method_name:
+        tracking = len(TrackingBboxMethodLookup & {"tracking_method_name": args.tracking_method_name})
+        assert tracking == 1, f"{tracking} matching records found in TrackingBboxMethodLookup for: {args.tracking_method_name}"
+        post_annotation_args["tracking_method_name"] = args.tracking_method_name
+    
     # create a filter for the recording table based on if participant_id and/or session_date is set
     filters = []
     session_filters = []
@@ -171,7 +190,9 @@ if __name__ == "__main__":
         else:
             keys = Video * SingleCameraVideo * PersonBbox * TrackingBboxMethodLookup
 
-            postannotation_session_pipeline(keys)
+        post_annotation_args["keys"] = keys
+
+        postannotation_session_pipeline(**post_annotation_args)
     else:
         if filter_str:
             keys = (SingleCameraVideo & Recording - EasymocapSmpl & (MultiCameraRecording * Recording & filter_str)).fetch("KEY")
