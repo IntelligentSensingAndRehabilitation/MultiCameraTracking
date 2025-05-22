@@ -102,7 +102,7 @@ class ChArucoAccumulator:
                                  zeroZone = (-1,-1),
                                  criteria = criteria)
             # corners2 , ids2, charuco_retval = corners, ids, 0
-            charuco_retval, corners2, ids2 = cv2.aruco.interpolateCornersCharuco(corners, ids, gray, self.board)
+            charuco_retval, corners2, ids2 = detector.interpolateCornersCharuco(corners, ids, gray, self.board)
             if corners2 is not None and  ids2 is not None :
                 if corners2.shape[0]==(self.rows-1)*(self.cols-1):
                     self.corners.append(corners2)
