@@ -78,50 +78,27 @@ class ChArucoAccumulator:
 
     def process_frame(self, idx, img):
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-        # chessboard_flags = cv2.CALIB_CB_ADAPTIVE_THRESH + cv2.CALIB_CB_NORMALIZE_IMAGE  # + cv2.CALIB_CB_FAST_CHECK
-
         gray_ds = cv2.resize(gray, (img.shape[1] // self.downsample, img.shape[0] // self.downsample))
-        params = cv2.aruco.DetectorParameters()
-        detector = cv2.aruco.ArucoDetector(self.DICT, params)
-        corners, ids, rejectedImgPoints = detector.detectMarkers(gray_ds)
-        corners, ids, _, _ = detector.refineDetectedMarkers(gray_ds, self.board, corners, ids, rejectedImgPoints)
 
         if not self.shape:
             self.shape = img.shape
-        if len(corners) > 0:
-            corners = corners * self.downsample
 
-            criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
+        charuco_detector = cv2.aruco.CharucoDetector(self.board)
+        charuco_corners, charuco_ids, marker_corners, marker_ids = charuco_detector.detectBoard(gray_ds)
 
-            # cv2.aruco.drawDetectedMarkers(gray, corners, ids)
-            
-            for corner in corners:
-                cv2.cornerSubPix(gray, corner,
-                                 winSize = (3,3),
-                                 zeroZone = (-1,-1),
-                                 criteria = criteria)
-            # corners2 , ids2, charuco_retval = corners, ids, 0
-            charuco_retval, corners2, ids2 = detector.interpolateCornersCharuco(corners, ids, gray, self.board)
-            if corners2 is not None and  ids2 is not None :
-                if corners2.shape[0]==(self.rows-1)*(self.cols-1):
-                    self.corners.append(corners2)
-                    self.ids.append(ids2)
-                    self.frames.append(idx)
-                else:
-                    print(f'\rcorners2 {corners2.shape}', end='')
-
-            # corners2 = cv2.cornerSubPix(gray, corners, (11, 11), (-1, -1), criteria)
-            # self.corners.append(corners2)
-            if self.save_images:
-                self.images.append(img)
-        else:
-            charuco_retval = 0
+        if charuco_corners is not None and charuco_ids is not None:
+            if charuco_corners.shape[0] == (self.rows - 1) * (self.cols - 1):
+                self.corners.append(charuco_corners * self.downsample)
+                self.ids.append(charuco_ids)
+                self.frames.append(idx)
+            else:
+                print(f"\rcorners2 {charuco_corners.shape}", end='')
 
         if self.save_images:
+            self.images.append(img)
             self.last_image = img
 
-        return charuco_retval
+        return len(charuco_corners) if charuco_corners is not None else 0
 
     def get_rvecs_tvecs(self, mtx, dist, corners=None):
         if corners is None:
