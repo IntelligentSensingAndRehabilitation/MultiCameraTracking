@@ -83,8 +83,9 @@ class ChArucoAccumulator:
 
         gray_ds = cv2.resize(gray, (img.shape[1] // self.downsample, img.shape[0] // self.downsample))
         params = cv2.aruco.DetectorParameters()
-        corners, ids, rejectedImgPoints = cv2.aruco.detectMarkers(gray_ds, self.DICT, parameters=params)
-        corners, ids, _, _ = cv2.aruco.refineDetectedMarkers(gray_ds, self.board, corners, ids, rejectedImgPoints)
+        detector = cv2.aruco.ArucoDetector(self.DICT, params)
+        corners, ids, rejectedImgPoints = detector.detectMarkers(gray_ds)
+        corners, ids, _, _ = detector.refineDetectedMarkers(gray_ds, self.board, corners, ids, rejectedImgPoints)
 
         if not self.shape:
             self.shape = img.shape
