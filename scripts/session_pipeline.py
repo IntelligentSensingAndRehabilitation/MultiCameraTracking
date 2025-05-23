@@ -55,7 +55,7 @@ def populate_session_calibration(keys: List[Dict] = None):
 
     SessionCalibration.populate(keys, suppress_errors=True, display_progress=True)
 
-def preannotation_session_pipeline(keys: List[Dict] = None, bridging: bool = True, easy_mocap: bool = False):
+def preannotation_session_pipeline(keys: List[Dict] = None, bottom_up: bool = True, bridging: bool = True, easy_mocap: bool = False):
     """
     Perform the initial scene reconstruction for annotation
 
@@ -66,7 +66,9 @@ def preannotation_session_pipeline(keys: List[Dict] = None, bridging: bool = Tru
     Args:
         keys (List[Dict], optional): list of recording keys. Defaults to None, in which case it
             will run on all recordings that have not been annotated
+        bottom_up (bool, optional): whether to run the bottom up pipeline. Defaults to True.
         bridging (bool, optional): whether to use the bridging keypoints. Defaults to True.
+        easy_mocap (bool, optional): whether to run the EasyMocap pipeline. Defaults to False.
 
     """
 
@@ -74,10 +76,11 @@ def preannotation_session_pipeline(keys: List[Dict] = None, bridging: bool = Tru
         keys = (SingleCameraVideo & Recording - EasymocapSmpl).fetch("KEY")
         print("Computing initial reconstruction for {} videos".format(len(keys)))
 
-    if bridging:
-        bottom_up_pipeline(keys, bottom_up_method_name="Bridging_OpenPose", reserve_jobs=True)
-    else:
-        bottom_up_pipeline(keys, bottom_up_method_name="OpenPose_HR", reserve_jobs=True)
+    if bottom_up:
+        if bridging:
+            bottom_up_pipeline(keys, bottom_up_method_name="Bridging_OpenPose", reserve_jobs=True)
+        else:
+            bottom_up_pipeline(keys, bottom_up_method_name="OpenPose_HR", reserve_jobs=True)
 
     # now run easymocap
     print("populating video info")
@@ -129,6 +132,7 @@ if __name__ == "__main__":
     parser.add_argument("--project", type=str, default=None, help="Video Project(s), comma-separated", required=False)
     parser.add_argument("--session_date", help="Session Date (YYYY-MM-DD)", required=False)
     parser.add_argument("--post_annotation", action="store_true", help="Run post-annotation pipeline")
+    parser.add_argument("--bottom_up", action="store_true", help="Run bottom up pipeline")
     parser.add_argument("--run_easymocap", action="store_true", help="Run the EasyMocap steps")
     parser.add_argument("--top_down_method_name", type=str, default="Bridging_bml_movi_87", help="Top down method name")
     parser.add_argument("--reconstruction_method_name", type=str, default="Robust Triangulation", help="Reconstruction method name")
@@ -199,4 +203,4 @@ if __name__ == "__main__":
         else:
             keys = (SingleCameraVideo & Recording - EasymocapSmpl & (MultiCameraRecording * Recording & "participant_id NOT IN (72,73,504)")).fetch("KEY")
 
-        preannotation_session_pipeline(keys, easy_mocap=args.run_easymocap)
+        preannotation_session_pipeline(keys, easy_mocap=args.run_easymocap, bottom_up=args.bottom_up)
