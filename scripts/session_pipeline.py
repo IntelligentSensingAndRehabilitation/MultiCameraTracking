@@ -132,8 +132,8 @@ if __name__ == "__main__":
     parser.add_argument("--project", type=str, default=None, help="Video Project(s), comma-separated", required=False)
     parser.add_argument("--session_date", help="Session Date (YYYY-MM-DD)", required=False)
     parser.add_argument("--post_annotation", action="store_true", help="Run post-annotation pipeline")
+    parser.add_argument("--bottom_up", action="store_true", help="Run bottom up pipeline")
     parser.add_argument("--run_easymocap", action="store_true", help="Run the EasyMocap steps")
-    parser.add_argument("--only_easymocap", action="store_true", help="Run only EasyMocap steps")
     parser.add_argument("--top_down_method_name", type=str, default="Bridging_bml_movi_87", help="Top down method name")
     parser.add_argument("--reconstruction_method_name", type=str, default="Robust Triangulation", help="Reconstruction method name")
     parser.add_argument("--tracking_method_name", type=str, default="Easymocap", help="Tracking method name")
@@ -203,4 +203,4 @@ if __name__ == "__main__":
         else:
             keys = (SingleCameraVideo & Recording - EasymocapSmpl & (MultiCameraRecording * Recording & "participant_id NOT IN (72,73,504)")).fetch("KEY")
 
-        preannotation_session_pipeline(keys, easy_mocap=args.run_easymocap, only_easymocap=args.only_easymocap)
+        preannotation_session_pipeline(keys, easy_mocap=args.run_easymocap, bottom_up=args.bottom_up)
