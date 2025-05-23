@@ -55,7 +55,7 @@ def populate_session_calibration(keys: List[Dict] = None):
 
     SessionCalibration.populate(keys, suppress_errors=True, display_progress=True)
 
-def preannotation_session_pipeline(keys: List[Dict] = None, bridging: bool = True, easy_mocap: bool = False, only_easymocap: bool = False):
+def preannotation_session_pipeline(keys: List[Dict] = None, bottom_up: bool = True, bridging: bool = True, easy_mocap: bool = False):
     """
     Perform the initial scene reconstruction for annotation
 
@@ -66,7 +66,9 @@ def preannotation_session_pipeline(keys: List[Dict] = None, bridging: bool = Tru
     Args:
         keys (List[Dict], optional): list of recording keys. Defaults to None, in which case it
             will run on all recordings that have not been annotated
+        bottom_up (bool, optional): whether to run the bottom up pipeline. Defaults to True.
         bridging (bool, optional): whether to use the bridging keypoints. Defaults to True.
+        easy_mocap (bool, optional): whether to run the EasyMocap pipeline. Defaults to False.
 
     """
 
@@ -74,7 +76,7 @@ def preannotation_session_pipeline(keys: List[Dict] = None, bridging: bool = Tru
         keys = (SingleCameraVideo & Recording - EasymocapSmpl).fetch("KEY")
         print("Computing initial reconstruction for {} videos".format(len(keys)))
 
-    if not only_easymocap:
+    if bottom_up:
         if bridging:
             bottom_up_pipeline(keys, bottom_up_method_name="Bridging_OpenPose", reserve_jobs=True)
         else:
@@ -84,7 +86,7 @@ def preannotation_session_pipeline(keys: List[Dict] = None, bridging: bool = Tru
     print("populating video info")
     VideoInfo.populate(SingleCameraVideo * MultiCameraRecording & keys, reserve_jobs=True)
 
-    if easy_mocap or only_easymocap:
+    if easy_mocap:
         print("populating easymocaptracking")
         EasymocapTracking.populate(MultiCameraRecording * CalibratedRecording & keys, reserve_jobs=True, suppress_errors=True)
         print("populating easymocapsmpl")
