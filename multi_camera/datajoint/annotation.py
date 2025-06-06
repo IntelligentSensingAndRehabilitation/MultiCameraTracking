@@ -177,3 +177,32 @@ class AssistiveDevice(dj.Manual):
     ---
     -> AssistiveDeviceLookup
     """
+
+@schema
+class RangeAnnotation(dj.Manual):
+    definition = """
+    # annotates the range of a recording
+    -> MultiCameraRecording
+    range_id    :  smallint
+    ---
+    user        : varchar(32)   # user who annotated the range
+    source      : varchar(32)   # data source used while annotating
+    ranges      : longblob      # list of ranges in the recording, e.g. [[0, 100], [200, 300]]
+    num_ranges  : int unsigned  # number of ranges in the recording
+    range_label : varchar(512)  # label for the range, e.g. 'Full', 'Left', 'Right'
+    annotation_time : datetime  # time when the annotation was made
+    """
+
+@schema
+class EventAnnotation(dj.Manual):
+    definition = """
+    # annotates the range of a recording
+    -> MultiCameraRecording
+    event_id    :  smallint
+    ---
+    user        : varchar(32)    # user who annotated the event
+    events      : longblob       # list of events in the recording, e.g. [[0, 100], [200, 300]]
+    num_events  : int unsigned   # number of events in the recording
+    event_label : varchar(512)   # label for the event, e.g. 'Left Arm Raise'
+    annotation_time : datetime   # time when the annotation was made
+    """
