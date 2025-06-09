@@ -201,6 +201,7 @@ class EventAnnotation(dj.Manual):
     event_id    :  smallint
     ---
     user        : varchar(32)    # user who annotated the event
+    source      : varchar(32)   # data source used while annotating
     events      : longblob       # list of events in the recording, e.g. [[0, 100], [200, 300]]
     num_events  : int unsigned   # number of events in the recording
     event_label : varchar(512)   # label for the event, e.g. 'Left Arm Raise'
