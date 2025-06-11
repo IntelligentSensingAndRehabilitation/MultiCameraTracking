@@ -13,8 +13,8 @@ class MultiCameraRecording(dj.Manual):
     # Recording from multiple synchronized cameras
     recording_timestamps : timestamp
     camera_config_hash  : varchar(50)    # camera configuration
-    video_project       : varchar(50)    # video project, which should match pose pipeline
     ---
+    video_project       : varchar(50)    # video project, which should match pose pipeline
     video_base_filename : varchar(100)   # base name for the videos without serial prefix
     """
 
