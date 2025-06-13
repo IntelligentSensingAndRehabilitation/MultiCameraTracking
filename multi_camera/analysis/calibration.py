@@ -5,6 +5,7 @@ import jax
 import jaxopt
 from jax import vmap, jit
 from jax import numpy as jnp
+from jax import tree_util
 from tqdm import trange
 from functools import partial
 
@@ -1352,7 +1353,7 @@ def run_calibration(
         # the same
         board_rotation = board_rotation * np.array([[1, -1, -1]]).T
     camera_params_zeroed = shift_calibration(camera_params, x0, board_rotation, zoffset=0 if charuco else 1245)
-    params_dict = jax.tree_map(np.array, camera_params_zeroed)
+    params_dict = tree_util.tree_map(np.array, camera_params_zeroed)
 
     timestamp = vid_base.split("calibration_")[1]
     timestamp = datetime.strptime(timestamp, "%Y%m%d_%H%M%S")
