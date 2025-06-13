@@ -2247,7 +2247,7 @@ def dual_calibration_procedure(
     checkerboard_points = get_checkerboard_points(parsers)
     x0, board_rotation = extract_origin(camera_params, checkerboard_points[:, 5:])
     camera_params_zeroed = shift_calibration(camera_params, x0, board_rotation, zoffset=1245)
-    params_dict = jax.tree_map(np.array, camera_params_zeroed)
+    params_dict = tree_util.tree_map(np.array, camera_params_zeroed)
 
     return params_dict
 
@@ -2391,7 +2391,7 @@ def zero_calibration(camera_params: Dict, parsers: List[CheckerboardAccumulator]
     checkerboard_points = get_checkerboard_points(parsers)
     x0, board_rotation = extract_origin(camera_params, checkerboard_points[:, 5:])
     camera_params_zeroed = shift_calibration(camera_params, x0, board_rotation, zoffset=1245)
-    params_dict = jax.tree_map(np.array, camera_params_zeroed)
+    params_dict = tree_util.tree_map(np.array, camera_params_zeroed)
 
     return params_dict
 
