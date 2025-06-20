@@ -1353,7 +1353,7 @@ def run_calibration(
         # the same
         board_rotation = board_rotation * np.array([[1, -1, -1]]).T
     camera_params_zeroed = shift_calibration(camera_params, x0, board_rotation, zoffset=0 if charuco else 1245)
-    params_dict = tree_util.tree_map(np.array, camera_params_zeroed)
+    params_dict = jax.tree.map(np.array, camera_params_zeroed)
 
     timestamp = vid_base.split("calibration_")[1]
     timestamp = datetime.strptime(timestamp, "%Y%m%d_%H%M%S")
@@ -2247,7 +2247,7 @@ def dual_calibration_procedure(
     checkerboard_points = get_checkerboard_points(parsers)
     x0, board_rotation = extract_origin(camera_params, checkerboard_points[:, 5:])
     camera_params_zeroed = shift_calibration(camera_params, x0, board_rotation, zoffset=1245)
-    params_dict = tree_util.tree_map(np.array, camera_params_zeroed)
+    params_dict = jax.tree.map(np.array, camera_params_zeroed)
 
     return params_dict
 
@@ -2391,7 +2391,7 @@ def zero_calibration(camera_params: Dict, parsers: List[CheckerboardAccumulator]
     checkerboard_points = get_checkerboard_points(parsers)
     x0, board_rotation = extract_origin(camera_params, checkerboard_points[:, 5:])
     camera_params_zeroed = shift_calibration(camera_params, x0, board_rotation, zoffset=1245)
-    params_dict = tree_util.tree_map(np.array, camera_params_zeroed)
+    params_dict = jax.tree.map(np.array, camera_params_zeroed)
 
     return params_dict
 
