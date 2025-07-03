@@ -710,7 +710,7 @@ def plot_per_frame_p3ds_with_board_slider(per_frame_p3ds, poses, board, params_d
         print(f"Serving the figure at {url}")
 
         # Auto-open the URL in the host's browser
-        os.system(f"$BROWSER {url}")
+        #os.system(f"$BROWSER {url}")
 
         # Run the server in a separate thread
         def run_server():
