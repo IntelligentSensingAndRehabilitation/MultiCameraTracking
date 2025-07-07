@@ -7,6 +7,7 @@ from multi_camera.datajoint.multi_camera_dj import (
     PersonKeypointReconstruction,
 )
 from multi_camera.datajoint.easymocap import EasymocapSmpl, EasymocapTracking
+from body_models.datajoint.kinematic_dj import KinematicReconstruction
 
 bottom_up = BottomUpPeople * BottomUpMethodLookup & {"bottom_up_method_name": "Bridging_OpenPose"}
 top_down = TopDownPerson * TopDownMethodLookup & {"top_down_method_name": "Bridging_bml_movi_87"}
@@ -24,6 +25,7 @@ def get_stats(filter):
         "Reconstructed awaiting annotation": (Recording & CalibratedRecording * EasymocapSmpl) & filter - (SingleCameraVideo * PersonBbox),
         "Annotated videos missing top down": Recording * SingleCameraVideo * PersonBbox - top_down & filter,
         "Annotated without reconstruction": (Recording & CalibratedRecording & (SingleCameraVideo * PersonBbox) - PersonKeypointReconstruction) & filter,
+        "Recordings missing kinematic reconstruction method 137": (Recording & CalibratedRecording & filter) - (KinematicReconstruction & {"kinematic_reconstruction_settings_num": 137}),
     }
 
     return stats
