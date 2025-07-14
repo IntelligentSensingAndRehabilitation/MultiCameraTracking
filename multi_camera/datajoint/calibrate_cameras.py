@@ -26,23 +26,47 @@ class Calibration(dj.Manual):
     """
 
 
-def run_calibration(vid_base, vid_path=None, checkerboard_size=109.0, checkerboard_dim=(5, 7),charuco = True):
-    from ..analysis.calibration import run_calibration
+if __name__ == "__main__":
+    import argparse
+    import os
+    from ..analysis.calibration import run_calibration_APL
 
-    if vid_path is None:
-        import os
+    parser = argparse.ArgumentParser(description="Run camera calibration and releveling pipeline.")
+    parser.add_argument('--vid_base', type=str, required=True, help='Base path to calibration video set (without .cam.mp4)')
+    parser.add_argument('--charuco', type=str, default='charuco', help='Use charuco or checkerboard')
+    parser.add_argument('--checkerboard_size', type=int, default=109, help='Checkerboard square size in mm')
+    parser.add_argument('--checkerboard_dim', type=int, nargs=2, default=[5,7], help='Checkerboard dimensions (rows cols)')
+    parser.add_argument('--marker_bits', type=int, default=6, help='Charuco marker bits')
+    parser.add_argument('--releveling_type', type=str, default='no_leveling', help='Releveling method')
+    parser.add_argument('--z_offset_set', type=float, default=1.534, help='Board height for stroller/custom releveling (meters)')
+    parser.add_argument('--min_height', type=float, default=2.0, help='Min camera height for z_up (meters)')
+    parser.add_argument('--min_cameras', type=int, default=2, help='Min cameras for fitting board pose')
+    parser.add_argument('--board_ground_time', type=int, nargs=2, default=[0,200], help='Frame range for ground board')
+    parser.add_argument('--board_axis', type=float, nargs=3, default=[0,-1,0], help='Board axis to align with global axis')
+    parser.add_argument('--global_axis', type=float, nargs=3, default=[0,0,1], help='Global axis to align with board axis')
+    parser.add_argument('--board_secondary', type=float, nargs=3, default=[1,0,0], help='Board secondary axis')
+    parser.add_argument('--global_secondary', type=float, nargs=3, default=[1,0,0], help='Global secondary axis')
+    parser.add_argument('--output', type=str, default=None, help='Optional: Output file to save calibration results')
 
-        vid_path, vid_base = os.path.split(vid_base)
+    args = parser.parse_args()
 
-    print(vid_path, vid_base)
-
-    entry = run_calibration(
-        vid_base,
-        vid_path,
-        checkerboard_size=checkerboard_size,
-        checkerboard_dim=checkerboard_dim,
-        charuco = charuco,
-        jax_cal=False,
+    # Call your calibration pipeline
+    entry, board = run_calibration_APL(
+        vid_base=args.vid_base,
+        charuco=args.charuco,
+        checkerboard_size=args.checkerboard_size,
+        checkerboard_dim=tuple(args.checkerboard_dim),
+        marker_bits=args.marker_bits,
+        releveling_type=args.releveling_type,
+        board=None,
+        z_offset_set=args.z_offset_set,
+        min_height=args.min_height,
+        min_cameras=args.min_cameras,
+        board_ground_time=tuple(args.board_ground_time),
+        board_axis=tuple(args.board_axis),
+        global_axis=tuple(args.global_axis),
+        board_secondary=tuple(args.board_secondary),
+        global_secondary=tuple(args.global_secondary)
     )
 
     if np.isnan(entry["reprojection_error"]):
@@ -55,48 +79,19 @@ def run_calibration(vid_base, vid_path=None, checkerboard_size=109.0, checkerboa
         response = input()
         if response[0].upper() != "Y":
             print("Cancelling")
-            return
+            
+    vid_path, vid_base = os.path.split(args.vid_base)
+    entry["recording_base"] = vid_base # we default to using using input vid_path with path+base then we split here
 
-    entry["recording_base"] = vid_base
-
-    if charuco:
+    if args.charuco == "charuco": # is "charuco" string the right type?
         entry["calibration_type"] = "charuco"
 
-    Calibration.insert1(entry)
-
-
-if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser(description="Compute calibration from specified videos and insert into database")
-    parser.add_argument("vid_base", help="Base filenames to use for calibration")
-    parser.add_argument("--vid_path", help="Path to files", default=None)
-    # checkerboard_size=110.0, checkerboard_dim=(4, 6)
-    parser.add_argument(
-        "--checkerboard_size",
-        help="Size of checkerboard squares",
-        default=110.0,
-        type=float,
-    )
-    parser.add_argument(
-        "--checkerboard_dim",
-        help="Number of squares in checkerboard (rows, columns)",
-        default=(4, 6),
-        type=lambda x: tuple(map(int, x.split(","))),
-    )
-    parser.add_argument(
-    "--charuco",
-    help="using a charuco board instead of a checkerboard. Default is False.",
-    action="store_true",
-    )
-    args = parser.parse_args()
-    run_calibration(
-        vid_base=args.vid_base,
-        vid_path=args.vid_path,
-        checkerboard_size=args.checkerboard_size,
-        checkerboard_dim=args.checkerboard_dim,
-        charuco = args.charuco,
-
-    )
-
-    print("Complete")
+  
+    print('Does the calibration visualization on port 8050 look correct? Are you sure you would like to store this in the database? [Yes/No]')
+    response = input()
+    if response[0].upper() != "Y":
+        print("Cancelling")    
+    else:
+        print("Storing calibration in database...")
+        Calibration.insert1(entry)
+        print("Calibration complete.")

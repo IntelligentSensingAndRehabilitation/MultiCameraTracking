@@ -11,8 +11,11 @@ requires-python = ">=3.8"
 dependencies = [
     "aniposelib>=0.7.0",
     "colorlog>=6.8.2",
+    "dash>=3.1.1",
+    "datajoint>=0.14.3",
     "einops>=0.8.0",
     "fastapi[all]>=0.99.1",
+    "flax>=0.7.2",
     "jax>=0.4.13",
     "jaxlib>=0.4.13",
     "jaxlie>=1.4.2",
@@ -21,15 +24,15 @@ dependencies = [
     "matplotlib>=3.7.5",
     "numba>=0.58.1",
     "numpy>1.24",
-    "opencv-contrib-python<4.10",
-    "opencv-python<4.10",
+    "opencv-contrib-python>=4.11.0.86",
     "optax>=0.1.8",
     "pillow>10",
+    "plotly>=6.1.2",
     "pyyaml>=6.0.2",
+    "scipy>=1.15.2",
     "simple-pyspin>=0.1.1",
     "sqlalchemy>=2.0.35",
-    "tqdm>4.6",
-    "flax>=0.7.2"
+    "tqdm>4.6"
 ]
 
 [tool.uv]
