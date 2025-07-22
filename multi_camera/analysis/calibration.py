@@ -17,6 +17,25 @@ import threading
 import time
 
 
+def shift_calibration(camera_params, offset, rotation=np.eye(3), zoffset=None):
+    from jaxlie import SO3
+    from jax import vmap
+
+    camera_params = camera_params.copy()
+    offset = offset / 1000.0
+
+    camera_rotations = vmap(lambda x: SO3.exp(x).as_matrix())(camera_params["rvec"])
+    tvec = camera_params["tvec"] + camera_rotations @ offset.reshape((3,))
+    rvec = vmap(lambda x: (SO3.exp(x) @ SO3.from_matrix(rotation.T)).log())(camera_params["rvec"])
+
+    camera_params["rvec"] = rvec
+    camera_params["tvec"] = tvec
+
+    if zoffset:
+        camera_params = shift_calibration(camera_params, np.array([0, 0, -zoffset]))
+
+    return camera_params
+
 def run_calibration_APL(
         vid_base, 
         charuco="charuco", 
