@@ -15,10 +15,11 @@ import subprocess
 import os
 import threading
 import time
-from jax import vmap
+
 
 def shift_calibration(camera_params, offset, rotation=np.eye(3), zoffset=None):
     from jaxlie import SO3
+    from jax import vmap
 
     camera_params = camera_params.copy()
     offset = offset / 1000.0
