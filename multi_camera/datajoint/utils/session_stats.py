@@ -6,6 +6,7 @@ from multi_camera.datajoint.multi_camera_dj import (
     CalibratedRecording,
     PersonKeypointReconstruction,
 )
+from multi_camera.datajoint.session_calibrations import SessionCalibration
 from multi_camera.datajoint.easymocap import EasymocapSmpl, EasymocapTracking
 from body_models.datajoint.kinematic_dj import KinematicReconstruction
 
