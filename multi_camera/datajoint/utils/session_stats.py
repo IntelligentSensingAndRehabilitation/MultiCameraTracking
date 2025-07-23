@@ -37,7 +37,7 @@ def get_stats(filter):
         "Reconstructed awaiting annotation": (Recording & CalibratedRecording * EasymocapSmpl) & filter - (SingleCameraVideo * easymocap_bboxes),
         "Annotated videos missing top down": Recording * SingleCameraVideo * easymocap_bboxes - top_down & filter,
         "Annotated without reconstruction": (Recording & CalibratedRecording & (SingleCameraVideo * easymocap_bboxes) - PersonKeypointReconstruction) & filter,
-        "Recordings missing kinematic reconstruction method 137": (Recording & CalibratedRecording & filter) - (KinematicReconstruction & {"kinematic_reconstruction_settings_num": 137}),
+        "Sessions missing kinematic reconstruction method 137": (SessionCalibration.Grouping & (Recording * filter)) - KinematicReconstruction & {"kinematic_reconstruction_settings_num": 137},
     }
 
     return stats
