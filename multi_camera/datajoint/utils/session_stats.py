@@ -12,6 +12,15 @@ from body_models.datajoint.kinematic_dj import KinematicReconstruction
 tracking_method = 21
 
 bottom_up = BottomUpPeople * BottomUpMethodLookup & {"bottom_up_method_name": "Bridging_OpenPose"}
+videos_missing_bottom_up = (Recording * SingleCameraVideo - bottom_up)
+
+# This probably could be less convoluted but I am not sure how
+# Getting the total number of trials missing easymocap tracking 
+# and subtracting trials that have videos missing bottom up since
+# easymocap cannot be run until bridging is run for the entire trial
+trials_missing_bottom_up = (Recording & (videos_missing_bottom_up).proj()).proj()
+trials_missing_easymocap = (Recording & CalibratedRecording - EasymocapTracking)
+
 top_down = TopDownPerson * TopDownMethodLookup & {"top_down_method_name": "Bridging_bml_movi_87"} & {"tracking_method": tracking_method}
 easymocap_bboxes = PersonBbox() & {'tracking_method': tracking_method}
 missing = (MultiCameraRecording & Recording - CalibratedRecording).proj()
@@ -20,9 +29,9 @@ def get_stats(filter):
 
     stats = {
         "Number of recordings": Recording & filter,
-        "Number of videos missing bottom up": (Recording * SingleCameraVideo - bottom_up) & filter,
+        "Number of videos missing bottom up": videos_missing_bottom_up & filter,
         "Number missing calibration": missing & filter,
-        "Calibrated awaiting initial reconstruction": (Recording & CalibratedRecording - EasymocapTracking) & filter,
+        "Calibrated awaiting initial reconstruction": (trials_missing_easymocap - trials_missing_bottom_up) & filter,
         "Empty tracks": (Recording & (CalibratedRecording * EasymocapTracking & 'num_tracks=0') & filter),
         "Easymocap awaiting EasymocapSmpl": (Recording & CalibratedRecording * EasymocapTracking) & filter - EasymocapSmpl,
         "Reconstructed awaiting annotation": (Recording & CalibratedRecording * EasymocapSmpl) & filter - (SingleCameraVideo * easymocap_bboxes),
