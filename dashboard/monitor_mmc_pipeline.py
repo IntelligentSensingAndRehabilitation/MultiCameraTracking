@@ -1,7 +1,7 @@
 import streamlit as st
 import datajoint as dj
 
-# Bring up a prompt to authenticate the user (using their datajoint creadentials)
+# Bring up a prompt to authenticate the user (using their datajoint credentials)
 # Check if user is authenticated
 if 'authenticated' not in st.session_state:
     st.session_state.authenticated = False
