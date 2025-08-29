@@ -6,10 +6,6 @@ from pose_pipeline import (
     TopDownMethodLookup,
     TrackingBboxMethodLookup,
     TopDownPerson,
-    HandBboxMethod,
-    HandBbox,
-    HandPoseEstimationMethod,
-    HandPoseEstimation,
 )
 from ..datajoint.multi_camera_dj import (
     SingleCameraVideo,
@@ -74,14 +70,6 @@ def reconstruction_pipeline(
                     top_down_method_name=top_down_method_name,
                     reserve_jobs=reserve_jobs,
                 )
-            if top_down_method_name in ["Bridging_bml_movi_87"]:    
-                if with_hands:
-                    v['detection_method'] = 3
-                    HandBboxMethod.insert1(v, skip_duplicates=True, ignore_extra_fields=True)
-                    HandBbox.populate(v, reserve_jobs=reserve_jobs)
-                    v['estimation_method'] = 0
-                    HandPoseEstimationMethod.insert1(v, skip_duplicates=True, ignore_extra_fields=True)
-                    HandPoseEstimation.populate(v, reserve_jobs=reserve_jobs)
 
         k["reconstruction_method"] = reconstruction_method
         k["top_down_method"] = top_down_method

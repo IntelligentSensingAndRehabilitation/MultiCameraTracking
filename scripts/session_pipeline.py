@@ -108,7 +108,7 @@ def postannotation_session_pipeline(
         tracking_method_name (str, optional): name of the tracking method. Defaults to "Easymocap".
         top_down_method_name (str, optional): name of the top down method. Defaults to "Bridging_bml_movi_87".
         reconstruction_method_name (str, optional): name of the reconstruction method. Defaults to "Implicit Optimization KP Conf, MaxHuber=10".
-        with_hands (bool, optional): whether to include hand keypoints in the reconstruction. Defaults to False.
+        hand_estimation (bool, optional): whether to include hand keypoints in the reconstruction. Defaults to False.
     """
 
     filt = PersonKeypointReconstructionMethodLookup * TopDownMethodLookup & {
@@ -162,8 +162,6 @@ if __name__ == "__main__":
     if args.hand_estimation:
         post_annotation_args["hand_estimation"] = args.hand_estimation
     
-    if args.with_hands:
-        post_annotation_args["with_hands"] = args.with_hands
     # create a filter for the recording table based on if participant_id and/or session_date is set
     filters = []
     session_filters = []
