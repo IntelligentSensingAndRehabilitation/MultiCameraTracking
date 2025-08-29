@@ -98,11 +98,7 @@ def postannotation_session_pipeline(
     tracking_method_name: str = "Easymocap",
     top_down_method_name: str = "Bridging_bml_movi_87",
     reconstruction_method_name: str = "Robust Triangulation",
-<<<<<<< Updated upstream
-    with_hands: bool = False,
-=======
     hand_estimation: bool = False,
->>>>>>> Stashed changes
 ):
     """
     Run the person reconstruction pipeline on the set of recordings
@@ -129,11 +125,7 @@ def postannotation_session_pipeline(
         top_down_method_name=top_down_method_name,
         reconstruction_method_name=reconstruction_method_name,
         reserve_jobs=True,
-<<<<<<< Updated upstream
-        with_hands=with_hands
-=======
         hand_estimation=hand_estimation,
->>>>>>> Stashed changes
     )
 
 
@@ -148,11 +140,7 @@ if __name__ == "__main__":
     parser.add_argument("--top_down_method_name", type=str, default="Bridging_bml_movi_87", help="Top down method name")
     parser.add_argument("--reconstruction_method_name", type=str, default="Robust Triangulation", help="Reconstruction method name")
     parser.add_argument("--tracking_method_name", type=str, default="Easymocap", help="Tracking method name")
-<<<<<<< Updated upstream
-    parser.add_argument("--with_hands", action="store_true", help="Run hand keypoint pipeline")
-=======
     parser.add_argument("--hand_estimation", action="store_true", help="Run hand estimation")
->>>>>>> Stashed changes
     args = parser.parse_args()
 
     post_annotation_args = {}

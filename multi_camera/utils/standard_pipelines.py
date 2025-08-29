@@ -25,11 +25,7 @@ def reconstruction_pipeline(
     tracking_method_name: str = "EasyMocap",
     reconstruction_method_name: str = "Robust Triangulation",
     reserve_jobs: bool = True,
-<<<<<<< Updated upstream
-    with_hands: bool = False,
-=======
     hand_estimation: bool = False,
->>>>>>> Stashed changes
 ):
     from pose_pipeline.utils import standard_pipelines as pose_pipelines
 
@@ -68,7 +64,7 @@ def reconstruction_pipeline(
 
             if hand_estimation:
                 if (TopDownPerson & v & 'top_down_method = 12'):
-                        # Hand keypoints requires Bridging keypoints to be populated first
+                    # Hand keypoints requires Bridging keypoints to be populated first
                     pose_pipelines.hand_estimation_pipeline([v], detection_method_name="MoviTopDown",
                                                                 estimation_method_name="RTMPoseHand5", reserve_jobs=reserve_jobs)
             else:
