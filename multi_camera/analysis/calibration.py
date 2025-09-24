@@ -1295,3 +1295,104 @@ def triangulate_from_calibration_points(cal_points, cgroup, min_cameras=2):
         per_frame_p3ds[frame_idx] = np.array(p3ds)
         per_frame_ids[frame_idx] = np.array(ids)
     return per_frame_p3ds, per_frame_ids
+
+def plot_cal(camera_params):
+    import cv2
+    from matplotlib import pyplot as plt
+
+    tvec = camera_params["tvec"]
+    rvec = camera_params["rvec"]
+
+    pixel_size_micron = 3.45
+    pixels_per_mm = 1000 / pixel_size_micron
+
+    # Removed display function calls to prevent error
+    # Assuming camera_params['mtx'] and camera_params['dist'] are well-defined
+
+    # Convert rotation vectors to rotation matrices
+    rmats = [cv2.Rodrigues(np.array(r[None, :]))[0].T for r in rvec]
+
+    pos = np.array([-R.dot(t) for R, t in zip(rmats, tvec)])
+
+    drange = np.max(np.abs(pos)) * 1.1
+
+    fig = plt.figure(figsize=(9, 4))
+
+    ax = fig.add_subplot(121, projection="3d")
+    ax.scatter(pos[:, 0], pos[:, 1], pos[:, 2], c="r", marker="o")
+
+    ax.set_xlim(-drange, drange)
+    ax.set_ylim(-drange, drange)
+    ax.set_zlim(-drange, drange)
+
+    # 3D orientation visualization
+    for i, (R, t) in enumerate(zip(rmats, pos)):
+        length = drange / 5.0
+        x_axis = np.array([length, 0, 0])
+        y_axis = np.array([0, length, 0])
+        z_axis = np.array([0, 0, length])
+        x_axis = R.dot(x_axis) + t
+        y_axis = R.dot(y_axis) + t
+        z_axis = R.dot(z_axis) + t
+        ax.quiver(
+            t[0],
+            t[1],
+            t[2],
+            x_axis[0] - t[0],
+            x_axis[1] - t[1],
+            x_axis[2] - t[2],
+            color="r",
+            arrow_length_ratio=0.5,
+        )
+        ax.quiver(
+            t[0],
+            t[1],
+            t[2],
+            y_axis[0] - t[0],
+            y_axis[1] - t[1],
+            y_axis[2] - t[2],
+            color="g",
+            arrow_length_ratio=0.1,
+        )
+        ax.quiver(
+            t[0],
+            t[1],
+            t[2],
+            z_axis[0] - t[0],
+            z_axis[1] - t[1],
+            z_axis[2] - t[2],
+            color="b",
+            arrow_length_ratio=0.1,
+        )
+
+    ax = fig.add_subplot(122)
+    ax.scatter(pos[:, 0], pos[:, 1], c="r", marker="o")
+    ax.set_xlim(-drange, drange)
+    ax.set_ylim(-drange, drange)
+
+    # 2D orientation visualization
+    for i, (R, t) in enumerate(zip(rmats, pos)):
+        length = drange / 10.0
+        x_axis = np.array([length, 0, 0])
+        y_axis = np.array([0, 0, length])
+        x_axis = R.dot(x_axis) + t
+        y_axis = R.dot(y_axis) + t
+        # ax.quiver(t[0], t[1], x_axis[0]-t[0], x_axis[1]-t[1], color='r', angles='xy', scale_units='xy', scale=0.5, headlength=4, headwidth=4)
+        ax.quiver(
+            t[0],
+            t[1],
+            y_axis[0] - t[0],
+            y_axis[1] - t[1],
+            color="g",
+            angles="xy",
+            scale_units="xy",
+            scale=0.5,
+            headlength=4,
+            headwidth=4,
+        )
+
+    # Display numbers by the cameras
+    for i in range(pos.shape[0]):
+        ax.text(pos[i, 0] + 0.2, pos[i, 1] + 0.2, str(i), color="k")
+
+    plt.show()
