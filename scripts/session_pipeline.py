@@ -98,6 +98,7 @@ def postannotation_session_pipeline(
     tracking_method_name: str = "Easymocap",
     top_down_method_name: str = "Bridging_bml_movi_87",
     reconstruction_method_name: str = "Robust Triangulation",
+    hand_estimation: bool = False,
 ):
     """
     Run the person reconstruction pipeline on the set of recordings
@@ -107,6 +108,7 @@ def postannotation_session_pipeline(
         tracking_method_name (str, optional): name of the tracking method. Defaults to "Easymocap".
         top_down_method_name (str, optional): name of the top down method. Defaults to "Bridging_bml_movi_87".
         reconstruction_method_name (str, optional): name of the reconstruction method. Defaults to "Implicit Optimization KP Conf, MaxHuber=10".
+        hand_estimation (bool, optional): whether to include hand keypoints in the reconstruction. Defaults to False.
     """
 
     filt = PersonKeypointReconstructionMethodLookup * TopDownMethodLookup & {
@@ -123,6 +125,7 @@ def postannotation_session_pipeline(
         top_down_method_name=top_down_method_name,
         reconstruction_method_name=reconstruction_method_name,
         reserve_jobs=True,
+        hand_estimation=hand_estimation,
     )
 
 
@@ -137,6 +140,7 @@ if __name__ == "__main__":
     parser.add_argument("--top_down_method_name", type=str, default="Bridging_bml_movi_87", help="Top down method name")
     parser.add_argument("--reconstruction_method_name", type=str, default="Robust Triangulation", help="Reconstruction method name")
     parser.add_argument("--tracking_method_name", type=str, default="Easymocap", help="Tracking method name")
+    parser.add_argument("--hand_estimation", action="store_true", help="Run hand estimation")
     args = parser.parse_args()
 
     post_annotation_args = {}
@@ -154,6 +158,9 @@ if __name__ == "__main__":
         tracking = len(TrackingBboxMethodLookup & {"tracking_method_name": args.tracking_method_name})
         assert tracking == 1, f"{tracking} matching records found in TrackingBboxMethodLookup for: {args.tracking_method_name}"
         post_annotation_args["tracking_method_name"] = args.tracking_method_name
+
+    if args.hand_estimation:
+        post_annotation_args["hand_estimation"] = args.hand_estimation
     
     # create a filter for the recording table based on if participant_id and/or session_date is set
     filters = []
