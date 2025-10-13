@@ -69,6 +69,7 @@ class PersonKeypointReconstructionMethodLookup(dj.Lookup):
         {"reconstruction_method": 10, "reconstruction_method_name": r"Implicit Optimization $\\gamma=0.3$"},
         {"reconstruction_method": 11, "reconstruction_method_name": "Implicit Optimization, MaxHuber=10"},
         {"reconstruction_method": 12, "reconstruction_method_name": r"Implicit Optimization $\\sigma=50$"},
+        {"reconstruction_method": 13, "reconstruction_method_name": "ImplicitOptKPConf,MaxHuber=10,skel_weight=0.05"},
     ]
 
 
@@ -281,6 +282,22 @@ class PersonKeypointReconstruction(dj.Computed):
                 return_weights=True,
                 delta_weight=0.1,
                 skeleton_weight=0.1,
+                skeleton=skeleton,
+                huber_max=10,
+                robust_camera_weights=False,
+                max_iters=50000,
+            )
+
+        elif reconstruction_method_name == "ImplicitOptKPConf,MaxHuber=10,skel_weight=0.05":
+            from ..analysis.optimize_reconstruction import optimize_trajectory
+
+            points3d, camera_weights = optimize_trajectory(
+                points2d,
+                camera_calibration,
+                "implicit",
+                return_weights=True,
+                delta_weight=0.1,
+                skeleton_weight=0.05,
                 skeleton=skeleton,
                 huber_max=10,
                 robust_camera_weights=False,
