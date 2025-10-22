@@ -72,6 +72,9 @@ def preannotation_session_pipeline(keys: List[Dict] = None, bottom_up: bool = Tr
 
     """
 
+    print("populating video info")
+    VideoInfo.populate(SingleCameraVideo * MultiCameraRecording & keys, reserve_jobs=True)
+
     if keys is None:
         keys = (SingleCameraVideo & Recording - EasymocapSmpl).fetch("KEY")
         print("Computing initial reconstruction for {} videos".format(len(keys)))
@@ -83,9 +86,6 @@ def preannotation_session_pipeline(keys: List[Dict] = None, bottom_up: bool = Tr
             bottom_up_pipeline(keys, bottom_up_method_name="OpenPose_HR", reserve_jobs=True)
 
     # now run easymocap
-    print("populating video info")
-    VideoInfo.populate(SingleCameraVideo * MultiCameraRecording & keys, reserve_jobs=True)
-
     if easy_mocap:
         print("populating easymocaptracking")
         EasymocapTracking.populate(MultiCameraRecording * CalibratedRecording & keys, reserve_jobs=True, suppress_errors=True)
