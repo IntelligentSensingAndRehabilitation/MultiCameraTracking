@@ -514,8 +514,8 @@ async def get_camera_status() -> List[CameraStatus]:
     return camera_status
 
 
-@api_router.websocket("/ws/{client_id}")
-async def websocket_endpoint(websocket: WebSocket, client_id: int):
+@api_router.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
     """This websocket endpoint is used to send the recording status to the client"""
 
     state: GlobalState = get_global_state()
