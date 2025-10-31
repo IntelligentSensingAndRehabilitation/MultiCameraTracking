@@ -38,7 +38,6 @@ def get_stats(filter):
         "Reconstructed awaiting annotation": (Recording & CalibratedRecording * EasymocapSmpl) & filter - (SingleCameraVideo * easymocap_bboxes),
         "Annotated videos missing top down": Recording * SingleCameraVideo * easymocap_bboxes - top_down & filter,
         "Annotated without reconstruction": (Recording & CalibratedRecording & (SingleCameraVideo * easymocap_bboxes) - PersonKeypointReconstruction) & filter,
-        "Sessions missing kinematic reconstruction method 137": (SessionCalibration.Grouping & (Recording * filter)) - KinematicReconstruction & {"kinematic_reconstruction_settings_num": 137},
     }
 
     return stats
@@ -46,6 +45,46 @@ def get_stats(filter):
 def get_project_stats_counts(project):
     filter = MultiCameraRecording & {'video_project': project}
     stats = get_stats(filter)
+    counts = {k: len(v) for k, v in stats.items()}
+    return {'Project': project, **counts}
+
+
+def get_reconstruction_stats(filter):
+    """
+    Get reconstruction statistics at the session level.
+    Returns stats for both kinematic and probabilistic reconstruction methods.
+    """
+    from body_models.datajoint.kinematic_dj import KinematicReconstruction
+    from body_models.datajoint.probabilistic_dj import ProbabilisticReconstruction
+
+    # Kinematic reconstruction methods to track
+    kinematic_methods = [137, 140, 190]
+
+    # Probabilistic reconstruction methods to track
+    probabilistic_methods = [75, 77]
+
+    stats = {}
+
+    # Get all sessions for this filter
+    sessions_query = SessionCalibration.Grouping & (Recording * filter)
+
+    # Track kinematic reconstructions
+    for method_num in kinematic_methods:
+        missing = sessions_query - (KinematicReconstruction & {"kinematic_reconstruction_settings_num": method_num})
+        stats[f"Kinematic {method_num} - Missing"] = missing
+
+    # Track probabilistic reconstructions
+    for method_num in probabilistic_methods:
+        missing = sessions_query - (ProbabilisticReconstruction & {"probabilistic_reconstruction_settings_num": method_num})
+        stats[f"Probabilistic {method_num} - Missing"] = missing
+
+    return stats
+
+
+def get_project_reconstruction_stats_counts(project):
+    """Get reconstruction statistics counts for a given project."""
+    filter = MultiCameraRecording & {'video_project': project}
+    stats = get_reconstruction_stats(filter)
     counts = {k: len(v) for k, v in stats.items()}
     return {'Project': project, **counts}
 
