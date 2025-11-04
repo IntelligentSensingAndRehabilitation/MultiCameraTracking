@@ -18,10 +18,6 @@ from multi_camera.datajoint.easymocap import EasymocapTracking, EasymocapSmpl
 from multi_camera.utils.standard_pipelines import reconstruction_pipeline
 import argparse
 
-pose_pipeline.env.pytorch_memory_limit()
-pose_pipeline.env.tensorflow_memory_limit()
-pose_pipeline.env.jax_memory_limit()
-
 def assign_calibration():
     # find the calibration that is closest in time to each recording that also has a minimum
     # threshold. note that this will possibly allow different calibrations within a session,
@@ -71,6 +67,12 @@ def preannotation_session_pipeline(keys: List[Dict] = None, bottom_up: bool = Tr
         easy_mocap (bool, optional): whether to run the EasyMocap pipeline. Defaults to False.
 
     """
+    
+    # Configure GPU memory limits only when GPU-intensive operations are needed
+    if bottom_up:
+        pose_pipeline.env.pytorch_memory_limit()
+        pose_pipeline.env.tensorflow_memory_limit()
+        pose_pipeline.env.jax_memory_limit()
 
     print("populating video info")
     VideoInfo.populate(SingleCameraVideo * MultiCameraRecording & keys, reserve_jobs=True)
@@ -110,6 +112,11 @@ def postannotation_session_pipeline(
         reconstruction_method_name (str, optional): name of the reconstruction method. Defaults to "Implicit Optimization KP Conf, MaxHuber=10".
         hand_estimation (bool, optional): whether to include hand keypoints in the reconstruction. Defaults to False.
     """
+    
+    # Configure GPU memory limits for reconstruction pipeline
+    pose_pipeline.env.pytorch_memory_limit()
+    pose_pipeline.env.tensorflow_memory_limit()
+    pose_pipeline.env.jax_memory_limit()
 
     filt = PersonKeypointReconstructionMethodLookup * TopDownMethodLookup & {
         "top_down_method_name": top_down_method_name,
