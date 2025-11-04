@@ -16,7 +16,7 @@
 RED='\033[0;31m'
 YELLOW='\033[1;33m'
 GREEN='\033[0;32m'
-BLUE='\033[0;34m'
+CYAN='\033[0;36m'  # Brighter than blue for better visibility
 NC='\033[0m' # No Color
 BOLD='\033[1m'
 
@@ -42,7 +42,7 @@ print_section() {
     local section_name="$1"
     echo "" | tee -a "${LOG_FILE}"
     echo "================================================================================" | tee -a "${LOG_FILE}"
-    echo -e "${BOLD}${BLUE}${section_name}${NC}" | tee -a "${LOG_FILE}"
+    echo -e "${BOLD}${CYAN}${section_name}${NC}" | tee -a "${LOG_FILE}"
     echo "================================================================================" | tee -a "${LOG_FILE}"
     echo "" | tee -a "${LOG_FILE}"
 }
@@ -51,14 +51,14 @@ print_section() {
 print_error() {
     local message="$1"
     echo -e "${RED}[ERROR]${NC} ${message}" | tee -a "${LOG_FILE}"
-    ((ERROR_COUNT++))
+    ERROR_COUNT=$((ERROR_COUNT + 1))
 }
 
 # Print warning message
 print_warning() {
     local message="$1"
     echo -e "${YELLOW}[WARNING]${NC} ${message}" | tee -a "${LOG_FILE}"
-    ((WARNING_COUNT++))
+    WARNING_COUNT=$((WARNING_COUNT + 1))
 }
 
 # Print success message
@@ -96,24 +96,32 @@ run_command() {
 collect_system_info() {
     print_section "1. SYSTEM INFORMATION"
 
-    run_command "OS Version" "cat /etc/os-release"
-    run_command "Kernel Version" "uname -a"
-    run_command "Timestamp" "date"
-    run_command "Uptime and Load Average" "uptime"
-    run_command "CPU Info" "lscpu | grep -E 'Model name|CPU\(s\)|Thread'"
-    run_command "Memory Usage" "free -h"
-    run_command "Disk Space" "df -h"
+    # Get Ubuntu version
+    print_info "OS Version:"
+    grep "PRETTY_NAME\|VERSION_ID" /etc/os-release | tee -a "${LOG_FILE}"
 
-    # Check disk space on data volume if accessible
+    # Get kernel version
+    print_info ""
+    print_info "Kernel Version:"
+    uname -r | tee -a "${LOG_FILE}"
+
+    print_info ""
+    run_command "Current Timestamp" "date"
+
+    # Check disk space on data volume only
+    print_info ""
     if [ -n "${DATA_VOLUME}" ] && [ -d "${DATA_VOLUME}" ]; then
-        local disk_avail=$(df -h "${DATA_VOLUME}" | awk 'NR==2 {print $4}')
-        local disk_avail_gb=$(df -BG "${DATA_VOLUME}" 2>/dev/null | awk 'NR==2 {print $4}' | sed 's/G//')
+        print_info "Disk space for recording directory (${DATA_VOLUME}):"
+        df -h "${DATA_VOLUME}" | tee -a "${LOG_FILE}"
 
+        local disk_avail_gb=$(df -BG "${DATA_VOLUME}" 2>/dev/null | awk 'NR==2 {print $4}' | sed 's/G//')
         if [ -n "${disk_avail_gb}" ] && [ "${disk_avail_gb}" -lt 10 ]; then
-            print_warning "Low disk space on ${DATA_VOLUME}: ${disk_avail} available"
-        elif [ -n "${disk_avail}" ]; then
-            print_success "Disk space on ${DATA_VOLUME}: ${disk_avail} available"
+            print_warning "Low disk space: less than 10GB available"
+        else
+            print_success "Sufficient disk space available"
         fi
+    else
+        print_warning "DATA_VOLUME not set or directory does not exist"
     fi
 }
 
@@ -123,6 +131,7 @@ collect_env_config() {
     # Check for .env file
     if [ -f ".env" ]; then
         print_success ".env file found"
+        print_info ""
         print_info "Contents of .env:"
         cat .env | tee -a "${LOG_FILE}"
         echo "" | tee -a "${LOG_FILE}"
@@ -130,12 +139,39 @@ collect_env_config() {
         # Copy .env to temp directory
         cp .env "${TEMP_DIR}/.env"
 
-        # Source the .env file to get variables
-        set -a
-        source .env
-        set +a
+        # Load environment variables using a safer method for /bin/sh compatibility
+        while IFS='=' read -r key value; do
+            # Skip comments and empty lines
+            case "$key" in
+                ''|\#*) continue ;;
+            esac
+            # Remove any quotes from value
+            value=$(echo "$value" | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//")
+            # Export the variable
+            eval "export $key='$value'"
+        done < .env
 
-        export NETWORK_INTERFACE DATA_VOLUME CAMERA_CONFIGS
+        # Validate required variables
+        print_info "Validating environment variables:"
+
+        if [ -n "$NETWORK_INTERFACE" ]; then
+            print_success "NETWORK_INTERFACE = $NETWORK_INTERFACE"
+        else
+            print_error "NETWORK_INTERFACE not set in .env"
+        fi
+
+        if [ -n "$DATA_VOLUME" ]; then
+            print_success "DATA_VOLUME = $DATA_VOLUME"
+        else
+            print_error "DATA_VOLUME not set in .env"
+        fi
+
+        if [ -n "$CAMERA_CONFIGS" ]; then
+            print_success "CAMERA_CONFIGS = $CAMERA_CONFIGS"
+        else
+            print_error "CAMERA_CONFIGS not set in .env"
+        fi
+
     else
         print_error ".env file not found in current directory"
         print_info "Current directory: $(pwd)"
@@ -147,64 +183,65 @@ collect_env_config() {
 collect_network_info() {
     print_section "3. NETWORK CONFIGURATION"
 
+    # NETWORK_INTERFACE is already validated in section 2
     if [ -z "${NETWORK_INTERFACE}" ]; then
-        print_error "NETWORK_INTERFACE not set in .env file"
-        print_info "Showing all network interfaces:"
-        run_command "All Network Interfaces" "ip a"
+        print_error "NETWORK_INTERFACE not available (should have been set in section 2)"
+        return 1
+    fi
+
+    print_info "Checking interface: ${NETWORK_INTERFACE}"
+    print_info ""
+
+    # Check if interface exists
+    if ! ip link show "${NETWORK_INTERFACE}" >/dev/null 2>&1; then
+        print_error "Interface ${NETWORK_INTERFACE} does not exist or is not connected"
+        print_info ""
+        print_info "Available interfaces:"
+        ip link show | grep -E '^[0-9]+:' | awk '{print $2}' | sed 's/:$//' | tee -a "${LOG_FILE}"
+        return 1
+    fi
+
+    print_success "Interface ${NETWORK_INTERFACE} exists"
+
+    # Get interface details
+    print_info ""
+    ip a show "${NETWORK_INTERFACE}" | tee -a "${LOG_FILE}"
+
+    # Check MTU
+    print_info ""
+    local mtu=$(ip link show "${NETWORK_INTERFACE}" | grep -oP 'mtu \K\d+')
+    if [ "${mtu}" = "9000" ]; then
+        print_success "MTU is set to 9000 (jumbo frames enabled)"
     else
-        print_success "NETWORK_INTERFACE set to: ${NETWORK_INTERFACE}"
+        print_error "MTU is ${mtu}, should be 9000 for optimal performance"
+        print_info "Fix with: sudo sh set_mtu.sh"
+    fi
 
-        # Check if interface exists
-        if ip link show "${NETWORK_INTERFACE}" >/dev/null 2>&1; then
-            print_success "Interface ${NETWORK_INTERFACE} exists"
+    # Check if interface is up
+    if ip link show "${NETWORK_INTERFACE}" | grep -q "state UP"; then
+        print_success "Interface ${NETWORK_INTERFACE} is UP"
+    else
+        print_error "Interface ${NETWORK_INTERFACE} is DOWN"
+    fi
 
-            # Get interface details
-            run_command "Interface ${NETWORK_INTERFACE} Details" "ip a show ${NETWORK_INTERFACE}"
-
-            # Check MTU
-            local mtu=$(ip link show "${NETWORK_INTERFACE}" | grep -oP 'mtu \K\d+')
-            if [ "${mtu}" = "9000" ]; then
-                print_success "MTU is set to 9000 (jumbo frames enabled)"
-            else
-                print_error "MTU is ${mtu}, should be 9000 for optimal performance"
-                print_info "Run: sudo sh set_mtu.sh"
-            fi
-
-            # Check if interface is up
-            if ip link show "${NETWORK_INTERFACE}" | grep -q "state UP"; then
-                print_success "Interface ${NETWORK_INTERFACE} is UP"
-            else
-                print_error "Interface ${NETWORK_INTERFACE} is DOWN"
-            fi
-
-            # Check IP address
-            local ip_addr=$(ip addr show "${NETWORK_INTERFACE}" | grep -oP 'inet \K[\d.]+')
-            if [ -n "${ip_addr}" ]; then
-                print_success "IP address: ${ip_addr}"
-                if [ "${ip_addr}" = "192.168.1.1" ]; then
-                    print_success "IP address matches expected DHCP server address"
-                else
-                    print_warning "IP address is ${ip_addr}, expected 192.168.1.1"
-                fi
-            else
-                print_error "No IP address assigned to ${NETWORK_INTERFACE}"
-            fi
-
+    # Check IP address
+    local ip_addr=$(ip addr show "${NETWORK_INTERFACE}" | grep -oP 'inet \K[\d.]+')
+    if [ -n "${ip_addr}" ]; then
+        if [ "${ip_addr}" = "192.168.1.1" ]; then
+            print_success "IP address is ${ip_addr} (correct for DHCP server)"
         else
-            print_error "Interface ${NETWORK_INTERFACE} does not exist or is not connected"
-            print_info "Available interfaces:"
-            ip link show | grep -E '^[0-9]+:' | tee -a "${LOG_FILE}"
+            print_warning "IP address is ${ip_addr}, expected 192.168.1.1 for camera acquisition"
         fi
+    else
+        print_error "No IP address assigned to ${NETWORK_INTERFACE}"
     fi
 
     # Check NetworkManager connection
     if command_exists nmcli; then
         print_info ""
-        run_command "NetworkManager Connections" "nmcli con show"
-
+        print_info "NetworkManager status:"
         # Check if DHCP-Server profile exists and is active
         if nmcli con show | grep -q "DHCP-Server"; then
-            print_success "DHCP-Server profile exists"
             if nmcli con show --active | grep -q "DHCP-Server"; then
                 print_success "DHCP-Server profile is ACTIVE"
             else
@@ -218,14 +255,12 @@ collect_network_info() {
 
     # Check network buffer settings
     print_info ""
-    run_command "Network Buffer Settings" "sysctl net.core.rmem_max net.core.rmem_default"
-
     local rmem_max=$(sysctl -n net.core.rmem_max 2>/dev/null)
     if [ -n "${rmem_max}" ] && [ "${rmem_max}" -ge 10000000 ]; then
         print_success "net.core.rmem_max is set to ${rmem_max} (>= 10000000)"
     else
         print_warning "net.core.rmem_max is ${rmem_max}, recommended >= 10000000"
-        print_info "This is set by set_mtu.sh script"
+        print_info "This is set by the set_mtu.sh script"
     fi
 }
 
@@ -273,40 +308,41 @@ collect_camera_info() {
         return 1
     fi
 
-    # Check if Docker image exists
-    if ! docker image inspect peabody124/mocap >/dev/null 2>&1; then
-        print_error "Docker image peabody124/mocap not found"
-        print_info "Build with: make build-mocap"
-        return 1
-    else
-        print_success "Docker image peabody124/mocap found"
-    fi
-
-    # Run camera detection using Docker
+    # Run camera detection using Docker Compose
+    # Use the 'test' service which has proper network_mode: host and volumes mounted
     print_info "Running camera detection script via Docker..."
     print_info "(This may take 10-15 seconds)"
+    print_info ""
 
-    # Create a temporary Docker Compose service for diagnostics
-    local camera_check_output=$(docker compose run --rm -T mocap python3 /Mocap/multi_camera/acquisition/diagnostics/check_active_cameras.py 2>&1)
+    # Save output to temp file to avoid command substitution issues
+    local camera_output_file="${TEMP_DIR}/camera_check.txt"
 
-    echo "${camera_check_output}" | tee -a "${LOG_FILE}"
+    # Run camera check using docker compose (similar to make test/reset)
+    docker compose run --rm test python3 /Mocap/multi_camera/acquisition/diagnostics/check_active_cameras.py > "${camera_output_file}" 2>&1
+
+    # Display and log the output
+    cat "${camera_output_file}" | tee -a "${LOG_FILE}"
+
+    print_info ""
 
     # Parse the output to check for issues
-    if echo "${camera_check_output}" | grep -q "Serial:"; then
-        local num_cameras=$(echo "${camera_check_output}" | grep -c "Serial:")
+    if grep -q "Serial:" "${camera_output_file}"; then
+        local num_cameras
+        num_cameras=$(grep -c "Serial:" "${camera_output_file}")
         print_success "Detected ${num_cameras} camera(s) on network"
 
         # Check if any are in use
-        if echo "${camera_check_output}" | grep -q "In Use"; then
+        if grep -q "In Use" "${camera_output_file}"; then
             print_warning "Some cameras are currently in use"
         fi
 
         # Check if any are available
-        if echo "${camera_check_output}" | grep -q "Available"; then
+        if grep -q "Available" "${camera_output_file}"; then
             print_success "Some cameras are available for use"
         fi
     else
         print_error "No cameras detected on network"
+        print_info ""
         print_info "Troubleshooting steps:"
         print_info "  1. Check cameras are powered (via PoE from switch)"
         print_info "  2. Look for double-blinking green LED on camera back"
@@ -407,15 +443,20 @@ check_recent_recordings() {
             print_info ""
             print_info "Analyzing JSON metadata for synchronization quality..."
 
-            # Create a simple Python script to analyze the JSON without matplotlib
-            local analysis_output=$(docker compose run --rm -T mocap python3 -c "
+            # Convert host path to container path for Docker
+            local json_file_container
+            json_file_container=$(echo "${json_file}" | sed "s|${DATA_VOLUME}|/data|")
+
+            # Save analysis to temp file
+            local json_analysis_file="${TEMP_DIR}/json_analysis.txt"
+
+            # Run Python analysis in Docker container
+            docker compose run --rm test python3 -c "
 import json
 import numpy as np
 import sys
 
-json_file = '${json_file}'
-# Convert host path to container path
-json_file = json_file.replace('${DATA_VOLUME}', '/data')
+json_file = '${json_file_container}'
 
 try:
     with open(json_file, 'r') as f:
@@ -432,27 +473,24 @@ try:
 
     if max_spread_ms > 1.0:
         print(f'WARNING: Timestamp spread exceeds 1ms threshold')
-        sys.exit(1)
     else:
         print(f'GOOD: Timestamp synchronization is within acceptable limits')
-        sys.exit(0)
 
 except FileNotFoundError:
-    print(f'Error: Could not find JSON file')
-    sys.exit(2)
+    print(f'Error: Could not find JSON file at {json_file}')
 except Exception as e:
     print(f'Error parsing JSON: {e}')
-    sys.exit(2)
-" 2>&1)
+" > "${json_analysis_file}" 2>&1
 
-            echo "${analysis_output}" | tee -a "${LOG_FILE}"
+            # Display and log the output
+            cat "${json_analysis_file}" | tee -a "${LOG_FILE}"
 
-            # Check exit status to determine if sync was good
-            if echo "${analysis_output}" | grep -q "GOOD:"; then
+            # Check if sync was good
+            if grep -q "GOOD:" "${json_analysis_file}"; then
                 print_success "Timestamp synchronization looks good"
-            elif echo "${analysis_output}" | grep -q "WARNING:"; then
+            elif grep -q "WARNING:" "${json_analysis_file}"; then
                 print_warning "Timestamp synchronization issues detected"
-            elif echo "${analysis_output}" | grep -q "Error"; then
+            elif grep -q "Error" "${json_analysis_file}"; then
                 print_warning "Could not analyze JSON file"
             fi
         else
@@ -507,13 +545,6 @@ generate_summary() {
         echo -e "${GREEN}✓${NC} DHCP server is running" | tee -a "${LOG_FILE}"
     else
         echo -e "${RED}✗${NC} DHCP server is not running" | tee -a "${LOG_FILE}"
-    fi
-
-    # Docker check
-    if docker image inspect peabody124/mocap >/dev/null 2>&1; then
-        echo -e "${GREEN}✓${NC} Docker image available" | tee -a "${LOG_FILE}"
-    else
-        echo -e "${RED}✗${NC} Docker image not found" | tee -a "${LOG_FILE}"
     fi
 
     echo "" | tee -a "${LOG_FILE}"
