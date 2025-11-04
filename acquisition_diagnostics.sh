@@ -324,12 +324,6 @@ collect_dhcp_info() {
 collect_camera_info() {
     print_section "5. CAMERA DETECTION"
 
-    # Check if Docker is available
-    if ! command_exists docker; then
-        print_error "Docker not found. Cannot check cameras."
-        return 1
-    fi
-
     # Run camera detection using Docker Compose
     # Use the 'test' service which has proper network_mode: host and volumes mounted
     print_info "Running camera detection script via Docker..."
@@ -536,7 +530,7 @@ import json
 import numpy as np
 import sys
 
-json_file = '${json_file_container}'
+json_file = '${json_file}'
 
 try:
     with open(json_file, 'r') as f:
@@ -547,6 +541,7 @@ try:
     spread = np.max(dt, axis=1) - np.min(dt, axis=1)
     max_spread_ms = np.max(spread) * 1000
 
+    print(f'Filename: {json_file}')
     print(f'Camera serials: {data[\"serials\"]}')
     print(f'Number of frames recorded: {len(timestamps)}')
     print(f'Max timestamp spread: {max_spread_ms:.3f} ms')
@@ -657,8 +652,6 @@ generate_summary() {
     print_info "Log file: ${LOG_FILE}"
     print_info "Tarball:  ${TARBALL}"
     print_info "  (contains: diagnostic log, full dmesg, full journalctl)"
-    print_info ""
-    print_info "Send the tarball to your system administrator for analysis."
 }
 
 create_tarball() {
