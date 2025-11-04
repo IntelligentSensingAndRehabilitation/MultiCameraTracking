@@ -384,7 +384,7 @@ collect_camera_info() {
             ls -lh "${CAMERA_CONFIGS}"/*.yaml 2>/dev/null
         fi
 
-        if [ ! -f "${CAMERA_CONFIGS}"/*.yaml 2>/dev/null ]; then
+        if [ -z "$(ls -A "${CAMERA_CONFIGS}"/*.yaml 2>/dev/null)" ]; then
             print_warning "No .yaml config files found in ${CAMERA_CONFIGS}"
         fi
     else
