@@ -136,8 +136,7 @@ collect_env_config() {
         cat .env | tee -a "${LOG_FILE}"
         echo "" | tee -a "${LOG_FILE}"
 
-        # Copy .env to temp directory
-        cp .env "${TEMP_DIR}/.env"
+        # Don't copy .env to temp directory (not needed in tarball)
 
         # Load environment variables using a safer method for /bin/sh compatibility
         while IFS='=' read -r key value; do
@@ -394,9 +393,6 @@ collect_camera_info() {
         if [ ! -f "${CAMERA_CONFIGS}"/*.yaml 2>/dev/null ]; then
             print_warning "No .yaml config files found in ${CAMERA_CONFIGS}"
         fi
-
-        # Copy config files to temp directory
-        cp "${CAMERA_CONFIGS}"/*.yaml "${TEMP_DIR}/" 2>/dev/null
     else
         print_warning "Camera configs directory not found: ${CAMERA_CONFIGS}"
     fi
@@ -404,6 +400,13 @@ collect_camera_info() {
 
 collect_logs() {
     print_section "6. SYSTEM LOGS"
+
+    # Save full logs to temp directory for tarball
+    print_info "Saving full system logs to tarball..."
+    dmesg 2>/dev/null > "${TEMP_DIR}/dmesg_full.log"
+    if command_exists journalctl; then
+        sudo journalctl --no-pager 2>/dev/null > "${TEMP_DIR}/journalctl_full.log"
+    fi
 
     print_info "Last 200 lines of dmesg (filtered for network/USB/camera/error):"
     dmesg 2>/dev/null | tail -200 | grep -iE 'network|eth|usb|camera|gige|flir|error|fail|warn' | tee -a "${LOG_FILE}"
@@ -653,6 +656,7 @@ generate_summary() {
     print_info "=== Output Files ==="
     print_info "Log file: ${LOG_FILE}"
     print_info "Tarball:  ${TARBALL}"
+    print_info "  (contains: diagnostic log, full dmesg, full journalctl)"
     print_info ""
     print_info "Send the tarball to your system administrator for analysis."
 }
@@ -708,7 +712,7 @@ main() {
     echo "" >> "${LOG_FILE}"
 
     # Check if running as root
-    if [ "$EUID" -ne 0 ]; then
+    if [ "$(id -u)" -ne 0 ]; then
         print_warning "Not running as root. Some checks may require sudo."
         print_info "For complete diagnostics, run with: sudo ./acquisition_diagnostics.sh"
         echo ""
