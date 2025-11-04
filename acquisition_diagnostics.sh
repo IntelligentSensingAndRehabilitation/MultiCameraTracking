@@ -4,13 +4,29 @@
 # MultiCameraTracking Acquisition Diagnostics Script
 #
 # Purpose: Collect diagnostic information for debugging acquisition issues
-# Usage: sudo ./acquisition_diagnostics.sh
+# Usage: sudo ./acquisition_diagnostics.sh [-v|--verbose]
+#        -v, --verbose: Show detailed output (DHCP leases, config files, etc.)
 # Output: Creates /tmp/acquisition_diagnostics_YYYYMMDD_HHMMSS.log
 #         and /tmp/acquisition_diagnostics_YYYYMMDD_HHMMSS.tar.gz
 #
 # This script should be run from the MultiCameraTracking repository root
 # on the Ubuntu laptop used for acquisition (HOST system, not inside container)
 ################################################################################
+
+# Parse command line arguments
+VERBOSE=false
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -v|--verbose)
+            VERBOSE=true
+            shift
+            ;;
+        *)
+            echo "Usage: $0 [-v|--verbose]"
+            exit 1
+            ;;
+    esac
+done
 
 # Colors for output
 RED='\033[0;31m'
@@ -107,22 +123,6 @@ collect_system_info() {
 
     print_info ""
     run_command "Current Timestamp" "date"
-
-    # Check disk space on data volume only
-    print_info ""
-    if [ -n "${DATA_VOLUME}" ] && [ -d "${DATA_VOLUME}" ]; then
-        print_info "Disk space for recording directory (${DATA_VOLUME}):"
-        df -h "${DATA_VOLUME}" | tee -a "${LOG_FILE}"
-
-        local disk_avail_gb=$(df -BG "${DATA_VOLUME}" 2>/dev/null | awk 'NR==2 {print $4}' | sed 's/G//')
-        if [ -n "${disk_avail_gb}" ] && [ "${disk_avail_gb}" -lt 10 ]; then
-            print_warning "Low disk space: less than 10GB available"
-        else
-            print_success "Sufficient disk space available"
-        fi
-    else
-        print_warning "DATA_VOLUME not set or directory does not exist"
-    fi
 }
 
 collect_env_config() {
@@ -170,6 +170,23 @@ collect_env_config() {
             print_success "CAMERA_CONFIGS = $CAMERA_CONFIGS"
         else
             print_error "CAMERA_CONFIGS not set in .env"
+        fi
+
+        # Check disk space on data volume
+        print_info ""
+        if [ -n "${DATA_VOLUME}" ] && [ -d "${DATA_VOLUME}" ]; then
+            print_info "Disk space for recording directory (${DATA_VOLUME}):"
+            df -h "${DATA_VOLUME}" | tee -a "${LOG_FILE}"
+
+            local disk_avail_gb
+            disk_avail_gb=$(df -BG "${DATA_VOLUME}" 2>/dev/null | awk 'NR==2 {print $4}' | sed 's/G//')
+            if [ -n "${disk_avail_gb}" ] && [ "${disk_avail_gb}" -lt 10 ]; then
+                print_warning "Low disk space: less than 10GB available"
+            else
+                print_success "Sufficient disk space available"
+            fi
+        elif [ -n "${DATA_VOLUME}" ]; then
+            print_warning "DATA_VOLUME directory does not exist: ${DATA_VOLUME}"
         fi
 
     else
@@ -289,13 +306,19 @@ collect_dhcp_info() {
         print_warning "journalctl not available"
     fi
 
-    # Check DHCP leases
-    print_info ""
+    # Check DHCP leases (verbose mode or always to log file)
+    print_info "" >> "${LOG_FILE}"
     if [ -f "/var/lib/dhcp/dhcpd.leases" ]; then
-        print_info "DHCP Leases (active camera IPs):"
-        sudo grep -E "lease|hardware ethernet|client-hostname" /var/lib/dhcp/dhcpd.leases 2>/dev/null | tail -30 | tee -a "${LOG_FILE}"
+        echo "DHCP Leases (active camera IPs):" >> "${LOG_FILE}"
+        sudo grep -E "lease|hardware ethernet|client-hostname" /var/lib/dhcp/dhcpd.leases 2>/dev/null | tail -30 >> "${LOG_FILE}"
+
+        if [ "$VERBOSE" = true ]; then
+            print_info ""
+            print_info "DHCP Leases (active camera IPs):"
+            sudo grep -E "lease|hardware ethernet|client-hostname" /var/lib/dhcp/dhcpd.leases 2>/dev/null | tail -30
+        fi
     else
-        print_warning "DHCP leases file not found at /var/lib/dhcp/dhcpd.leases"
+        echo "DHCP leases file not found at /var/lib/dhcp/dhcpd.leases" >> "${LOG_FILE}"
     fi
 }
 
@@ -318,7 +341,8 @@ collect_camera_info() {
     local camera_output_file="${TEMP_DIR}/camera_check.txt"
 
     # Run camera check using docker compose (similar to make test/reset)
-    docker compose run --rm test python3 /Mocap/multi_camera/acquisition/diagnostics/check_active_cameras.py > "${camera_output_file}" 2>&1
+    # Need to override the default command from the test service
+    docker compose run --rm --entrypoint python3 test /Mocap/multi_camera/acquisition/diagnostics/check_active_cameras.py > "${camera_output_file}" 2>&1
 
     # Display and log the output
     cat "${camera_output_file}" | tee -a "${LOG_FILE}"
@@ -356,10 +380,18 @@ collect_camera_info() {
     print_info ""
     if [ -n "${CAMERA_CONFIGS}" ] && [ -d "${CAMERA_CONFIGS}" ]; then
         print_success "Camera configs directory found: ${CAMERA_CONFIGS}"
-        print_info "Available config files:"
-        ls -lh "${CAMERA_CONFIGS}"/*.yaml 2>/dev/null | tee -a "${LOG_FILE}"
 
-        if [ $? -ne 0 ]; then
+        # Always log to file
+        echo "Available config files:" >> "${LOG_FILE}"
+        ls -lh "${CAMERA_CONFIGS}"/*.yaml 2>/dev/null >> "${LOG_FILE}"
+
+        # Show in console if verbose
+        if [ "$VERBOSE" = true ]; then
+            print_info "Available config files:"
+            ls -lh "${CAMERA_CONFIGS}"/*.yaml 2>/dev/null
+        fi
+
+        if [ ! -f "${CAMERA_CONFIGS}"/*.yaml 2>/dev/null ]; then
             print_warning "No .yaml config files found in ${CAMERA_CONFIGS}"
         fi
 
@@ -390,58 +422,103 @@ collect_logs() {
 }
 
 check_recent_recordings() {
-    print_section "7. RECENT RECORDINGS CHECK"
+    # Only show section header if verbose
+    if [ "$VERBOSE" = true ]; then
+        print_section "7. RECENT RECORDINGS CHECK"
+    else
+        echo "" >> "${LOG_FILE}"
+        echo "================================================================================" >> "${LOG_FILE}"
+        echo "7. RECENT RECORDINGS CHECK" >> "${LOG_FILE}"
+        echo "================================================================================" >> "${LOG_FILE}"
+        echo "" >> "${LOG_FILE}"
+    fi
 
     # Check data directory from .env
     if [ -z "${DATA_VOLUME}" ]; then
-        print_warning "DATA_VOLUME not set in .env"
+        echo "DATA_VOLUME not set in .env" >> "${LOG_FILE}"
         return 1
     fi
 
     if [ ! -d "${DATA_VOLUME}" ]; then
-        print_error "Data volume not accessible: ${DATA_VOLUME}"
+        echo "Data volume not accessible: ${DATA_VOLUME}" >> "${LOG_FILE}"
         return 1
     fi
 
-    print_success "Data volume found: ${DATA_VOLUME}"
+    echo "Data volume found: ${DATA_VOLUME}" >> "${LOG_FILE}"
+    if [ "$VERBOSE" = true ]; then
+        print_success "Data volume found: ${DATA_VOLUME}"
+    fi
 
     # Find most recent directory with recordings (look for directories with timestamps)
-    local recent_dir=$(find "${DATA_VOLUME}" -maxdepth 3 -type f -name "*.mp4" -printf '%T@ %h\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2)
+    local recent_dir
+    recent_dir=$(find "${DATA_VOLUME}" -maxdepth 3 -type f -name "*.mp4" -printf '%T@ %h\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2)
 
     if [ -n "${recent_dir}" ]; then
-        print_info "Most recent recording directory: ${recent_dir}"
+        echo "Most recent recording directory: ${recent_dir}" >> "${LOG_FILE}"
+        if [ "$VERBOSE" = true ]; then
+            print_info "Most recent recording directory: ${recent_dir}"
+        fi
 
-        # List video files
-        print_info ""
-        print_info "Video files in recent directory:"
-        ls -lh "${recent_dir}"/*.mp4 2>/dev/null | tee -a "${LOG_FILE}"
-        local num_videos=$(ls -1 "${recent_dir}"/*.mp4 2>/dev/null | wc -l)
+        # List video files (always to log)
+        echo "" >> "${LOG_FILE}"
+        echo "Video files in recent directory:" >> "${LOG_FILE}"
+        ls -lh "${recent_dir}"/*.mp4 2>/dev/null >> "${LOG_FILE}"
+        local num_videos
+        num_videos=$(ls -1 "${recent_dir}"/*.mp4 2>/dev/null | wc -l)
+
+        if [ "$VERBOSE" = true ]; then
+            print_info ""
+            print_info "Video files in recent directory:"
+            ls -lh "${recent_dir}"/*.mp4 2>/dev/null
+        fi
 
         if [ "${num_videos}" -gt 0 ]; then
-            print_success "Found ${num_videos} video file(s)"
+            echo "Found ${num_videos} video file(s)" >> "${LOG_FILE}"
+            if [ "$VERBOSE" = true ]; then
+                print_success "Found ${num_videos} video file(s)"
+            fi
 
             # Check file sizes - warn if any are suspiciously small
-            local small_videos=$(find "${recent_dir}" -name "*.mp4" -size -1M 2>/dev/null)
+            local small_videos
+            small_videos=$(find "${recent_dir}" -name "*.mp4" -size -1M 2>/dev/null)
             if [ -n "${small_videos}" ]; then
-                print_warning "Some video files are smaller than 1MB (may be incomplete):"
-                echo "${small_videos}" | tee -a "${LOG_FILE}"
+                echo "WARNING: Some video files are smaller than 1MB (may be incomplete):" >> "${LOG_FILE}"
+                echo "${small_videos}" >> "${LOG_FILE}"
+                if [ "$VERBOSE" = true ]; then
+                    print_warning "Some video files are smaller than 1MB (may be incomplete):"
+                    echo "${small_videos}"
+                fi
             fi
         else
-            print_warning "No video files found in recent directory"
+            echo "No video files found in recent directory" >> "${LOG_FILE}"
         fi
 
         # Check JSON files
-        print_info ""
-        print_info "Metadata files in recent directory:"
-        ls -lh "${recent_dir}"/*.json 2>/dev/null | tee -a "${LOG_FILE}"
-        local json_file=$(ls "${recent_dir}"/*.json 2>/dev/null | head -1)
+        echo "" >> "${LOG_FILE}"
+        echo "Metadata files in recent directory:" >> "${LOG_FILE}"
+        ls -lh "${recent_dir}"/*.json 2>/dev/null >> "${LOG_FILE}"
+        local json_file
+        json_file=$(ls "${recent_dir}"/*.json 2>/dev/null | head -1)
+
+        if [ "$VERBOSE" = true ]; then
+            print_info ""
+            print_info "Metadata files in recent directory:"
+            ls -lh "${recent_dir}"/*.json 2>/dev/null
+        fi
 
         if [ -n "${json_file}" ]; then
-            print_success "Found metadata JSON file: $(basename ${json_file})"
+            echo "Found metadata JSON file: $(basename ${json_file})" >> "${LOG_FILE}"
+            if [ "$VERBOSE" = true ]; then
+                print_success "Found metadata JSON file: $(basename ${json_file})"
+            fi
 
             # Analyze JSON file using Docker
-            print_info ""
-            print_info "Analyzing JSON metadata for synchronization quality..."
+            echo "" >> "${LOG_FILE}"
+            echo "Analyzing JSON metadata for synchronization quality..." >> "${LOG_FILE}"
+            if [ "$VERBOSE" = true ]; then
+                print_info ""
+                print_info "Analyzing JSON metadata for synchronization quality..."
+            fi
 
             # Convert host path to container path for Docker
             local json_file_container
@@ -450,8 +527,8 @@ check_recent_recordings() {
             # Save analysis to temp file
             local json_analysis_file="${TEMP_DIR}/json_analysis.txt"
 
-            # Run Python analysis in Docker container
-            docker compose run --rm test python3 -c "
+            # Run Python analysis in Docker container with proper entrypoint override
+            docker compose run --rm --entrypoint python3 test -c "
 import json
 import numpy as np
 import sys
@@ -482,22 +559,27 @@ except Exception as e:
     print(f'Error parsing JSON: {e}')
 " > "${json_analysis_file}" 2>&1
 
-            # Display and log the output
-            cat "${json_analysis_file}" | tee -a "${LOG_FILE}"
+            # Always log the output
+            cat "${json_analysis_file}" >> "${LOG_FILE}"
 
-            # Check if sync was good
+            # Display if verbose
+            if [ "$VERBOSE" = true ]; then
+                cat "${json_analysis_file}"
+            fi
+
+            # Check if sync was good (always show this summary)
             if grep -q "GOOD:" "${json_analysis_file}"; then
-                print_success "Timestamp synchronization looks good"
+                echo "Timestamp synchronization looks good" >> "${LOG_FILE}"
             elif grep -q "WARNING:" "${json_analysis_file}"; then
-                print_warning "Timestamp synchronization issues detected"
+                echo "WARNING: Timestamp synchronization issues detected" >> "${LOG_FILE}"
             elif grep -q "Error" "${json_analysis_file}"; then
-                print_warning "Could not analyze JSON file"
+                echo "WARNING: Could not analyze JSON file" >> "${LOG_FILE}"
             fi
         else
-            print_warning "No metadata JSON files found in recent directory"
+            echo "No metadata JSON files found in recent directory" >> "${LOG_FILE}"
         fi
     else
-        print_info "No recent recording directories found in ${DATA_VOLUME}"
+        echo "No recent recording directories found in ${DATA_VOLUME}" >> "${LOG_FILE}"
     fi
 }
 
@@ -507,14 +589,16 @@ check_hardware() {
     print_info "PCI Devices (Ethernet/Thunderbolt adapters):"
     lspci 2>/dev/null | grep -iE 'ethernet|network|thunderbolt' | tee -a "${LOG_FILE}"
 
-    print_info ""
-    print_info "USB Devices:"
-    lsusb 2>/dev/null | tee -a "${LOG_FILE}"
-
-    # Check ethernet adapter details if ethtool is available
+    # Check ethernet adapter details if ethtool is available (verbose mode or log only)
     if command_exists ethtool && [ -n "${NETWORK_INTERFACE}" ]; then
-        print_info ""
-        run_command "Ethernet Adapter Details for ${NETWORK_INTERFACE}" "sudo ethtool ${NETWORK_INTERFACE}"
+        echo "" >> "${LOG_FILE}"
+        echo "Ethernet Adapter Details for ${NETWORK_INTERFACE}:" >> "${LOG_FILE}"
+        sudo ethtool "${NETWORK_INTERFACE}" 2>&1 >> "${LOG_FILE}"
+
+        if [ "$VERBOSE" = true ]; then
+            print_info ""
+            run_command "Ethernet Adapter Details for ${NETWORK_INTERFACE}" "sudo ethtool ${NETWORK_INTERFACE}"
+        fi
     fi
 }
 
