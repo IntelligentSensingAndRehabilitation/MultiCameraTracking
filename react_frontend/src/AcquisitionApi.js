@@ -80,10 +80,7 @@ export const AcquisitionApi = (props) => {
 
     useEffectOnce(() => {
 
-
-        var client_id = Date.now()
-
-        const url = `${WS_BASE_URL}/${client_id}`;
+        const url = `${WS_BASE_URL}`;
         const socket = new WebSocket(url);
 
         console.log("Connecting to websocket..." + url)
