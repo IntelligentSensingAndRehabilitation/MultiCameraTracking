@@ -42,3 +42,6 @@ notebooks/
 results/
 
 .env
+
+# Backup configuration (environment-specific)
+backup_config.yaml

@@ -1,0 +1,40 @@
+# Backup Configuration for MultiCameraTracking
+# Copy this file to backup_config.yaml and customize for your environment
+# Add backup_config.yaml to .gitignore to keep environment-specific settings private
+
+backup:
+  # Backup destination configuration
+  destinations:
+    - name: "CottonLab Network"
+      mount_point: "/mnt/CottonLab"
+      base_path: "/mnt/CottonLab/mobile_system_data"
+      # Path structure: how to organize files at destination
+      # Available variables: {participant_id}, {session_date}
+      path_structure: "{session_date}/{participant_id}"
+      enabled: true
+      verify_mount: true
+
+  # Source configuration
+  source:
+    base_path: "/data"
+    path_structure: "{participant_id}/{session_date}"
+
+  # Filtering rules
+  filters:
+    # Only sync participants with these prefixes
+    participant_prefixes: ["m", "p", "b", "s", "TR", "TF"]
+    # Exclude files matching these patterns
+    exclude_patterns: ["*.tmp", "*.lock"]
+
+  # Rsync options
+  rsync:
+    flags: "-avzh"
+    # Additional options (uncomment if needed):
+    # bandwidth_limit: 10000  # KB/s
+    # timeout: 300  # seconds
+
+  # Verification settings
+  verification:
+    verify_after_sync: true
+    # Method: "size" (file size + count) - fast and reliable for most cases
+    verify_method: "size"
