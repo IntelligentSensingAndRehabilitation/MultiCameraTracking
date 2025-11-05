@@ -217,6 +217,41 @@ class BackupManager:
 
         return True, "Safe to delete"
 
+    def get_sessions_in_range(self, start_date: Optional[str] = None,
+                              end_date: Optional[str] = None) -> List[Tuple[str, str]]:
+        """
+        Get all participant sessions in a date range
+
+        Returns list of (participant_id, session_date) tuples
+        """
+        query = self.db.query(SessionModel)
+
+        if start_date:
+            if isinstance(start_date, str):
+                start_date_obj = datetime.strptime(start_date, "%Y%m%d").date()
+            else:
+                start_date_obj = start_date
+            query = query.filter(SessionModel.session_date >= start_date_obj)
+
+        if end_date:
+            if isinstance(end_date, str):
+                end_date_obj = datetime.strptime(end_date, "%Y%m%d").date()
+            else:
+                end_date_obj = end_date
+            query = query.filter(SessionModel.session_date <= end_date_obj)
+
+        sessions = query.order_by(SessionModel.session_date.desc()).all()
+
+        results = []
+        for session in sessions:
+            participant = self.db.query(Participant).filter(
+                Participant.id == session.participant_id
+            ).first()
+            if participant and self.config.should_sync_participant(participant.name):
+                results.append((participant.name, session.session_date.strftime("%Y%m%d")))
+
+        return results
+
     def sync_multiple_sessions(self, start_date: str, end_date: Optional[str] = None,
                                participant_filter: Optional[str] = None,
                                dry_run: bool = False) -> Dict:

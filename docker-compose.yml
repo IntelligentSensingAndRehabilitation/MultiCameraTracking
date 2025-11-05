@@ -51,3 +51,13 @@ services:
       - /etc/localtime:/etc/localtime:ro
       - ${DATAJOINT_EXTERNAL:-/mnt/datajoint_external}:/datajoint_external
     network_mode: host
+
+  backup:
+    image: peabody124/mocap
+    volumes:
+      - ${DATA_VOLUME:-/data}:/data
+      - ${BACKUP_MOUNT:-/mnt/CottonLab}:/mnt/CottonLab
+      - /etc/localtime:/etc/localtime:ro
+    working_dir: /Mocap
+    entrypoint: python
+    command: scripts/backup_sync.py
