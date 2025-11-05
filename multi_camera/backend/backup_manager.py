@@ -1,5 +1,6 @@
 import subprocess
 import yaml
+import os
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, List, Tuple
@@ -57,22 +58,65 @@ class BackupManager:
         self.config = BackupConfig(config_path)
 
     def verify_mount(self, destination_name: Optional[str] = None) -> Tuple[bool, str]:
-        """Check if backup destination is mounted"""
+        """Check if backup destination is mounted using mountpoint command"""
         dest = self.config.get_destination_config(destination_name)
         mount_point = dest['mount_point']
 
         result = subprocess.run(
             ['mountpoint', '-q', mount_point],
-            capture_output=True
+            capture_output=True,
+            timeout=5
         )
 
-        if result.returncode == 0:
-            if Path(dest['base_path']).exists():
-                return True, f"{mount_point} mounted and accessible"
-            else:
-                return False, f"{dest['base_path']} not accessible"
-        else:
-            return False, f"{mount_point} not mounted"
+        return result.returncode == 0, f"{mount_point} {'mounted' if result.returncode == 0 else 'not mounted'}"
+
+    def _path_accessible(self, path: Path, timeout: int = 2) -> bool:
+        """
+        Check if path is accessible without hanging on stale mounts.
+        Uses stat command with timeout to avoid blocking.
+        """
+        try:
+            result = subprocess.run(
+                ['timeout', str(timeout), 'stat', str(path)],
+                capture_output=True,
+                timeout=timeout + 1
+            )
+            return result.returncode == 0
+        except (subprocess.TimeoutExpired, Exception):
+            return False
+
+    def _list_directory_safe(self, path: Path, timeout: int = 10) -> List[Path]:
+        """
+        List directory contents safely without hanging on stale mounts.
+        Uses find command with timeout.
+        """
+        try:
+            result = subprocess.run(
+                ['timeout', str(timeout), 'find', str(path), '-type', 'f'],
+                capture_output=True,
+                text=True,
+                timeout=timeout + 1
+            )
+            if result.returncode == 0:
+                return [Path(line.strip()) for line in result.stdout.strip().split('\n') if line.strip()]
+            return []
+        except (subprocess.TimeoutExpired, Exception):
+            return []
+
+    def _get_file_size_safe(self, path: Path, timeout: int = 2) -> Optional[int]:
+        """Get file size safely without hanging"""
+        try:
+            result = subprocess.run(
+                ['timeout', str(timeout), 'stat', '-c', '%s', str(path)],
+                capture_output=True,
+                text=True,
+                timeout=timeout + 1
+            )
+            if result.returncode == 0:
+                return int(result.stdout.strip())
+            return None
+        except (subprocess.TimeoutExpired, Exception):
+            return None
 
     def sync_session(self, participant_id: str, session_date: str,
                      destination_name: Optional[str] = None, dry_run: bool = False) -> Dict:
@@ -91,16 +135,12 @@ class BackupManager:
         source = self.config.get_source_path(participant_id, session_date)
         dest = self.config.get_destination_path(participant_id, session_date, destination_name)
 
-        if not source.exists():
-            return {'success': False, 'error': f'Source path not found: {source}'}
+        # Check source using safe method
+        if not self._path_accessible(source):
+            return {'success': False, 'error': f'Source path not found or not accessible: {source}'}
 
-        # Check if destination base path is accessible before creating subdirectories
-        dest_config = self.config.get_destination_config(destination_name)
-        dest_base = Path(dest_config['base_path'])
-        if not dest_base.exists():
-            return {'success': False, 'error': f'Destination base path not accessible: {dest_base}. Check if network is mounted.'}
-
-        dest.mkdir(parents=True, exist_ok=True)
+        # Check destination base path using mountpoint verification (already done above)
+        # Don't try to create directories - let rsync do it
 
         rsync_flags = self.config.config['backup']['rsync']['flags'].split()
         cmd = ['rsync'] + rsync_flags + [f"{source}/", f"{dest}/"]
@@ -109,7 +149,7 @@ class BackupManager:
             cmd.append('--dry-run')
 
         start_time = datetime.now()
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
         duration = (datetime.now() - start_time).total_seconds()
 
         if result.returncode != 0:
@@ -139,57 +179,70 @@ class BackupManager:
 
         Returns verification results dict
         """
-        source = self.config.get_source_path(participant_id, session_date)
-        dest = self.config.get_destination_path(participant_id, session_date, destination_name)
+        try:
+            source = self.config.get_source_path(participant_id, session_date)
+            dest = self.config.get_destination_path(participant_id, session_date, destination_name)
 
-        # Only try to list files if paths exist
-        if source.exists():
-            source_files = list(source.rglob('*'))
-            source_files = [f for f in source_files if f.is_file()]
-        else:
-            source_files = []
+            # Use safe methods to list files without blocking on stale mounts
+            source_files = self._list_directory_safe(source, timeout=30)
+            dest_files = self._list_directory_safe(dest, timeout=30)
 
-        if dest.exists():
-            dest_files = list(dest.rglob('*'))
-            dest_files = [f for f in dest_files if f.is_file()]
-        else:
-            dest_files = []
+            file_count_match = len(source_files) == len(dest_files)
 
-        file_count_match = len(source_files) == len(dest_files)
+            # Get relative paths for comparison
+            source_names = {f.relative_to(source) for f in source_files}
+            dest_names = {f.relative_to(dest) for f in dest_files}
+            missing_files = list(source_names - dest_names)
 
-        source_names = {f.relative_to(source) for f in source_files}
-        dest_names = {f.relative_to(dest) for f in dest_files}
-        missing_files = list(source_names - dest_names)
-
-        size_match = True
-        total_size = 0
-        for src_file in source_files:
-            rel_path = src_file.relative_to(source)
-            dest_file = dest / rel_path
-            src_size = src_file.stat().st_size
-            total_size += src_size
-
-            if dest_file.exists():
-                if src_size != dest_file.stat().st_size:
+            size_match = True
+            total_size = 0
+            for src_file in source_files:
+                src_size = self._get_file_size_safe(src_file)
+                if src_size is None:
                     size_match = False
                     break
 
-        verified = file_count_match and size_match and len(missing_files) == 0
+                total_size += src_size
 
-        return {
-            'verified': verified,
-            'file_count_match': file_count_match,
-            'size_match': size_match,
-            'missing_files': [str(f) for f in missing_files],
-            'source_file_count': len(source_files),
-            'dest_file_count': len(dest_files),
-            'total_size': total_size
-        }
+                rel_path = src_file.relative_to(source)
+                dest_file = dest / rel_path
+                dest_size = self._get_file_size_safe(dest_file)
+
+                if dest_size is None or src_size != dest_size:
+                    size_match = False
+                    break
+
+            verified = file_count_match and size_match and len(missing_files) == 0
+
+            return {
+                'verified': verified,
+                'file_count_match': file_count_match,
+                'size_match': size_match,
+                'missing_files': [str(f) for f in missing_files],
+                'source_file_count': len(source_files),
+                'dest_file_count': len(dest_files),
+                'total_size': total_size
+            }
+        except Exception as e:
+            # Return failed verification on any error
+            return {
+                'verified': False,
+                'file_count_match': False,
+                'size_match': False,
+                'missing_files': [],
+                'source_file_count': 0,
+                'dest_file_count': 0,
+                'total_size': 0
+            }
 
     def backup_exists(self, participant_id: str, session_date: str) -> bool:
         """Check if backup destination has files for this session"""
-        dest = self.config.get_destination_path(participant_id, session_date)
-        return dest.exists() and any(dest.iterdir())
+        try:
+            dest = self.config.get_destination_path(participant_id, session_date)
+            # Use safe path checking that won't hang
+            return self._path_accessible(dest, timeout=5)
+        except Exception:
+            return False
 
     def check_datajoint_imported(self, participant_id: str, session_date: str) -> bool:
         """Check if session has been imported to DataJoint"""
