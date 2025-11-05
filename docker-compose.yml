@@ -58,6 +58,7 @@ services:
       - ${DATA_VOLUME:-/data}:/data
       - ${BACKUP_MOUNT:-/mnt/CottonLab}:/mnt/CottonLab
       - /etc/localtime:/etc/localtime:ro
-    working_dir: /Mocap
-    entrypoint: python
-    command: scripts/backup_sync.py
+      - ${DATAJOINT_EXTERNAL:-/mnt/datajoint_external}:/datajoint_external
+    network_mode: host
+    entrypoint: python3
+    command: /Mocap/scripts/backup_sync.py
