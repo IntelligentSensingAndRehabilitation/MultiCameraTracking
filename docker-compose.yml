@@ -59,6 +59,8 @@ services:
       - ${BACKUP_MOUNT:-/mnt/CottonLab}:/mnt/CottonLab
       - /etc/localtime:/etc/localtime:ro
       - ${DATAJOINT_EXTERNAL:-/mnt/datajoint_external}:/datajoint_external
+      - ./scripts:/Mocap/scripts
+      - ./backup_config.yaml:/Mocap/backup_config.yaml
     network_mode: host
     entrypoint: python3
     command: /Mocap/scripts/backup_sync.py

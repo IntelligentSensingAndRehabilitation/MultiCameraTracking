@@ -94,6 +94,12 @@ class BackupManager:
         if not source.exists():
             return {'success': False, 'error': f'Source path not found: {source}'}
 
+        # Check if destination base path is accessible before creating subdirectories
+        dest_config = self.config.get_destination_config(destination_name)
+        dest_base = Path(dest_config['base_path'])
+        if not dest_base.exists():
+            return {'success': False, 'error': f'Destination base path not accessible: {dest_base}. Check if network is mounted.'}
+
         dest.mkdir(parents=True, exist_ok=True)
 
         rsync_flags = self.config.config['backup']['rsync']['flags'].split()
@@ -136,11 +142,18 @@ class BackupManager:
         source = self.config.get_source_path(participant_id, session_date)
         dest = self.config.get_destination_path(participant_id, session_date, destination_name)
 
-        source_files = list(source.rglob('*'))
-        source_files = [f for f in source_files if f.is_file()]
+        # Only try to list files if paths exist
+        if source.exists():
+            source_files = list(source.rglob('*'))
+            source_files = [f for f in source_files if f.is_file()]
+        else:
+            source_files = []
 
-        dest_files = list(dest.rglob('*'))
-        dest_files = [f for f in dest_files if f.is_file()]
+        if dest.exists():
+            dest_files = list(dest.rglob('*'))
+            dest_files = [f for f in dest_files if f.is_file()]
+        else:
+            dest_files = []
 
         file_count_match = len(source_files) == len(dest_files)
 
