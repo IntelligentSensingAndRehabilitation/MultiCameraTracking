@@ -57,91 +57,29 @@ class BackupManager:
         self.db = db
         self.config = BackupConfig(config_path)
 
-    def verify_mount(self, destination_name: Optional[str] = None) -> Tuple[bool, str]:
-        """Check if backup destination is mounted using mountpoint command"""
-        dest = self.config.get_destination_config(destination_name)
-        mount_point = dest['mount_point']
-
-        result = subprocess.run(
-            ['mountpoint', '-q', mount_point],
-            capture_output=True,
-            timeout=5
-        )
-
-        return result.returncode == 0, f"{mount_point} {'mounted' if result.returncode == 0 else 'not mounted'}"
-
-    def _path_accessible(self, path: Path, timeout: int = 2) -> bool:
-        """
-        Check if path is accessible without hanging on stale mounts.
-        Uses stat command with timeout to avoid blocking.
-        """
-        try:
-            result = subprocess.run(
-                ['timeout', str(timeout), 'stat', str(path)],
-                capture_output=True,
-                timeout=timeout + 1
-            )
-            return result.returncode == 0
-        except (subprocess.TimeoutExpired, Exception):
-            return False
-
-    def _list_directory_safe(self, path: Path, timeout: int = 10) -> List[Path]:
-        """
-        List directory contents safely without hanging on stale mounts.
-        Uses find command with timeout.
-        """
-        try:
-            result = subprocess.run(
-                ['timeout', str(timeout), 'find', str(path), '-type', 'f'],
-                capture_output=True,
-                text=True,
-                timeout=timeout + 1
-            )
-            if result.returncode == 0:
-                return [Path(line.strip()) for line in result.stdout.strip().split('\n') if line.strip()]
-            return []
-        except (subprocess.TimeoutExpired, Exception):
-            return []
-
-    def _get_file_size_safe(self, path: Path, timeout: int = 2) -> Optional[int]:
-        """Get file size safely without hanging"""
-        try:
-            result = subprocess.run(
-                ['timeout', str(timeout), 'stat', '-c', '%s', str(path)],
-                capture_output=True,
-                text=True,
-                timeout=timeout + 1
-            )
-            if result.returncode == 0:
-                return int(result.stdout.strip())
-            return None
-        except (subprocess.TimeoutExpired, Exception):
-            return None
+    # Mount verification removed - now handled by shell script on host
 
     def sync_session(self, participant_id: str, session_date: str,
                      destination_name: Optional[str] = None, dry_run: bool = False) -> Dict:
         """
         Sync a single session to backup destination
 
+        Note: Mount verification is handled by the shell script before calling this.
+        This function assumes the mount is valid and accessible.
+
         Returns dict with success status, stats, and verification results
         """
-        mount_ok, mount_msg = self.verify_mount(destination_name)
-        if not mount_ok:
-            return {'success': False, 'error': mount_msg}
-
         if not self.config.should_sync_participant(participant_id):
             return {'success': False, 'error': f'Participant {participant_id} not in allowed list'}
 
         source = self.config.get_source_path(participant_id, session_date)
         dest = self.config.get_destination_path(participant_id, session_date, destination_name)
 
-        # Check source using safe method
-        if not self._path_accessible(source):
-            return {'success': False, 'error': f'Source path not found or not accessible: {source}'}
+        # Quick check that source exists (should be safe - local filesystem)
+        if not source.exists():
+            return {'success': False, 'error': f'Source path not found: {source}'}
 
-        # Check destination base path using mountpoint verification (already done above)
-        # Don't try to create directories - let rsync do it
-
+        # Don't create directories - let rsync do it
         rsync_flags = self.config.config['backup']['rsync']['flags'].split()
         cmd = ['rsync'] + rsync_flags + [f"{source}/", f"{dest}/"]
 
@@ -177,15 +115,21 @@ class BackupManager:
         """
         Verify backup completeness using file counts and sizes
 
+        Note: Shell script verifies mount before calling this.
+        Safe to use normal Path operations since mount is verified.
+
         Returns verification results dict
         """
         try:
             source = self.config.get_source_path(participant_id, session_date)
             dest = self.config.get_destination_path(participant_id, session_date, destination_name)
 
-            # Use safe methods to list files without blocking on stale mounts
-            source_files = self._list_directory_safe(source, timeout=30)
-            dest_files = self._list_directory_safe(dest, timeout=30)
+            # List all files
+            source_files = list(source.rglob('*')) if source.exists() else []
+            source_files = [f for f in source_files if f.is_file()]
+
+            dest_files = list(dest.rglob('*')) if dest.exists() else []
+            dest_files = [f for f in dest_files if f.is_file()]
 
             file_count_match = len(source_files) == len(dest_files)
 
@@ -197,18 +141,13 @@ class BackupManager:
             size_match = True
             total_size = 0
             for src_file in source_files:
-                src_size = self._get_file_size_safe(src_file)
-                if src_size is None:
-                    size_match = False
-                    break
-
+                src_size = src_file.stat().st_size
                 total_size += src_size
 
                 rel_path = src_file.relative_to(source)
                 dest_file = dest / rel_path
-                dest_size = self._get_file_size_safe(dest_file)
 
-                if dest_size is None or src_size != dest_size:
+                if not dest_file.exists() or dest_file.stat().st_size != src_size:
                     size_match = False
                     break
 
@@ -232,15 +171,19 @@ class BackupManager:
                 'missing_files': [],
                 'source_file_count': 0,
                 'dest_file_count': 0,
-                'total_size': 0
+                'total_size': 0,
+                'error': str(e)
             }
 
     def backup_exists(self, participant_id: str, session_date: str) -> bool:
-        """Check if backup destination has files for this session"""
+        """
+        Check if backup destination has files for this session
+
+        Note: Shell script should verify mount before calling this.
+        """
         try:
             dest = self.config.get_destination_path(participant_id, session_date)
-            # Use safe path checking that won't hang
-            return self._path_accessible(dest, timeout=5)
+            return dest.exists() and any(dest.iterdir())
         except Exception:
             return False
 

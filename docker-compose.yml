@@ -55,12 +55,12 @@ services:
   backup:
     image: peabody124/mocap
     volumes:
-      - ${DATA_VOLUME:-/data}:/data
-      - ${BACKUP_MOUNT:-/mnt/CottonLab}:/mnt/CottonLab
+      - ${DATA_VOLUME:-/data}:/data:ro  # Read-only access for database queries
       - /etc/localtime:/etc/localtime:ro
-      - ${DATAJOINT_EXTERNAL:-/mnt/datajoint_external}:/datajoint_external
       - ./scripts:/Mocap/scripts
-      - ./backup_config.yaml:/Mocap/backup_config.yaml
+      - ./multi_camera:/Mocap/multi_camera
     network_mode: host
     entrypoint: python3
-    command: /Mocap/scripts/backup_sync.py
+    # This service is only used for database queries
+    # All filesystem operations (rsync, verification, deletion) happen on host via shell script
+    command: /Mocap/scripts/backup_db_queries.py
