@@ -244,6 +244,15 @@ main() {
                     local source_count=$(find "$source" -type f 2>/dev/null | wc -l)
                     local dest_count=$(find "$dest" -type f 2>/dev/null | wc -l)
 
+                    # Handle empty directories
+                    source_count=${source_count:-0}
+                    dest_count=${dest_count:-0}
+
+                    if [ "$source_count" -eq 0 ]; then
+                        print_error "Source directory is empty - nothing to sync!"
+                        exit 1
+                    fi
+
                     if [ "$source_count" -eq "$dest_count" ]; then
                         print_success "Verification passed: $source_count files synced"
 
@@ -342,6 +351,8 @@ main() {
                 if [ -d "$dest" ]; then
                     local source_count=$(find "$source" -type f 2>/dev/null | wc -l)
                     local dest_count=$(find "$dest" -type f 2>/dev/null | wc -l)
+                    source_count=${source_count:-0}
+                    dest_count=${dest_count:-0}
                     if [ "$source_count" -eq "$dest_count" ] && [ "$source_count" -gt 0 ]; then
                         print_info "  Already backed up and verified, skipping"
                         skipped=$((skipped + 1))
@@ -359,7 +370,9 @@ main() {
                     if [ "$dry_run" = "false" ]; then
                         local source_count=$(find "$source" -type f 2>/dev/null | wc -l)
                         local dest_count=$(find "$dest" -type f 2>/dev/null | wc -l)
-                        if [ "$source_count" -eq "$dest_count" ]; then
+                        source_count=${source_count:-0}
+                        dest_count=${dest_count:-0}
+                        if [ "$source_count" -eq "$dest_count" ] && [ "$source_count" -gt 0 ]; then
                             print_info "  Verified: $source_count files"
                         else
                             print_error "  Warning: file count mismatch after sync"
@@ -409,8 +422,12 @@ main() {
             local source=$(get_source_path "$participant_id" "$session_date")
             local dest=$(get_dest_path "$participant_id" "$session_date")
 
+            local source_count=0
+            local dest_count=0
+
             if [ -d "$source" ]; then
-                local source_count=$(find "$source" -type f | wc -l)
+                source_count=$(find "$source" -type f 2>/dev/null | wc -l)
+                source_count=${source_count:-0}
                 local source_size=$(du -sh "$source" | cut -f1)
                 print_success "Source exists: $source ($source_count files, $source_size)"
             else
@@ -418,12 +435,13 @@ main() {
             fi
 
             if verify_mount >/dev/null 2>&1 && [ -d "$dest" ]; then
-                local dest_count=$(find "$dest" -type f | wc -l)
+                dest_count=$(find "$dest" -type f 2>/dev/null | wc -l)
+                dest_count=${dest_count:-0}
                 local dest_size=$(du -sh "$dest" | cut -f1)
                 print_success "Backup exists: $dest ($dest_count files, $dest_size)"
 
                 # Check if counts match
-                if [ "$source_count" -eq "$dest_count" ]; then
+                if [ "$source_count" -eq "$dest_count" ] && [ "$source_count" -gt 0 ]; then
                     print_success "File counts match"
                 else
                     print_error "File count mismatch: source=$source_count, backup=$dest_count"
@@ -466,7 +484,9 @@ main() {
                     if [ -d "$source" ]; then
                         local source_count=$(find "$source" -type f 2>/dev/null | wc -l)
                         local dest_count=$(find "$dest" -type f 2>/dev/null | wc -l)
-                        [ "$source_count" -eq "$dest_count" ] && verified="✓"
+                        source_count=${source_count:-0}
+                        dest_count=${dest_count:-0}
+                        [ "$source_count" -eq "$dest_count" ] && [ "$source_count" -gt 0 ] && verified="✓"
                     fi
                 fi
 
@@ -531,12 +551,19 @@ main() {
             local source_files=$(cd "$source" && find . -type f | sort)
             local dest_files=$(cd "$dest" && find . -type f | sort)
 
-            # Count files
-            local source_count=$(echo "$source_files" | wc -l)
-            local dest_count=$(echo "$dest_files" | wc -l)
+            # Count files (handle empty case)
+            local source_count=$(echo "$source_files" | grep -c . || echo "0")
+            local dest_count=$(echo "$dest_files" | grep -c . || echo "0")
 
             print_info "Source files: $source_count"
             print_info "Backup files: $dest_count"
+
+            # Check if empty
+            if [ "$source_count" -eq 0 ]; then
+                print_error "Source directory is empty!"
+                echo -e "\n${RED}${BOLD}✗ Verification FAILED${NC}"
+                exit 1
+            fi
 
             # Check file count match
             if [ "$source_count" -ne "$dest_count" ]; then
@@ -685,8 +712,15 @@ main() {
                 # Quick verification: file counts and sizes
                 local source_files=$(cd "$source" && find . -type f | sort)
                 local dest_files=$(cd "$dest" && find . -type f | sort)
-                local source_count=$(echo "$source_files" | wc -l)
-                local dest_count=$(echo "$dest_files" | wc -l)
+                local source_count=$(echo "$source_files" | grep -c . || echo "0")
+                local dest_count=$(echo "$dest_files" | grep -c . || echo "0")
+
+                # Check if empty
+                if [ "$source_count" -eq 0 ]; then
+                    print_error "Source directory is empty! Nothing to verify."
+                    echo "Cannot safely delete an empty directory."
+                    exit 1
+                fi
 
                 if [ "$source_count" -ne "$dest_count" ]; then
                     print_error "File count mismatch: source=$source_count, backup=$dest_count"
