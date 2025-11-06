@@ -507,6 +507,10 @@ main() {
                 esac
             done
 
+            # Fetch sessions first (triggers DataJoint connection)
+            local sessions=$(get_sessions_from_db "$start_date" "$end_date")
+
+            # Now print table header after connection is established
             printf "%-12s %-16s %-8s %-10s %-12s %-8s %-8s\n" "Date" "Participant" "Videos" "DJ" "Backup" "Verified" "Safe"
             echo "=========================================================================================="
 
@@ -551,7 +555,7 @@ main() {
                 printf "%-12s %-16s %-8s %-10s %-12s %-12s %-8s\n" \
                     "$session_date" "$participant_id" "$video_count" "$dj_mark" "$backup_exists" "$verified" "$safe"
 
-            done < <(get_sessions_from_db "$start_date" "$end_date")
+            done <<< "$sessions"
 
             if [ $displayed_count -eq 0 ]; then
                 echo ""
