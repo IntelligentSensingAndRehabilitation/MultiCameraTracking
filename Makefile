@@ -22,21 +22,3 @@ reset:
 
 annotate:
 	docker compose run --rm annotate
-
-backup-sync:
-	docker compose run --rm backup --session $(ARGS)
-
-backup-batch:
-	docker compose run --rm backup --start-date $(ARGS)
-
-backup-status:
-	docker compose run --rm backup --status $(ARGS)
-
-backup-status-range:
-	docker compose run --rm backup --status-range $(ARGS)
-
-backup-verify:
-	docker compose run --rm backup --verify $(ARGS)
-
-backup-delete:
-	docker compose run --rm -it backup --safe-delete $(ARGS)
