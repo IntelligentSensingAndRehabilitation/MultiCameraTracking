@@ -9,9 +9,9 @@
 #   ./backup_manager.sh batch <start_date> [end_date] [--dry-run]
 #   ./backup_manager.sh status <participant_id> <session_date>
 #   ./backup_manager.sh status <session_date>
-#   ./backup_manager.sh status-range [start_date] [end_date]
+#   ./backup_manager.sh status-range [--start-date YYYYMMDD] [--end-date YYYYMMDD]
 #   ./backup_manager.sh verify <participant_id> <session_date>
-#   ./backup_manager.sh delete <participant_id> <session_date> [--force]
+#   ./backup_manager.sh delete <participant_id> <session_date> [--dry-run]
 #
 # This script should be run from the MultiCameraTracking repository root
 # on the HOST system (not inside container)
@@ -204,19 +204,24 @@ main() {
         echo "  $0 verify <participant_id> <session_date>"
         echo "      Verify backup integrity for a session"
         echo ""
-        echo "  $0 delete <participant_id> <session_date> [--force]"
+        echo "  $0 delete <participant_id> <session_date> [--dry-run]"
         echo "      Safely delete local session after verification"
+        echo "      --dry-run: Check safety conditions without deleting (optional)"
         echo ""
         echo "Examples:"
         echo "  $0 sync p001 20250104"
+        echo "  $0 sync p001 20250104 --dry-run"
         echo "  $0 batch 20250101 20250131"
+        echo "  $0 batch 20250101 20250131 --dry-run"
         echo "  $0 status p001 20250104"
         echo "  $0 status 20250104"
         echo "  $0 status-range"
         echo "  $0 status-range --start-date 20250101"
         echo "  $0 status-range --end-date 20250131"
         echo "  $0 status-range --start-date 20250101 --end-date 20250131"
+        echo "  $0 verify p001 20250104"
         echo "  $0 delete p001 20250104"
+        echo "  $0 delete p001 20250104 --dry-run"
         exit 1
     fi
 
@@ -695,17 +700,35 @@ main() {
 
         delete)
             if [ $# -lt 2 ]; then
-                print_error "Usage: $0 delete <participant_id> <session_date> [--force]"
+                print_error "Usage: $0 delete <participant_id> <session_date> [--dry-run]"
                 exit 1
             fi
 
             local participant_id="$1"
             local session_date="$2"
-            local force_delete="false"
+            local dry_run="false"
             shift 2
-            [[ "$1" == "--force" ]] && force_delete="true"
 
-            echo -e "\n${BOLD}Safety check for deleting ${participant_id}/${session_date}:${NC}\n"
+            # Parse flags
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    --dry-run)
+                        dry_run="true"
+                        shift
+                        ;;
+                    *)
+                        print_error "Unknown argument: $1"
+                        echo "Usage: delete <participant_id> <session_date> [--dry-run]"
+                        exit 1
+                        ;;
+                esac
+            done
+
+            if [ "$dry_run" = "true" ]; then
+                echo -e "\n${CYAN}${BOLD}DRY RUN MODE - No files will be deleted${NC}\n"
+            fi
+
+            echo -e "${BOLD}Safety check for deleting ${participant_id}/${session_date}:${NC}\n"
 
             local source=$(get_source_path "$participant_id" "$session_date")
             local dest=$(get_dest_path "$participant_id" "$session_date")
@@ -720,19 +743,14 @@ main() {
             # 1. Check DataJoint import status (checks both SQLite flag AND actual DataJoint tables)
             print_info "Checking DataJoint database..."
             if ! check_datajoint_imported "$participant_id" "$session_date"; then
-                if [ "$force_delete" = "false" ]; then
-                    print_error "Session not fully imported to DataJoint"
-                    echo ""
-                    echo "This means either:"
-                    echo "  - Session not marked as imported in SQLite database, OR"
-                    echo "  - Data missing from DataJoint tables (Subject, Session, Recording, MultiCameraRecording, SingleCameraVideo)"
-                    echo ""
-                    echo "Cannot safely delete without verified DataJoint data."
-                    echo "Use --force to override (NOT RECOMMENDED - may result in data loss)"
-                    exit 1
-                else
-                    print_error "Session not fully imported to DataJoint (--force used, proceeding anyway)"
-                fi
+                print_error "Session not fully imported to DataJoint"
+                echo ""
+                echo "This means either:"
+                echo "  - Session not marked as imported in SQLite database, OR"
+                echo "  - Data missing from DataJoint tables (Subject, Session, Recording, MultiCameraRecording, SingleCameraVideo)"
+                echo ""
+                echo "Cannot safely delete without verified DataJoint data."
+                exit 1
             else
                 print_success "DataJoint fully imported: ✓"
                 print_info "  - SQLite Imported flag: ✓"
@@ -748,20 +766,15 @@ main() {
             fi
 
             if [ ! -d "$dest" ]; then
-                if [ "$force_delete" = "false" ]; then
-                    print_error "Backup directory not found: $dest"
-                    echo "No backup exists. Cannot safely delete."
-                    echo "Use --force to override (NOT RECOMMENDED)"
-                    exit 1
-                else
-                    print_error "Backup not found (--force used, proceeding anyway)"
-                fi
+                print_error "Backup directory not found: $dest"
+                echo "No backup exists. Cannot safely delete."
+                exit 1
             else
                 print_success "Backup exists: $dest"
             fi
 
             # 3. Verify backup integrity (file counts + sample sizes)
-            if [ "$force_delete" = "false" ] && [ -d "$dest" ]; then
+            if [ -d "$dest" ]; then
                 print_info "Verifying backup integrity..."
 
                 # Quick verification: file counts and sizes
@@ -822,40 +835,54 @@ main() {
             echo "  Backup: $([ -d "$dest" ] && echo "✓ Exists at $dest" || echo "✗ Not found")"
             echo -e "${BOLD}════════════════════════════════════════${NC}"
 
-            # 5. Confirmation prompt
-            echo -e "\n${YELLOW}This action cannot be undone!${NC}"
-            echo -e "${YELLOW}Data will only exist in:${NC}"
-            echo -e "  1. DataJoint database tables"
-            echo -e "  2. Network backup at: $dest"
-            echo ""
-            echo -n "Type 'DELETE' (in capital letters) to confirm: "
-            read -r confirmation
+            # 5. Confirmation prompt (skip in dry-run mode)
+            if [ "$dry_run" = "false" ]; then
+                echo -e "\n${YELLOW}This action cannot be undone!${NC}"
+                echo -e "${YELLOW}Data will only exist in:${NC}"
+                echo -e "  1. DataJoint database tables"
+                echo -e "  2. Network backup at: $dest"
+                echo ""
+                echo -n "Type 'DELETE' (in capital letters) to confirm: "
+                read -r confirmation
 
-            if [ "$confirmation" != "DELETE" ]; then
-                print_info "Deletion cancelled."
-                exit 0
+                if [ "$confirmation" != "DELETE" ]; then
+                    print_info "Deletion cancelled."
+                    exit 0
+                fi
             fi
 
             # 6. Execute deletion
-            echo -e "\n${BOLD}Deleting local files...${NC}"
-            if rm -rf "$source"; then
-                print_success "Successfully deleted: $source"
+            if [ "$dry_run" = "true" ]; then
+                echo -e "\n${CYAN}${BOLD}[DRY RUN] Would delete: $source${NC}"
+                echo "  Would free approximately: $total_size"
+                echo ""
+                echo "  All safety checks passed:"
+                echo "    - DataJoint fully imported: ✓"
+                echo "    - Backup exists: ✓"
+                echo "    - Backup verified: ✓"
+                echo ""
+                print_success "Dry run complete - no files were deleted"
             else
-                print_error "Failed to delete: $source"
-                exit 1
-            fi
+                echo -e "\n${BOLD}Deleting local files...${NC}"
+                if rm -rf "$source"; then
+                    print_success "Successfully deleted: $source"
+                else
+                    print_error "Failed to delete: $source"
+                    exit 1
+                fi
 
-            # 7. Verify deletion
-            if [ -d "$source" ]; then
-                print_error "Directory still exists after deletion attempt!"
-                exit 1
-            fi
+                # 7. Verify deletion
+                if [ -d "$source" ]; then
+                    print_error "Directory still exists after deletion attempt!"
+                    exit 1
+                fi
 
-            echo -e "\n${GREEN}${BOLD}✓ Deletion completed successfully${NC}"
-            echo "  Freed up approximately: $total_size"
-            echo "  Data preserved in:"
-            echo "    - DataJoint database"
-            echo "    - Network backup: $dest"
+                echo -e "\n${GREEN}${BOLD}✓ Deletion completed successfully${NC}"
+                echo "  Freed up approximately: $total_size"
+                echo "  Data preserved in:"
+                echo "    - DataJoint database"
+                echo "    - Network backup: $dest"
+            fi
             ;;
 
         *)
