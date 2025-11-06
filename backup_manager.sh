@@ -149,6 +149,7 @@ do_rsync() {
     local source="$1"
     local dest="$2"
     local dry_run="$3"
+    local show_progress="${4:-true}"  # Show progress by default
 
     if [ ! -d "$source" ]; then
         print_error "Source path not found: $source"
@@ -157,9 +158,18 @@ do_rsync() {
 
     local cmd="rsync $RSYNC_FLAGS"
     [ "$dry_run" = "true" ] && cmd="$cmd --dry-run"
+
+    # Add progress flag if showing progress
+    if [ "$show_progress" = "true" ]; then
+        cmd="$cmd --progress"
+    fi
+
     cmd="$cmd \"${source}/\" \"${dest}/\""
 
-    print_info "Running: $cmd"
+    if [ "$show_progress" = "true" ]; then
+        print_info "Syncing files..."
+    fi
+
     eval $cmd
     return $?
 }
@@ -185,8 +195,11 @@ main() {
         echo "  $0 status <session_date>"
         echo "      Show status for all sessions on a specific date"
         echo ""
-        echo "  $0 status-range [start_date] [end_date]"
-        echo "      Show status for sessions in date range (no args = all sessions)"
+        echo "  $0 status-range [--start-date YYYYMMDD] [--end-date YYYYMMDD]"
+        echo "      Show status for sessions in date range"
+        echo "      --start-date: Show sessions from this date onwards (optional)"
+        echo "      --end-date: Show sessions up to this date (optional)"
+        echo "      No args: Show all sessions with local data"
         echo ""
         echo "  $0 verify <participant_id> <session_date>"
         echo "      Verify backup integrity for a session"
@@ -200,8 +213,9 @@ main() {
         echo "  $0 status p001 20250104"
         echo "  $0 status 20250104"
         echo "  $0 status-range"
-        echo "  $0 status-range 20250101"
-        echo "  $0 status-range 20250101 20250131"
+        echo "  $0 status-range --start-date 20250101"
+        echo "  $0 status-range --end-date 20250131"
+        echo "  $0 status-range --start-date 20250101 --end-date 20250131"
         echo "  $0 delete p001 20250104"
         exit 1
     fi
@@ -361,8 +375,9 @@ main() {
                     fi
                 fi
 
-                # Perform sync
-                if do_rsync "$source" "$dest" "$dry_run" >/dev/null 2>&1; then
+                # Perform sync (hide rsync progress for batch, show summary instead)
+                print_info "  Syncing..."
+                if do_rsync "$source" "$dest" "$dry_run" "false" 2>&1 | grep -E '(sent|total size)' | tail -2; then
                     succeeded=$((succeeded + 1))
                     print_success "  Synced successfully"
 
@@ -465,10 +480,29 @@ main() {
             # Only show sessions that exist locally in the data directory
             echo -e "\n${BOLD}Querying sessions from database...${NC}\n"
 
-            local start_date="${1:-}"
-            local end_date="${2:-}"
+            local start_date=""
+            local end_date=""
 
-            printf "%-12s %-15s %-4s %-8s %-10s %-6s\n" "Date" "Participant" "DJ" "Backup" "Verified" "Safe"
+            # Parse arguments for --start-date and --end-date flags
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    --start-date)
+                        start_date="$2"
+                        shift 2
+                        ;;
+                    --end-date)
+                        end_date="$2"
+                        shift 2
+                        ;;
+                    *)
+                        print_error "Unknown argument: $1"
+                        echo "Usage: $0 status-range [--start-date YYYYMMDD] [--end-date YYYYMMDD]"
+                        exit 1
+                        ;;
+                esac
+            done
+
+            printf "%-12s %-15s %-6s %-8s %-10s %-6s\n" "Date" "Participant" "DJ" "Backup" "Verified" "Safe"
             echo "================================================================================"
 
             local displayed_count=0
@@ -505,7 +539,7 @@ main() {
 
                 local dj_mark=$([ "$dj_imported" = "True" ] && echo "✓" || echo "✗")
 
-                printf "%-12s %-15s %-4s %-8s %-10s %-6s\n" \
+                printf "%-12s %-15s %-6s %-8s %-10s %-6s\n" \
                     "$session_date" "$participant_id" "$dj_mark" "$backup_exists" "$verified" "$safe"
 
             done < <(get_sessions_from_db "$start_date" "$end_date")
