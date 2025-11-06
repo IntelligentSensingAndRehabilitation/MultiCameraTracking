@@ -462,6 +462,7 @@ main() {
 
         status-range)
             # Get sessions from database and check backup status for each
+            # Only show sessions that exist locally in the data directory
             echo -e "\n${BOLD}Querying sessions from database...${NC}\n"
 
             local start_date="${1:-}"
@@ -470,7 +471,18 @@ main() {
             printf "%-12s %-15s %-4s %-8s %-10s %-6s\n" "Date" "Participant" "DJ" "Backup" "Verified" "Safe"
             echo "================================================================================"
 
+            local displayed_count=0
+
             while IFS=$'\t' read -r participant_id session_date dj_imported; do
+                local source=$(get_source_path "$participant_id" "$session_date")
+
+                # Skip sessions that don't exist locally
+                if [ ! -d "$source" ]; then
+                    continue
+                fi
+
+                displayed_count=$((displayed_count + 1))
+
                 local dest=$(get_dest_path "$participant_id" "$session_date")
 
                 # Check if backup exists
@@ -480,14 +492,11 @@ main() {
                     backup_exists="✓"
 
                     # Quick verification - just check file counts
-                    local source=$(get_source_path "$participant_id" "$session_date")
-                    if [ -d "$source" ]; then
-                        local source_count=$(find "$source" -type f 2>/dev/null | wc -l)
-                        local dest_count=$(find "$dest" -type f 2>/dev/null | wc -l)
-                        source_count=${source_count:-0}
-                        dest_count=${dest_count:-0}
-                        [ "$source_count" -eq "$dest_count" ] && [ "$source_count" -gt 0 ] && verified="✓"
-                    fi
+                    local source_count=$(find "$source" -type f 2>/dev/null | wc -l)
+                    local dest_count=$(find "$dest" -type f 2>/dev/null | wc -l)
+                    source_count=${source_count:-0}
+                    dest_count=${dest_count:-0}
+                    [ "$source_count" -eq "$dest_count" ] && [ "$source_count" -gt 0 ] && verified="✓"
                 fi
 
                 # Safe to delete?
@@ -500,6 +509,14 @@ main() {
                     "$session_date" "$participant_id" "$dj_mark" "$backup_exists" "$verified" "$safe"
 
             done < <(get_sessions_from_db "$start_date" "$end_date")
+
+            if [ $displayed_count -eq 0 ]; then
+                echo ""
+                print_info "No sessions found locally in the data directory"
+                if [ -n "$start_date" ]; then
+                    echo "Date range: $start_date to ${end_date:-$start_date}"
+                fi
+            fi
             ;;
 
         verify)
