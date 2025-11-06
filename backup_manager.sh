@@ -746,7 +746,13 @@ main() {
 
             # 1. Check DataJoint import status (checks both SQLite flag AND actual DataJoint tables)
             print_info "Checking DataJoint database..."
-            if ! check_datajoint_imported "$participant_id" "$session_date"; then
+            local dj_check_passed="false"
+            if check_datajoint_imported "$participant_id" "$session_date"; then
+                dj_check_passed="true"
+                print_success "DataJoint fully imported: ✓"
+                print_info "  - SQLite Imported flag: ✓"
+                print_info "  - DataJoint tables populated: ✓"
+            else
                 print_error "Session not fully imported to DataJoint"
                 echo ""
                 echo "This means either:"
@@ -755,10 +761,6 @@ main() {
                 echo ""
                 echo "Cannot safely delete without verified DataJoint data."
                 exit 1
-            else
-                print_success "DataJoint fully imported: ✓"
-                print_info "  - SQLite Imported flag: ✓"
-                print_info "  - DataJoint tables populated: ✓"
             fi
 
             # 2. Verify mount and backup exists
@@ -830,14 +832,14 @@ main() {
             local total_size=$(du -sh "$source" | cut -f1)
 
             echo -e "\n${BOLD}${RED}WARNING: About to DELETE local files${NC}"
-            echo -e "${BOLD}════════════════════════════════════════${NC}"
+            echo -e "${BOLD}════════════════════════════════════${NC}"
             echo "  Path: $source"
             echo "  Files: $file_count"
             echo "  Size: $total_size"
             echo ""
-            echo "  DataJoint: $(check_datajoint_imported "$participant_id" "$session_date" && echo "✓ Fully imported (SQLite + DataJoint tables)" || echo "✗ Not fully imported")"
+            echo "  DataJoint: $([ "$dj_check_passed" = "true" ] && echo "✓ Fully imported (SQLite + DataJoint tables)" || echo "✗ Not fully imported")"
             echo "  Backup: $([ -d "$dest" ] && echo "✓ Exists at $dest" || echo "✗ Not found")"
-            echo -e "${BOLD}════════════════════════════════════════${NC}"
+            echo -e "${BOLD}════════════════════════════════════${NC}"
 
             # 5. Confirmation prompt (skip in dry-run mode)
             if [ "$dry_run" = "false" ]; then
