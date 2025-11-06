@@ -15,19 +15,33 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from multi_camera.backend.recording_db import get_db, Participant, Session as SessionModel, Imported
 
+# Import DataJoint schemas to check actual data (not just the Imported flag)
+import datajoint as dj
+from multi_camera.datajoint.sessions import Subject, Session as DJSession, Recording
+from multi_camera.datajoint.multi_camera_dj import MultiCameraRecording, SingleCameraVideo
+
 
 def check_datajoint_imported(participant_id: str, session_date: str) -> bool:
-    """Check if session has been imported to DataJoint"""
-    db = get_db()
+    """
+    Check if session has been imported to DataJoint
 
-    participant = db.query(Participant).filter(Participant.name == participant_id).first()
-    if not participant:
-        return False
+    This checks BOTH:
+    1. The SQLite Imported flag (quick check)
+    2. The actual DataJoint tables contain the data (thorough check)
 
+    Returns True only if data exists in both places.
+    """
+    # Parse session date
     if isinstance(session_date, str):
         session_date_obj = datetime.strptime(session_date, "%Y%m%d").date()
     else:
         session_date_obj = session_date
+
+    # First check the SQLite database (Recording database tracking)
+    db = get_db()
+    participant = db.query(Participant).filter(Participant.name == participant_id).first()
+    if not participant:
+        return False
 
     session = db.query(SessionModel).filter(
         SessionModel.participant_id == participant.id,
@@ -38,7 +52,46 @@ def check_datajoint_imported(participant_id: str, session_date: str) -> bool:
         return False
 
     imported = db.query(Imported).filter(Imported.session_id == session.id).first()
-    return imported is not None
+    if not imported:
+        return False
+
+    # Now check the actual DataJoint tables contain the data
+    # This is the source of truth for the actual recording data
+    try:
+        # Check if Subject exists in DataJoint
+        subject_key = {"participant_id": participant_id}
+        if not (Subject & subject_key):
+            return False
+
+        # Check if Session exists in DataJoint
+        session_key = {"participant_id": participant_id, "session_date": session_date_obj}
+        if not (DJSession & session_key):
+            return False
+
+        # Check if Recording entries exist (this links Session to MultiCameraRecording)
+        recordings = Recording & session_key
+        if not recordings:
+            return False
+
+        # Check that the MultiCameraRecording entries exist
+        for recording_key in recordings.fetch("KEY"):
+            mcr_key = {
+                "recording_timestamps": recording_key["recording_timestamps"],
+                "camera_config_hash": recording_key["camera_config_hash"]
+            }
+            if not (MultiCameraRecording & mcr_key):
+                return False
+
+            # Check that SingleCameraVideo entries exist for this recording
+            if not (SingleCameraVideo & mcr_key):
+                return False
+
+        # All checks passed - data exists in DataJoint
+        return True
+
+    except Exception as e:
+        print(f"Error checking DataJoint tables: {e}", file=sys.stderr)
+        return False
 
 
 def get_sessions_in_range(start_date: str = None, end_date: str = None):

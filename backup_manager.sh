@@ -239,7 +239,27 @@ main() {
                 # Verify if not dry run
                 if [ "$dry_run" = "false" ]; then
                     print_info "Verifying backup..."
-                    # TODO: Add verification logic here
+
+                    # Count files in source and destination
+                    local source_count=$(find "$source" -type f 2>/dev/null | wc -l)
+                    local dest_count=$(find "$dest" -type f 2>/dev/null | wc -l)
+
+                    if [ "$source_count" -eq "$dest_count" ]; then
+                        print_success "Verification passed: $source_count files synced"
+
+                        # Calculate sizes
+                        local source_size=$(du -sh "$source" | cut -f1)
+                        local dest_size=$(du -sh "$dest" | cut -f1)
+                        print_info "Source size: $source_size"
+                        print_info "Backup size: $dest_size"
+                    else
+                        print_error "Verification FAILED: file count mismatch"
+                        echo "  Source: $source_count files"
+                        echo "  Backup: $dest_count files"
+                        echo ""
+                        echo "Run './backup_manager.sh verify $participant_id $session_date' for detailed analysis"
+                        exit 1
+                    fi
                 fi
             else
                 print_error "Sync failed"
@@ -261,16 +281,110 @@ main() {
             local start_date="$1"
             shift
             local end_date=""
-            local extra_args=""
+            local dry_run="false"
 
             # Check if next arg is a date or a flag
             if [ $# -gt 0 ] && [[ "$1" =~ ^[0-9]{8}$ ]]; then
                 end_date="$1"
                 shift
-                extra_args="--end-date ${end_date}"
             fi
 
-            run_backup_script --start-date "${start_date}" ${extra_args} "$@"
+            # Check for dry-run flag
+            [[ "$1" == "--dry-run" ]] && dry_run="true"
+
+            echo -e "\n${BOLD}Batch sync sessions${NC}"
+            if [ -n "$end_date" ]; then
+                echo "Date range: $start_date to $end_date"
+            else
+                echo "Date: $start_date"
+            fi
+            [ "$dry_run" = "true" ] && echo "Mode: DRY RUN (no changes will be made)"
+            echo ""
+
+            # Get sessions from database
+            print_info "Querying sessions from database..."
+            local sessions=$(get_sessions_from_db "$start_date" "$end_date")
+
+            if [ -z "$sessions" ]; then
+                print_error "No sessions found in date range"
+                exit 1
+            fi
+
+            # Count total sessions
+            local total=$(echo "$sessions" | wc -l)
+            echo "Found $total session(s) to sync"
+            echo ""
+
+            # Initialize counters
+            local succeeded=0
+            local failed=0
+            local skipped=0
+            local current=0
+
+            # Loop through sessions
+            while IFS=$'\t' read -r participant_id session_date dj_imported; do
+                current=$((current + 1))
+
+                echo -e "${BOLD}[$current/$total]${NC} Processing ${participant_id}/${session_date}..."
+
+                local source=$(get_source_path "$participant_id" "$session_date")
+                local dest=$(get_dest_path "$participant_id" "$session_date")
+
+                # Check if source exists
+                if [ ! -d "$source" ]; then
+                    print_error "  Source not found, skipping"
+                    skipped=$((skipped + 1))
+                    echo ""
+                    continue
+                fi
+
+                # Check if already backed up
+                if [ -d "$dest" ]; then
+                    local source_count=$(find "$source" -type f 2>/dev/null | wc -l)
+                    local dest_count=$(find "$dest" -type f 2>/dev/null | wc -l)
+                    if [ "$source_count" -eq "$dest_count" ] && [ "$source_count" -gt 0 ]; then
+                        print_info "  Already backed up and verified, skipping"
+                        skipped=$((skipped + 1))
+                        echo ""
+                        continue
+                    fi
+                fi
+
+                # Perform sync
+                if do_rsync "$source" "$dest" "$dry_run" >/dev/null 2>&1; then
+                    succeeded=$((succeeded + 1))
+                    print_success "  Synced successfully"
+
+                    # Quick verification if not dry run
+                    if [ "$dry_run" = "false" ]; then
+                        local source_count=$(find "$source" -type f 2>/dev/null | wc -l)
+                        local dest_count=$(find "$dest" -type f 2>/dev/null | wc -l)
+                        if [ "$source_count" -eq "$dest_count" ]; then
+                            print_info "  Verified: $source_count files"
+                        else
+                            print_error "  Warning: file count mismatch after sync"
+                        fi
+                    fi
+                else
+                    failed=$((failed + 1))
+                    print_error "  Sync failed"
+                fi
+
+                echo ""
+            done <<< "$sessions"
+
+            # Show summary
+            echo -e "${BOLD}═══════════════════════════════════════════${NC}"
+            echo -e "${BOLD}Batch sync summary:${NC}"
+            echo "  Total sessions: $total"
+            echo "  Succeeded: $succeeded"
+            echo "  Failed: $failed"
+            echo "  Skipped: $skipped"
+            echo -e "${BOLD}═══════════════════════════════════════════${NC}"
+
+            if [ $failed -gt 0 ]; then
+                exit 1
+            fi
             ;;
 
         status)
@@ -374,12 +488,127 @@ main() {
                 exit 1
             fi
 
-            # Verify mount before verification
-            if ! verify_mount; then
+            local participant_id="$1"
+            local session_date="$2"
+
+            echo -e "\n${BOLD}Verifying backup for ${participant_id}/${session_date}:${NC}\n"
+
+            # Check DataJoint import status
+            if check_datajoint_imported "$participant_id" "$session_date"; then
+                print_success "DataJoint imported: ✓"
+            else
+                print_error "DataJoint imported: ✗ (session not in database)"
+                echo -e "\n${RED}${BOLD}✗ Verification FAILED${NC}"
                 exit 1
             fi
 
-            run_backup_script --verify "$1" "$2"
+            # Verify mount before verification
+            if ! verify_mount; then
+                echo -e "\n${RED}${BOLD}✗ Verification FAILED${NC}"
+                exit 1
+            fi
+
+            local source=$(get_source_path "$participant_id" "$session_date")
+            local dest=$(get_dest_path "$participant_id" "$session_date")
+
+            # Check source exists
+            if [ ! -d "$source" ]; then
+                print_error "Source directory not found: $source"
+                echo -e "\n${RED}${BOLD}✗ Verification FAILED${NC}"
+                exit 1
+            fi
+
+            # Check destination exists
+            if [ ! -d "$dest" ]; then
+                print_error "Backup directory not found: $dest"
+                echo -e "\n${RED}${BOLD}✗ Verification FAILED${NC}"
+                exit 1
+            fi
+
+            print_info "Comparing files..."
+
+            # Get file lists with relative paths
+            local source_files=$(cd "$source" && find . -type f | sort)
+            local dest_files=$(cd "$dest" && find . -type f | sort)
+
+            # Count files
+            local source_count=$(echo "$source_files" | wc -l)
+            local dest_count=$(echo "$dest_files" | wc -l)
+
+            print_info "Source files: $source_count"
+            print_info "Backup files: $dest_count"
+
+            # Check file count match
+            if [ "$source_count" -ne "$dest_count" ]; then
+                print_error "File count mismatch!"
+
+                # Find missing files
+                echo -e "\n${YELLOW}Files in source but not in backup:${NC}"
+                comm -23 <(echo "$source_files") <(echo "$dest_files") | head -10
+                [ $(comm -23 <(echo "$source_files") <(echo "$dest_files") | wc -l) -gt 10 ] && echo "... and more"
+
+                echo -e "\n${YELLOW}Files in backup but not in source:${NC}"
+                comm -13 <(echo "$source_files") <(echo "$dest_files") | head -10
+                [ $(comm -13 <(echo "$source_files") <(echo "$dest_files") | wc -l) -gt 10 ] && echo "... and more"
+
+                echo -e "\n${RED}${BOLD}✗ Verification FAILED${NC}"
+                exit 1
+            fi
+
+            print_success "File counts match"
+
+            # Compare file sizes
+            print_info "Verifying file sizes..."
+            local size_mismatches=0
+            local files_checked=0
+
+            while IFS= read -r file; do
+                files_checked=$((files_checked + 1))
+
+                # Progress indicator every 100 files
+                if [ $((files_checked % 100)) -eq 0 ]; then
+                    echo -ne "\rChecked $files_checked/$source_count files..."
+                fi
+
+                local source_size=$(stat -c %s "$source/$file" 2>/dev/null)
+                local dest_size=$(stat -c %s "$dest/$file" 2>/dev/null)
+
+                if [ "$source_size" != "$dest_size" ]; then
+                    if [ $size_mismatches -eq 0 ]; then
+                        echo -e "\n\n${YELLOW}Size mismatches found:${NC}"
+                    fi
+                    size_mismatches=$((size_mismatches + 1))
+                    echo "  $file: source=$source_size bytes, backup=$dest_size bytes"
+
+                    # Limit output
+                    if [ $size_mismatches -ge 10 ]; then
+                        echo "  ... and possibly more (stopping after 10)"
+                        break
+                    fi
+                fi
+            done <<< "$source_files"
+
+            echo -e "\rChecked $files_checked files.                    "
+
+            if [ $size_mismatches -gt 0 ]; then
+                print_error "Found $size_mismatches file(s) with size mismatches"
+                echo -e "\n${RED}${BOLD}✗ Verification FAILED${NC}"
+                exit 1
+            fi
+
+            print_success "All file sizes match"
+
+            # Calculate total sizes
+            local source_size=$(du -sh "$source" | cut -f1)
+            local dest_size=$(du -sh "$dest" | cut -f1)
+            print_info "Source total size: $source_size"
+            print_info "Backup total size: $dest_size"
+
+            echo -e "\n${GREEN}${BOLD}✓ Verification PASSED${NC}"
+            echo "  - DataJoint imported: ✓"
+            echo "  - File count match: $source_count files"
+            echo "  - All file sizes match: ✓"
+            echo "  - Total size: $source_size"
             ;;
 
         delete)
@@ -388,17 +617,156 @@ main() {
                 exit 1
             fi
 
-            # Verify mount before delete (need to ensure backup exists)
-            if ! verify_mount; then
+            local participant_id="$1"
+            local session_date="$2"
+            local force_delete="false"
+            shift 2
+            [[ "$1" == "--force" ]] && force_delete="true"
+
+            echo -e "\n${BOLD}Safety check for deleting ${participant_id}/${session_date}:${NC}\n"
+
+            local source=$(get_source_path "$participant_id" "$session_date")
+            local dest=$(get_dest_path "$participant_id" "$session_date")
+
+            # Check source exists
+            if [ ! -d "$source" ]; then
+                print_error "Source directory not found: $source"
+                echo "Nothing to delete."
                 exit 1
             fi
 
-            local participant_id="$1"
-            local session_date="$2"
-            shift 2
+            # 1. Check DataJoint import status (checks both SQLite flag AND actual DataJoint tables)
+            print_info "Checking DataJoint database..."
+            if ! check_datajoint_imported "$participant_id" "$session_date"; then
+                if [ "$force_delete" = "false" ]; then
+                    print_error "Session not fully imported to DataJoint"
+                    echo ""
+                    echo "This means either:"
+                    echo "  - Session not marked as imported in SQLite database, OR"
+                    echo "  - Data missing from DataJoint tables (Subject, Session, Recording, MultiCameraRecording, SingleCameraVideo)"
+                    echo ""
+                    echo "Cannot safely delete without verified DataJoint data."
+                    echo "Use --force to override (NOT RECOMMENDED - may result in data loss)"
+                    exit 1
+                else
+                    print_error "Session not fully imported to DataJoint (--force used, proceeding anyway)"
+                fi
+            else
+                print_success "DataJoint fully imported: ✓"
+                print_info "  - SQLite Imported flag: ✓"
+                print_info "  - DataJoint tables populated: ✓"
+            fi
 
-            # Need -it flag for interactive confirmation prompt
-            docker compose run --rm -it --entrypoint python3 backup /Mocap/scripts/backup_sync.py --safe-delete "${participant_id}" "${session_date}" "$@"
+            # 2. Verify mount and backup exists
+            print_info "Checking backup destination..."
+            if ! verify_mount >/dev/null 2>&1; then
+                print_error "Backup mount not accessible"
+                echo "Cannot verify backup exists. Aborting deletion for safety."
+                exit 1
+            fi
+
+            if [ ! -d "$dest" ]; then
+                if [ "$force_delete" = "false" ]; then
+                    print_error "Backup directory not found: $dest"
+                    echo "No backup exists. Cannot safely delete."
+                    echo "Use --force to override (NOT RECOMMENDED)"
+                    exit 1
+                else
+                    print_error "Backup not found (--force used, proceeding anyway)"
+                fi
+            else
+                print_success "Backup exists: $dest"
+            fi
+
+            # 3. Verify backup integrity (file counts + sample sizes)
+            if [ "$force_delete" = "false" ] && [ -d "$dest" ]; then
+                print_info "Verifying backup integrity..."
+
+                # Quick verification: file counts and sizes
+                local source_files=$(cd "$source" && find . -type f | sort)
+                local dest_files=$(cd "$dest" && find . -type f | sort)
+                local source_count=$(echo "$source_files" | wc -l)
+                local dest_count=$(echo "$dest_files" | wc -l)
+
+                if [ "$source_count" -ne "$dest_count" ]; then
+                    print_error "File count mismatch: source=$source_count, backup=$dest_count"
+                    echo "Backup verification failed. Cannot safely delete."
+                    echo "Run './backup_manager.sh verify $participant_id $session_date' for details"
+                    exit 1
+                fi
+
+                # Check a sample of file sizes (10 files for speed)
+                local sample_size=10
+                local size_ok=true
+                local checked=0
+                while IFS= read -r file && [ $checked -lt $sample_size ]; do
+                    checked=$((checked + 1))
+                    local source_size=$(stat -c %s "$source/$file" 2>/dev/null)
+                    local dest_size=$(stat -c %s "$dest/$file" 2>/dev/null)
+                    if [ "$source_size" != "$dest_size" ]; then
+                        size_ok=false
+                        print_error "File size mismatch detected: $file"
+                        break
+                    fi
+                done <<< "$source_files"
+
+                if [ "$size_ok" = "false" ]; then
+                    echo "Backup verification failed. Cannot safely delete."
+                    echo "Run './backup_manager.sh verify $participant_id $session_date' for full verification"
+                    exit 1
+                fi
+
+                print_success "Backup verified (file count: $source_count, sample sizes match)"
+            fi
+
+            # 4. Show deletion summary
+            local file_count=$(find "$source" -type f | wc -l)
+            local total_size=$(du -sh "$source" | cut -f1)
+
+            echo -e "\n${BOLD}${RED}WARNING: About to DELETE local files${NC}"
+            echo -e "${BOLD}════════════════════════════════════════${NC}"
+            echo "  Path: $source"
+            echo "  Files: $file_count"
+            echo "  Size: $total_size"
+            echo ""
+            echo "  DataJoint: $(check_datajoint_imported "$participant_id" "$session_date" && echo "✓ Fully imported (SQLite + DataJoint tables)" || echo "✗ Not fully imported")"
+            echo "  Backup: $([ -d "$dest" ] && echo "✓ Exists at $dest" || echo "✗ Not found")"
+            echo -e "${BOLD}════════════════════════════════════════${NC}"
+
+            # 5. Confirmation prompt
+            echo -e "\n${YELLOW}This action cannot be undone!${NC}"
+            echo -e "${YELLOW}Data will only exist in:${NC}"
+            echo -e "  1. DataJoint database tables"
+            echo -e "  2. Network backup at: $dest"
+            echo ""
+            echo -n "Type 'DELETE' (in capital letters) to confirm: "
+            read -r confirmation
+
+            if [ "$confirmation" != "DELETE" ]; then
+                print_info "Deletion cancelled."
+                exit 0
+            fi
+
+            # 6. Execute deletion
+            echo -e "\n${BOLD}Deleting local files...${NC}"
+            if rm -rf "$source"; then
+                print_success "Successfully deleted: $source"
+            else
+                print_error "Failed to delete: $source"
+                exit 1
+            fi
+
+            # 7. Verify deletion
+            if [ -d "$source" ]; then
+                print_error "Directory still exists after deletion attempt!"
+                exit 1
+            fi
+
+            echo -e "\n${GREEN}${BOLD}✓ Deletion completed successfully${NC}"
+            echo "  Freed up approximately: $total_size"
+            echo "  Data preserved in:"
+            echo "    - DataJoint database"
+            echo "    - Network backup: $dest"
             ;;
 
         *)
