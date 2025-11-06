@@ -502,8 +502,8 @@ main() {
                 esac
             done
 
-            printf "%-12s %-15s %-6s %-8s %-10s %-6s\n" "Date" "Participant" "DJ" "Backup" "Verified" "Safe"
-            echo "================================================================================"
+            printf "%-12s %-16s %-8s %-10s %-12s %-8s %-8s\n" "Date" "Participant" "Videos" "DJ" "Backup" "Verified" "Safe"
+            echo "=========================================================================================="
 
             local displayed_count=0
 
@@ -518,6 +518,10 @@ main() {
                 displayed_count=$((displayed_count + 1))
 
                 local dest=$(get_dest_path "$participant_id" "$session_date")
+
+                # Count video files (.mp4)
+                local video_count=$(find "$source" -type f -name "*.mp4" 2>/dev/null | wc -l)
+                video_count=${video_count:-0}
 
                 # Check if backup exists
                 local backup_exists="✗"
@@ -539,8 +543,8 @@ main() {
 
                 local dj_mark=$([ "$dj_imported" = "True" ] && echo "✓" || echo "✗")
 
-                printf "%-12s %-15s %-6s %-8s %-10s %-6s\n" \
-                    "$session_date" "$participant_id" "$dj_mark" "$backup_exists" "$verified" "$safe"
+                printf "%-12s %-16s %-8s %-10s %-12s %-12s %-8s\n" \
+                    "$session_date" "$participant_id" "$video_count" "$dj_mark" "$backup_exists" "$verified" "$safe"
 
             done < <(get_sessions_from_db "$start_date" "$end_date")
 
