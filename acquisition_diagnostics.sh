@@ -634,7 +634,7 @@ check_datajoint_connection() {
             local conn_time=$(grep "Connection time:" "${dj_output_file}" | grep -oP '\d+\.\d+')
             if [ -n "$conn_time" ]; then
                 # Warn if connection is slow (> 2 seconds)
-                if command_exists bc && (( $(echo "$conn_time > 2.0" | bc -l 2>/dev/null) )); then
+                if command_exists bc && [ "$(echo "$conn_time > 2.0" | bc -l 2>/dev/null)" -eq 1 ]; then
                     print_warning "DataJoint connection is slow (${conn_time}s)"
                     print_info "  This may indicate network issues or database overload"
                 fi
@@ -797,10 +797,10 @@ main() {
     check_hardware
     check_datajoint_connection
 
-    # Generate summary (before tarball cleanup)
+    # Generate summary
     generate_summary
 
-    # Create tarball
+    # Create tarball and cleanup
     create_tarball
 }
 
