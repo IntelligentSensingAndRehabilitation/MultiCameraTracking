@@ -11,7 +11,7 @@
 #   ./backup_manager.sh status <session_date>
 #   ./backup_manager.sh status-range [--start-date YYYYMMDD] [--end-date YYYYMMDD]
 #   ./backup_manager.sh verify <participant_id> <session_date>
-#   ./backup_manager.sh delete <participant_id> <session_date> [--dry-run]
+#   ./backup_manager.sh delete <participant_id> <session_date> [--dry-run] [--force-unverified]
 #   ./backup_manager.sh bulk-delete [--start-date YYYYMMDD] [--end-date YYYYMMDD] [--dry-run]
 #
 # This script should be run from the MultiCameraTracking repository root
@@ -205,9 +205,10 @@ main() {
         echo "  $0 verify <participant_id> <session_date>"
         echo "      Verify backup integrity for a session"
         echo ""
-        echo "  $0 delete <participant_id> <session_date> [--dry-run]"
+        echo "  $0 delete <participant_id> <session_date> [--dry-run] [--force-unverified]"
         echo "      Safely delete local session after verification"
         echo "      --dry-run: Check safety conditions without deleting (optional)"
+        echo "      --force-unverified: Skip ALL safety checks - permanent deletion (junk data only)"
         echo ""
         echo "  $0 bulk-delete [--start-date YYYYMMDD] [--end-date YYYYMMDD] [--dry-run]"
         echo "      Delete all sessions that are safe to delete (DJ imported + backup verified)"
@@ -229,6 +230,7 @@ main() {
         echo "  $0 verify p001 20250104"
         echo "  $0 delete p001 20250104"
         echo "  $0 delete p001 20250104 --dry-run"
+        echo "  $0 delete p001 20250104 --force-unverified"
         echo "  $0 bulk-delete"
         echo "  $0 bulk-delete --start-date 20250101 --end-date 20250131"
         echo "  $0 bulk-delete --dry-run"
@@ -714,13 +716,14 @@ main() {
 
         delete)
             if [ $# -lt 2 ]; then
-                print_error "Usage: $0 delete <participant_id> <session_date> [--dry-run]"
+                print_error "Usage: $0 delete <participant_id> <session_date> [--dry-run] [--force-unverified]"
                 exit 1
             fi
 
             local participant_id="$1"
             local session_date="$2"
             local dry_run="false"
+            local force_unverified="false"
             shift 2
 
             # Parse flags
@@ -730,9 +733,13 @@ main() {
                         dry_run="true"
                         shift
                         ;;
+                    --force-unverified)
+                        force_unverified="true"
+                        shift
+                        ;;
                     *)
                         print_error "Unknown argument: $1"
-                        echo "Usage: delete <participant_id> <session_date> [--dry-run]"
+                        echo "Usage: delete <participant_id> <session_date> [--dry-run] [--force-unverified]"
                         exit 1
                         ;;
                 esac
@@ -740,6 +747,12 @@ main() {
 
             if [ "$dry_run" = "true" ]; then
                 echo -e "\n${CYAN}${BOLD}DRY RUN MODE - No files will be deleted${NC}\n"
+            fi
+
+            if [ "$force_unverified" = "true" ]; then
+                echo -e "\n${YELLOW}${BOLD}WARNING: --force-unverified enabled${NC}"
+                echo -e "${YELLOW}ALL safety checks will be skipped (DataJoint + Backup).${NC}"
+                echo -e "${YELLOW}Use only for junk/bad data that was never imported.${NC}\n"
             fi
 
             echo -e "${BOLD}Safety check for deleting ${participant_id}/${session_date}:${NC}\n"
@@ -754,87 +767,99 @@ main() {
                 exit 1
             fi
 
-            # 1. Check DataJoint import status (checks both SQLite flag AND actual DataJoint tables)
-            print_info "Checking DataJoint database..."
+            # 1. Check DataJoint import status (skip if force_unverified)
             local dj_check_passed="false"
-            if check_datajoint_imported "$participant_id" "$session_date"; then
-                dj_check_passed="true"
-                print_success "DataJoint fully imported: ✓"
-                print_info "  - SQLite Imported flag: ✓"
-                print_info "  - DataJoint tables populated: ✓"
+            if [ "$force_unverified" = "false" ]; then
+                print_info "Checking DataJoint database..."
+                if check_datajoint_imported "$participant_id" "$session_date"; then
+                    dj_check_passed="true"
+                    print_success "DataJoint fully imported: ✓"
+                    print_info "  - SQLite Imported flag: ✓"
+                    print_info "  - DataJoint tables populated: ✓"
+                else
+                    print_error "Session not fully imported to DataJoint"
+                    echo ""
+                    echo "This means either:"
+                    echo "  - Session not marked as imported in SQLite database, OR"
+                    echo "  - Data missing from DataJoint tables (Subject, Session, Recording, MultiCameraRecording, SingleCameraVideo)"
+                    echo ""
+                    echo "Cannot safely delete without verified DataJoint data."
+                    exit 1
+                fi
             else
-                print_error "Session not fully imported to DataJoint"
-                echo ""
-                echo "This means either:"
-                echo "  - Session not marked as imported in SQLite database, OR"
-                echo "  - Data missing from DataJoint tables (Subject, Session, Recording, MultiCameraRecording, SingleCameraVideo)"
-                echo ""
-                echo "Cannot safely delete without verified DataJoint data."
-                exit 1
+                print_info "Skipping DataJoint verification (--force-unverified enabled)"
+                echo -e "${YELLOW}WARNING: DataJoint import check is being bypassed${NC}"
             fi
 
-            # 2. Verify mount and backup exists
-            print_info "Checking backup destination..."
-            if ! verify_mount >/dev/null 2>&1; then
-                print_error "Backup mount not accessible"
-                echo "Cannot verify backup exists. Aborting deletion for safety."
-                exit 1
-            fi
-
-            if [ ! -d "$dest" ]; then
-                print_error "Backup directory not found: $dest"
-                echo "No backup exists. Cannot safely delete."
-                exit 1
-            else
-                print_success "Backup exists: $dest"
-            fi
-
-            # 3. Verify backup integrity (file counts + sample sizes)
-            if [ -d "$dest" ]; then
-                print_info "Verifying backup integrity..."
-
-                # Quick verification: file counts and sizes
-                local source_files=$(cd "$source" && find . -type f | sort)
-                local dest_files=$(cd "$dest" && find . -type f | sort)
-                local source_count=$(echo "$source_files" | grep -c . || echo "0")
-                local dest_count=$(echo "$dest_files" | grep -c . || echo "0")
-
-                # Check if empty
-                if [ "$source_count" -eq 0 ]; then
-                    print_error "Source directory is empty! Nothing to verify."
-                    echo "Cannot safely delete an empty directory."
+            # 2. Verify mount and backup exists (skip if force_unverified)
+            local backup_verified="false"
+            if [ "$force_unverified" = "false" ]; then
+                print_info "Checking backup destination..."
+                if ! verify_mount >/dev/null 2>&1; then
+                    print_error "Backup mount not accessible"
+                    echo "Cannot verify backup exists. Aborting deletion for safety."
                     exit 1
                 fi
 
-                if [ "$source_count" -ne "$dest_count" ]; then
-                    print_error "File count mismatch: source=$source_count, backup=$dest_count"
-                    echo "Backup verification failed. Cannot safely delete."
-                    echo "Run './backup_manager.sh verify $participant_id $session_date' for details"
+                if [ ! -d "$dest" ]; then
+                    print_error "Backup directory not found: $dest"
+                    echo "No backup exists. Cannot safely delete."
                     exit 1
+                else
+                    print_success "Backup exists: $dest"
                 fi
 
-                # Check a sample of file sizes (10 files for speed)
-                local sample_size=10
-                local size_ok=true
-                local checked=0
-                while IFS= read -r file && [ $checked -lt $sample_size ]; do
-                    checked=$((checked + 1))
-                    local source_size=$(stat -c %s "$source/$file" 2>/dev/null)
-                    local dest_size=$(stat -c %s "$dest/$file" 2>/dev/null)
-                    if [ "$source_size" != "$dest_size" ]; then
-                        size_ok=false
-                        print_error "File size mismatch detected: $file"
-                        break
+                # 3. Verify backup integrity (file counts + sample sizes)
+                if [ -d "$dest" ]; then
+                    print_info "Verifying backup integrity..."
+
+                    # Quick verification: file counts and sizes
+                    local source_files=$(cd "$source" && find . -type f | sort)
+                    local dest_files=$(cd "$dest" && find . -type f | sort)
+                    local source_count=$(echo "$source_files" | grep -c . || echo "0")
+                    local dest_count=$(echo "$dest_files" | grep -c . || echo "0")
+
+                    # Check if empty
+                    if [ "$source_count" -eq 0 ]; then
+                        print_error "Source directory is empty! Nothing to verify."
+                        echo "Cannot safely delete an empty directory."
+                        exit 1
                     fi
-                done <<< "$source_files"
 
-                if [ "$size_ok" = "false" ]; then
-                    echo "Backup verification failed. Cannot safely delete."
-                    echo "Run './backup_manager.sh verify $participant_id $session_date' for full verification"
-                    exit 1
+                    if [ "$source_count" -ne "$dest_count" ]; then
+                        print_error "File count mismatch: source=$source_count, backup=$dest_count"
+                        echo "Backup verification failed. Cannot safely delete."
+                        echo "Run './backup_manager.sh verify $participant_id $session_date' for details"
+                        exit 1
+                    fi
+
+                    # Check a sample of file sizes (10 files for speed)
+                    local sample_size=10
+                    local size_ok=true
+                    local checked=0
+                    while IFS= read -r file && [ $checked -lt $sample_size ]; do
+                        checked=$((checked + 1))
+                        local source_size=$(stat -c %s "$source/$file" 2>/dev/null)
+                        local dest_size=$(stat -c %s "$dest/$file" 2>/dev/null)
+                        if [ "$source_size" != "$dest_size" ]; then
+                            size_ok=false
+                            print_error "File size mismatch detected: $file"
+                            break
+                        fi
+                    done <<< "$source_files"
+
+                    if [ "$size_ok" = "false" ]; then
+                        echo "Backup verification failed. Cannot safely delete."
+                        echo "Run './backup_manager.sh verify $participant_id $session_date' for full verification"
+                        exit 1
+                    fi
+
+                    print_success "Backup verified (file count: $source_count, sample sizes match)"
+                    backup_verified="true"
                 fi
-
-                print_success "Backup verified (file count: $source_count, sample sizes match)"
+            else
+                print_info "Skipping backup verification (--force-unverified enabled)"
+                echo -e "${YELLOW}WARNING: Backup existence and integrity checks are being bypassed${NC}"
             fi
 
             # 4. Show deletion summary
@@ -847,16 +872,27 @@ main() {
             echo "  Files: $file_count"
             echo "  Size: $total_size"
             echo ""
-            echo "  DataJoint: $([ "$dj_check_passed" = "true" ] && echo "✓ Fully imported (SQLite + DataJoint tables)" || echo "✗ Not fully imported")"
-            echo "  Backup: $([ -d "$dest" ] && echo "✓ Exists at $dest" || echo "✗ Not found")"
+            if [ "$force_unverified" = "false" ]; then
+                echo "  DataJoint: $([ "$dj_check_passed" = "true" ] && echo "✓ Fully imported (SQLite + DataJoint tables)" || echo "✗ Not fully imported")"
+                echo "  Backup: $([ "$backup_verified" = "true" ] && echo "✓ Verified at $dest" || echo "✗ Not verified")"
+            else
+                echo "  DataJoint: ${YELLOW}⚠ Check skipped (--force-unverified)${NC}"
+                echo "  Backup: ${YELLOW}⚠ Check skipped (--force-unverified)${NC}"
+            fi
             echo -e "${BOLD}════════════════════════════════════${NC}"
 
             # 5. Confirmation prompt (skip in dry-run mode)
             if [ "$dry_run" = "false" ]; then
                 echo -e "\n${YELLOW}This action cannot be undone!${NC}"
-                echo -e "${YELLOW}Data will only exist in:${NC}"
-                echo -e "  1. DataJoint database tables"
-                echo -e "  2. Network backup at: $dest"
+                if [ "$force_unverified" = "false" ]; then
+                    echo -e "${YELLOW}Data will only exist in:${NC}"
+                    echo -e "  1. DataJoint database tables"
+                    echo -e "  2. Network backup at: $dest"
+                else
+                    echo -e "${RED}${BOLD}WARNING: NO SAFETY CHECKS PERFORMED!${NC}"
+                    echo -e "${YELLOW}Data will be PERMANENTLY DELETED with no backup verification.${NC}"
+                    echo -e "${YELLOW}Use this mode only for junk/bad data.${NC}"
+                fi
                 echo ""
                 echo -n "Type 'DELETE' (in capital letters) to confirm: "
                 read -r confirmation
@@ -872,10 +908,17 @@ main() {
                 echo -e "\n${CYAN}${BOLD}[DRY RUN] Would delete: $source${NC}"
                 echo "  Would free approximately: $total_size"
                 echo ""
-                echo "  All safety checks passed:"
-                echo "    - DataJoint fully imported: ✓"
-                echo "    - Backup exists: ✓"
-                echo "    - Backup verified: ✓"
+                if [ "$force_unverified" = "false" ]; then
+                    echo "  All safety checks passed:"
+                    echo "    - DataJoint fully imported: ✓"
+                    echo "    - Backup exists: ✓"
+                    echo "    - Backup verified: ✓"
+                else
+                    echo "  Safety checks (with --force-unverified):"
+                    echo "    - DataJoint check: ${YELLOW}SKIPPED${NC}"
+                    echo "    - Backup verification: ${YELLOW}SKIPPED${NC}"
+                    echo "    - ${RED}No data preservation verified!${NC}"
+                fi
                 echo ""
                 print_success "Dry run complete - no files were deleted"
             else
@@ -895,9 +938,13 @@ main() {
 
                 echo -e "\n${GREEN}${BOLD}✓ Deletion completed successfully${NC}"
                 echo "  Freed up approximately: $total_size"
-                echo "  Data preserved in:"
-                echo "    - DataJoint database"
-                echo "    - Network backup: $dest"
+                if [ "$force_unverified" = "false" ]; then
+                    echo "  Data preserved in:"
+                    echo "    - DataJoint database"
+                    echo "    - Network backup: $dest"
+                else
+                    echo -e "  ${RED}WARNING: Data was permanently deleted (no backup verified)${NC}"
+                fi
             fi
             ;;
 

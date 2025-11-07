@@ -264,39 +264,54 @@ Performs thorough file-by-file verification of a backup.
 Deletes local files after comprehensive safety checks.
 
 ```bash
-./backup_manager.sh delete <participant_id> <session_date> [--dry-run]
+./backup_manager.sh delete <participant_id> <session_date> [--dry-run] [--force-unverified]
 ```
 
 **Examples:**
 ```bash
 ./backup_manager.sh delete p001 20250104
 ./backup_manager.sh delete p001 20250104 --dry-run  # Test safety checks without deleting
+./backup_manager.sh delete p001 20250104 --force-unverified  # Delete junk data without backup verification
 ```
 
 **Options:**
 - `--dry-run`: Perform all safety checks and show what would be deleted without actually deleting files
+- `--force-unverified`: Skip ALL safety checks (DataJoint + backup) - for junk/bad data only
 
-**Safety checks performed:**
+**Safety checks performed (normal mode):**
 1. **DataJoint verification** (checks both SQLite Imported flag AND actual data in all DataJoint tables: Subject, Session, Recording, MultiCameraRecording, SingleCameraVideo)
 2. **Backup exists** on network storage
 3. **Backup integrity** verified (file counts + sample file sizes match)
 
+**Safety checks performed (--force-unverified mode):**
+1. ~~DataJoint verification~~ **SKIPPED**
+2. ~~Backup exists~~ **SKIPPED**
+3. ~~Backup integrity~~ **SKIPPED**
+4. **Only requirement**: Source directory must exist
+
 **Deletion workflow:**
-1. Performs all safety checks
-2. Shows deletion summary (path, file count, size, where data is preserved)
+1. Performs safety checks (full or none, depending on flags)
+2. Shows deletion summary (path, file count, size, warnings)
 3. In normal mode: Requires typing `DELETE` (in capitals) to confirm
 4. In dry-run mode: Skips confirmation and deletion, shows what would be deleted
 5. Executes deletion (`rm -rf`) or reports dry-run results
 6. Verifies deletion succeeded (normal mode only)
 
 **Where data is preserved after deletion:**
-- DataJoint database tables (all video metadata and processing results)
-- Network backup at `/mnt/CottonLab/...`
+- **Normal mode**: DataJoint database + Network backup at `/mnt/CottonLab/...`
+- **--force-unverified mode**: NOWHERE - data is permanently deleted
 
 **When to use --dry-run:**
 - Test deletion safety checks before committing
 - Verify that all safety conditions are met
 - Preview deletion summary without risk
+
+**When to use --force-unverified:**
+- Deleting junk/bad data that was never imported to DataJoint
+- Cleaning up failed acquisitions that shouldn't be preserved
+- Removing test data that you don't want in the database or backups
+- **WARNING**: Data is PERMANENTLY DELETED with no preservation
+- **NOT** available for bulk-delete (intentionally disabled for safety)
 
 ---
 
