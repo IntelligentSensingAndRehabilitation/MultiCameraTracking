@@ -876,8 +876,8 @@ main() {
                 echo "  DataJoint: $([ "$dj_check_passed" = "true" ] && echo "✓ Fully imported (SQLite + DataJoint tables)" || echo "✗ Not fully imported")"
                 echo "  Backup: $([ "$backup_verified" = "true" ] && echo "✓ Verified at $dest" || echo "✗ Not verified")"
             else
-                echo "  DataJoint: ${YELLOW}⚠ Check skipped (--force-unverified)${NC}"
-                echo "  Backup: ${YELLOW}⚠ Check skipped (--force-unverified)${NC}"
+                echo "  DataJoint: ${YELLOW} Check skipped (--force-unverified)${NC}"
+                echo "  Backup: ${YELLOW} Check skipped (--force-unverified)${NC}"
             fi
             echo -e "${BOLD}════════════════════════════════════${NC}"
 
