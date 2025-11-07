@@ -41,4 +41,7 @@ notebooks/
 
 results/
 
+# Diagnostics output
+diagnostics_output/
+
 .env

@@ -6,8 +6,8 @@
 # Purpose: Collect diagnostic information for debugging acquisition issues
 # Usage: sudo ./acquisition_diagnostics.sh [-v|--verbose]
 #        -v, --verbose: Show detailed output (DHCP leases, config files, etc.)
-# Output: Creates /tmp/acquisition_diagnostics_YYYYMMDD_HHMMSS.log
-#         and /tmp/acquisition_diagnostics_YYYYMMDD_HHMMSS.tar.gz
+# Output: Creates ./diagnostics_output/acquisition_diagnostics_YYYYMMDD_HHMMSS.log
+#         and ./diagnostics_output/acquisition_diagnostics_YYYYMMDD_HHMMSS.tar.gz
 #
 # This script should be run from the MultiCameraTracking repository root
 # on the Ubuntu laptop used for acquisition (HOST system, not inside container)
@@ -38,15 +38,17 @@ BOLD='\033[1m'
 
 # Generate timestamp for log file
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-LOG_FILE="/tmp/acquisition_diagnostics_${TIMESTAMP}.log"
-TARBALL="/tmp/acquisition_diagnostics_${TIMESTAMP}.tar.gz"
+OUTPUT_DIR="./diagnostics_output"
+LOG_FILE="${OUTPUT_DIR}/acquisition_diagnostics_${TIMESTAMP}.log"
+TARBALL="${OUTPUT_DIR}/acquisition_diagnostics_${TIMESTAMP}.tar.gz"
 TEMP_DIR="/tmp/acquisition_diagnostics_${TIMESTAMP}"
 
 # Error counters
 ERROR_COUNT=0
 WARNING_COUNT=0
 
-# Create temp directory for collecting files
+# Create output and temp directories
+mkdir -p "${OUTPUT_DIR}"
 mkdir -p "${TEMP_DIR}"
 
 ################################################################################
@@ -600,8 +602,69 @@ check_hardware() {
     fi
 }
 
+check_datajoint_connection() {
+    print_section "9. DATAJOINT DATABASE CONNECTIVITY"
+
+    print_info "Testing DataJoint database connection..."
+    print_info "(Timeout: 10 seconds)"
+    print_info ""
+
+    # Save output to temp file
+    local dj_output_file="${TEMP_DIR}/datajoint_check.txt"
+
+    # Run DataJoint connection check via Docker
+    # Use test service with proper environment and network access
+    docker compose run --rm --entrypoint python3 test \
+        /Mocap/multi_camera/acquisition/diagnostics/check_datajoint_connection.py \
+        > "${dj_output_file}" 2>&1
+
+    local exit_code=$?
+
+    # Display and log the output
+    cat "${dj_output_file}" | tee -a "${LOG_FILE}"
+
+    print_info ""
+
+    # Check result
+    if [ $exit_code -eq 0 ]; then
+        print_success "DataJoint database is accessible"
+
+        # Extract connection time if available
+        if grep -q "Connection time:" "${dj_output_file}"; then
+            local conn_time=$(grep "Connection time:" "${dj_output_file}" | grep -oP '\d+\.\d+')
+            if [ -n "$conn_time" ]; then
+                # Warn if connection is slow (> 2 seconds)
+                if command_exists bc && [ "$(echo "$conn_time > 2.0" | bc -l 2>/dev/null)" -eq 1 ]; then
+                    print_warning "DataJoint connection is slow (${conn_time}s)"
+                    print_info "  This may indicate network issues or database overload"
+                fi
+            fi
+        fi
+    else
+        print_error "DataJoint database is NOT accessible"
+
+        # Check specific error types
+        if grep -q -i "timeout" "${dj_output_file}"; then
+            print_info ""
+            print_info "Connection timed out - possible causes:"
+            print_info "  1. Database server is down or unreachable"
+            print_info "  2. Network firewall blocking database port"
+            print_info "  3. Database server is hung or overloaded"
+            print_info "  4. Incorrect database host configuration"
+        elif grep -q -i "access denied\|authentication" "${dj_output_file}"; then
+            print_info ""
+            print_info "Authentication failed - check credentials in:"
+            print_info "  - .datajoint_config.json"
+            print_info "  - Environment variables (DJ_HOST, DJ_USER, DJ_PASS)"
+        elif grep -q -i "unknown database\|can't connect" "${dj_output_file}"; then
+            print_info ""
+            print_info "Database or host not found - verify configuration"
+        fi
+    fi
+}
+
 generate_summary() {
-    print_section "9. DIAGNOSTIC SUMMARY"
+    print_section "10. DIAGNOSTIC SUMMARY"
 
     print_info "Diagnostic run completed at: $(date)"
     print_info ""
@@ -627,6 +690,18 @@ generate_summary() {
         echo -e "${GREEN}✓${NC} DHCP server is running" | tee -a "${LOG_FILE}"
     else
         echo -e "${RED}✗${NC} DHCP server is not running" | tee -a "${LOG_FILE}"
+    fi
+
+    # DataJoint check
+    local dj_check_file="${TEMP_DIR}/datajoint_check.txt"
+    if [ -f "${dj_check_file}" ]; then
+        if grep -q "✓ Connected" "${dj_check_file}"; then
+            echo -e "${GREEN}✓${NC} DataJoint database is accessible" | tee -a "${LOG_FILE}"
+        else
+            echo -e "${RED}✗${NC} DataJoint database connection failed" | tee -a "${LOG_FILE}"
+        fi
+    else
+        echo -e "${YELLOW}?${NC} DataJoint check not run" | tee -a "${LOG_FILE}"
     fi
 
     echo "" | tee -a "${LOG_FILE}"
@@ -720,12 +795,13 @@ main() {
     collect_logs
     check_recent_recordings
     check_hardware
-
-    # Create tarball
-    create_tarball
+    check_datajoint_connection
 
     # Generate summary
     generate_summary
+
+    # Create tarball and cleanup
+    create_tarball
 }
 
 # Run main function
