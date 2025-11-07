@@ -56,7 +56,6 @@ if __name__ == "__main__":
         print(f"✓ Connected to DataJoint database")
         print(f"  Connection time: {timing:.3f}s")
         print(f"  Database host: {dj.config.get('database.host', 'N/A')}")
-        print(f"  Database name: {dj.config.get('database.database', 'N/A')}")
         sys.exit(0)
     else:
         print(f"✗ Failed to connect to DataJoint database")

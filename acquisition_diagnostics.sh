@@ -797,11 +797,11 @@ main() {
     check_hardware
     check_datajoint_connection
 
+    # Generate summary (before tarball cleanup)
+    generate_summary
+
     # Create tarball
     create_tarball
-
-    # Generate summary
-    generate_summary
 }
 
 # Run main function
