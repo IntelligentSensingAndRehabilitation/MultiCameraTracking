@@ -300,6 +300,62 @@ Deletes local files after comprehensive safety checks.
 
 ---
 
+#### 7. Bulk Delete Sessions
+
+Deletes all sessions that are safe to delete (DataJoint imported + backup verified).
+
+```bash
+./backup_manager.sh bulk-delete [--start-date YYYYMMDD] [--end-date YYYYMMDD] [--dry-run]
+```
+
+**Examples:**
+```bash
+# Delete all safe-to-delete sessions
+./backup_manager.sh bulk-delete
+
+# Delete safe sessions from January 2025
+./backup_manager.sh bulk-delete --start-date 20250101 --end-date 20250131
+
+# Preview what would be deleted (dry-run)
+./backup_manager.sh bulk-delete --dry-run
+
+# Preview with date filter
+./backup_manager.sh bulk-delete --start-date 20250101 --end-date 20250131 --dry-run
+```
+
+**Options:**
+- `--start-date YYYYMMDD`: Only consider sessions from this date onwards (optional)
+- `--end-date YYYYMMDD`: Only consider sessions up to this date (optional)
+- `--dry-run`: Show what would be deleted without actually deleting files
+
+**What it does:**
+1. Queries database for all sessions in date range (or all sessions if no dates specified)
+2. Checks each session against safety criteria:
+   - DataJoint fully imported (SQLite + all DataJoint tables)
+   - Backup exists on network storage
+   - Backup verified (file counts match)
+3. Displays list of sessions that would be deleted with sizes
+4. Shows total space to be freed
+5. In normal mode: Requires typing `DELETE ALL` (exactly) to confirm
+6. In dry-run mode: Skips confirmation and deletion, shows preview only
+7. Deletes each session and reports success/failure
+8. Displays summary of results
+
+**When to use:**
+- Cleanup after bulk syncing multiple sessions
+- Free up disk space when many sessions are safely backed up
+- Routine maintenance to keep local storage clean
+- Use `--dry-run` first to preview what will be deleted
+
+**Safety features:**
+- Same safety checks as single `delete` command
+- Lists all sessions before deletion
+- Requires exact confirmation phrase (`DELETE ALL`)
+- Reports individual success/failure for each session
+- Can be filtered by date range to limit scope
+
+---
+
 ## Column Explanations
 
 ### Status-Range Output Columns

@@ -12,6 +12,7 @@
 #   ./backup_manager.sh status-range [--start-date YYYYMMDD] [--end-date YYYYMMDD]
 #   ./backup_manager.sh verify <participant_id> <session_date>
 #   ./backup_manager.sh delete <participant_id> <session_date> [--dry-run]
+#   ./backup_manager.sh bulk-delete [--start-date YYYYMMDD] [--end-date YYYYMMDD] [--dry-run]
 #
 # This script should be run from the MultiCameraTracking repository root
 # on the HOST system (not inside container)
@@ -208,6 +209,12 @@ main() {
         echo "      Safely delete local session after verification"
         echo "      --dry-run: Check safety conditions without deleting (optional)"
         echo ""
+        echo "  $0 bulk-delete [--start-date YYYYMMDD] [--end-date YYYYMMDD] [--dry-run]"
+        echo "      Delete all sessions that are safe to delete (DJ imported + backup verified)"
+        echo "      --start-date: Filter sessions from this date onwards (optional)"
+        echo "      --end-date: Filter sessions up to this date (optional)"
+        echo "      --dry-run: Show what would be deleted without actually deleting (optional)"
+        echo ""
         echo "Examples:"
         echo "  $0 sync p001 20250104"
         echo "  $0 sync p001 20250104 --dry-run"
@@ -222,6 +229,9 @@ main() {
         echo "  $0 verify p001 20250104"
         echo "  $0 delete p001 20250104"
         echo "  $0 delete p001 20250104 --dry-run"
+        echo "  $0 bulk-delete"
+        echo "  $0 bulk-delete --start-date 20250101 --end-date 20250131"
+        echo "  $0 bulk-delete --dry-run"
         exit 1
     fi
 
@@ -888,6 +898,192 @@ main() {
                 echo "  Data preserved in:"
                 echo "    - DataJoint database"
                 echo "    - Network backup: $dest"
+            fi
+            ;;
+
+        bulk-delete)
+            # Delete all sessions that are safe to delete (DJ imported + backup verified)
+            local start_date=""
+            local end_date=""
+            local dry_run="false"
+
+            # Parse arguments
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    --start-date)
+                        start_date="$2"
+                        shift 2
+                        ;;
+                    --end-date)
+                        end_date="$2"
+                        shift 2
+                        ;;
+                    --dry-run)
+                        dry_run="true"
+                        shift
+                        ;;
+                    *)
+                        print_error "Unknown argument: $1"
+                        echo "Usage: $0 bulk-delete [--start-date YYYYMMDD] [--end-date YYYYMMDD] [--dry-run]"
+                        exit 1
+                        ;;
+                esac
+            done
+
+            if [ "$dry_run" = "true" ]; then
+                echo -e "\n${CYAN}${BOLD}DRY RUN MODE - No files will be deleted${NC}\n"
+            fi
+
+            echo -e "${BOLD}Finding sessions safe to delete...${NC}\n"
+
+            # Get sessions from database
+            print_info "Querying sessions from database..."
+            local sessions=$(get_sessions_from_db "$start_date" "$end_date")
+
+            if [ -z "$sessions" ]; then
+                print_error "No sessions found in date range"
+                exit 1
+            fi
+
+            # Build list of safe-to-delete sessions
+            declare -a safe_sessions=()
+            declare -a safe_paths=()
+            declare -a safe_sizes=()
+            local total_size=0
+
+            while IFS=$'\t' read -r participant_id session_date dj_imported; do
+                local source=$(get_source_path "$participant_id" "$session_date")
+
+                # Skip if source doesn't exist locally
+                [ ! -d "$source" ] && continue
+
+                local dest=$(get_dest_path "$participant_id" "$session_date")
+
+                # Check if safe to delete (same logic as status-range)
+                local backup_exists="false"
+                local verified="false"
+
+                if verify_mount >/dev/null 2>&1 && [ -d "$dest" ]; then
+                    backup_exists="true"
+
+                    # Quick verification - file counts
+                    local source_count=$(find "$source" -type f 2>/dev/null | wc -l)
+                    local dest_count=$(find "$dest" -type f 2>/dev/null | wc -l)
+                    source_count=${source_count:-0}
+                    dest_count=${dest_count:-0}
+
+                    if [ "$source_count" -eq "$dest_count" ] && [ "$source_count" -gt 0 ]; then
+                        verified="true"
+                    fi
+                fi
+
+                # Add to list if safe to delete
+                if [ "$dj_imported" = "True" ] && [ "$backup_exists" = "true" ] && [ "$verified" = "true" ]; then
+                    safe_sessions+=("${participant_id}/${session_date}")
+                    safe_paths+=("$source")
+
+                    # Calculate size
+                    local size=$(du -sb "$source" | cut -f1)
+                    safe_sizes+=("$size")
+                    total_size=$((total_size + size))
+                fi
+
+            done <<< "$sessions"
+
+            # Check if any sessions found
+            if [ ${#safe_sessions[@]} -eq 0 ]; then
+                print_info "No sessions are currently safe to delete."
+                echo ""
+                echo "Sessions must meet all these criteria:"
+                echo "  - Imported to DataJoint (SQLite + DataJoint tables)"
+                echo "  - Backup exists on network storage"
+                echo "  - Backup verified (file counts match)"
+                exit 0
+            fi
+
+            # Display what will be deleted
+            echo -e "${BOLD}Found ${#safe_sessions[@]} session(s) safe to delete:${NC}\n"
+
+            for i in "${!safe_sessions[@]}"; do
+                local size_human=$(numfmt --to=iec-i --suffix=B ${safe_sizes[$i]} 2>/dev/null || echo "${safe_sizes[$i]} bytes")
+                echo "  [$((i+1))] ${safe_sessions[$i]} - ${size_human}"
+            done
+
+            local total_size_human=$(numfmt --to=iec-i --suffix=B $total_size 2>/dev/null || echo "$total_size bytes")
+            echo ""
+            echo -e "${BOLD}Total space to be freed: ${total_size_human}${NC}"
+
+            # Dry run - just show what would be deleted
+            if [ "$dry_run" = "true" ]; then
+                echo ""
+                print_success "Dry run complete - no files were deleted"
+                echo ""
+                echo "To actually delete these sessions, run without --dry-run:"
+                echo "  $0 bulk-delete" $([ -n "$start_date" ] && echo "--start-date $start_date") $([ -n "$end_date" ] && echo "--end-date $end_date")
+                exit 0
+            fi
+
+            # Confirmation prompt
+            echo ""
+            echo -e "${BOLD}${RED}WARNING: This will permanently delete ${#safe_sessions[@]} session(s)${NC}"
+            echo -e "${BOLD}════════════════════════════════════════════════════════${NC}"
+            echo -e "${YELLOW}This action cannot be undone!${NC}"
+            echo ""
+            echo "Each session has been verified as:"
+            echo "  ✓ Imported to DataJoint database"
+            echo "  ✓ Backed up to network storage"
+            echo "  ✓ Backup integrity verified"
+            echo ""
+            echo -n "Type 'DELETE ALL' (exactly) to confirm deletion: "
+            read -r confirmation
+
+            if [ "$confirmation" != "DELETE ALL" ]; then
+                print_info "Bulk deletion cancelled."
+                exit 0
+            fi
+
+            # Execute deletions
+            echo ""
+            echo -e "${BOLD}Deleting sessions...${NC}\n"
+
+            local deleted=0
+            local failed=0
+
+            for i in "${!safe_paths[@]}"; do
+                local path="${safe_paths[$i]}"
+                local session="${safe_sessions[$i]}"
+
+                echo -n "  Deleting ${session}... "
+
+                if rm -rf "$path"; then
+                    if [ ! -d "$path" ]; then
+                        echo -e "${GREEN}✓${NC}"
+                        deleted=$((deleted + 1))
+                    else
+                        echo -e "${RED}✗ (still exists)${NC}"
+                        failed=$((failed + 1))
+                    fi
+                else
+                    echo -e "${RED}✗ (rm failed)${NC}"
+                    failed=$((failed + 1))
+                fi
+            done
+
+            # Summary
+            echo ""
+            echo -e "${BOLD}═══════════════════════════════════════════${NC}"
+            echo -e "${BOLD}Bulk deletion summary:${NC}"
+            echo "  Total sessions: ${#safe_sessions[@]}"
+            echo "  Successfully deleted: $deleted"
+            echo "  Failed: $failed"
+            echo "  Space freed: ${total_size_human}"
+            echo -e "${BOLD}═══════════════════════════════════════════${NC}"
+
+            if [ $failed -gt 0 ]; then
+                print_error "Some deletions failed"
+                exit 1
+            else
+                print_success "All sessions deleted successfully"
             fi
             ;;
 
