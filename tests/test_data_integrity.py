@@ -30,7 +30,7 @@ from typing import List, Dict, Optional
 from multi_camera.backend.recording_db import (
     get_db,
     Participant,
-    Session as SessionModel,
+    Session as SQLiteSession,
     Imported
 )
 from multi_camera.datajoint.sessions import Subject, Session as DJSession, Recording
@@ -74,9 +74,9 @@ def check_session_in_datajoint(participant_id: str, session_date: str) -> bool:
     if not participant:
         return False
 
-    session = db.query(SessionModel).filter(
-        SessionModel.participant_id == participant.id,
-        SessionModel.session_date == session_date_obj
+    session = db.query(SQLiteSession).filter(
+        SQLiteSession.participant_id == participant.id,
+        SQLiteSession.session_date == session_date_obj
     ).first()
 
     if not session:
@@ -148,17 +148,17 @@ def get_sessions_in_range(
     """
     db = get_db()
 
-    query = db.query(SessionModel)
+    query = db.query(SQLiteSession)
 
     if start_date:
         start_date_obj = datetime.strptime(start_date, "%Y%m%d").date()
-        query = query.filter(SessionModel.session_date >= start_date_obj)
+        query = query.filter(SQLiteSession.session_date >= start_date_obj)
 
     if end_date:
         end_date_obj = datetime.strptime(end_date, "%Y%m%d").date()
-        query = query.filter(SessionModel.session_date <= end_date_obj)
+        query = query.filter(SQLiteSession.session_date <= end_date_obj)
 
-    sessions = query.order_by(SessionModel.session_date.desc()).all()
+    sessions = query.order_by(SQLiteSession.session_date.desc()).all()
 
     results = []
     for session in sessions:
