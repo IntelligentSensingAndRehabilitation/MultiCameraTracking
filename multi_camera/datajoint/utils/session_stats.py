@@ -66,7 +66,14 @@ def get_reconstruction_stats(filter):
     stats = {}
 
     # Get all sessions for this filter
-    sessions_query = SessionCalibration.Grouping & (Recording * filter)
+    all_sessions = SessionCalibration.Grouping & (Recording * filter)
+
+    # Exclude sessions that have trials still awaiting EasyMocap
+    trials_missing_easymocap = (Recording & CalibratedRecording - EasymocapTracking) & filter
+    sessions_with_pending_easymocap = SessionCalibration.Grouping & trials_missing_easymocap
+
+    # Only include sessions where ALL trials have completed EasyMocap
+    sessions_query = all_sessions - sessions_with_pending_easymocap
 
     # Track kinematic reconstructions
     for method_num in kinematic_methods:
