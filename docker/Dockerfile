@@ -77,6 +77,7 @@ RUN mkdir -p /configs
 # A hack currently, to have a local .datajoint_config.json replace the default one from posepipe
 COPY datajoint_config.json /root/.datajoint_config.json
 
+COPY tests /Mocap/tests
 COPY run_tests.sh /Mocap/run_tests.sh
 
 RUN pip3 install pytest
