@@ -25,7 +25,7 @@ Usage from CLI wrapper:
 
 import pytest
 from datetime import datetime, date, timedelta
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 
 from multi_camera.backend.recording_db import (
     get_db,
@@ -130,7 +130,7 @@ def check_session_in_datajoint(participant_id: str, session_date: str) -> bool:
 def get_sessions_in_range(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None
-) -> List[Dict[str, any]]:
+) -> List[Dict[str, Any]]:
     """
     Get all sessions in date range with DataJoint import status
 
