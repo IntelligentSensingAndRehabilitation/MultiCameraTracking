@@ -32,13 +32,13 @@ RUN apt-get update && apt-get install nodejs -y
 RUN node -v
 RUN npm -v
 
-WORKDIR /Mocap/react_frontend
+WORKDIR /Mocap/frontend/acquisition
 
-COPY react_frontend/package*.json /Mocap/react_frontend/
+COPY frontend/acquisition/package*.json /Mocap/frontend/acquisition/
 
 RUN npm install
 
-COPY react_frontend /Mocap/react_frontend
+COPY frontend/acquisition /Mocap/frontend/acquisition
 
 ### Installing extra things (curl, screen, netstat) (can be removed after image is in stable state)
 RUN apt-get install -y net-tools

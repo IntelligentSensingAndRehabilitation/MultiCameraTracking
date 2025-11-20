@@ -15,10 +15,10 @@ RUN apt-get update && apt-get install nodejs -y
 RUN node -v
 RUN npm -v
 
-WORKDIR /Mocap/annotation_frontend
-COPY annotation_frontend/package*.json /Mocap/annotation_frontend/
+WORKDIR /Mocap/frontend/annotation
+COPY frontend/annotation/package*.json /Mocap/frontend/annotation/
 RUN npm install
-COPY annotation_frontend /Mocap/annotation_frontend
+COPY frontend/annotation /Mocap/frontend/annotation
 
 ### Installing extra things (curl, screen, netstat) (can be removed after image is in stable state)
 RUN apt-get install -y net-tools
