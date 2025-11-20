@@ -2,6 +2,11 @@
 
 We welcome contributions from the community. This document provides guidelines for contributing to the project.
 
+## TL;DR
+
+- Contributions welcome as Pull Requests
+- Feature requests and bug reports welcome as GitHub Issues
+
 ## Getting Started
 
 1. Clone the repository:
