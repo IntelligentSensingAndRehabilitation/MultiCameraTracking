@@ -15,7 +15,7 @@ services:
       - /etc/localtime:/etc/localtime:ro
       - ${DATAJOINT_EXTERNAL:-/mnt/datajoint_external}:/datajoint_external
     network_mode: host
-    command: /Mocap/start_acquisition_gui.sh
+    command: /Mocap/entrypoints/start_acquisition_gui.sh
 
   test:
     image: isr/mct_acquisition

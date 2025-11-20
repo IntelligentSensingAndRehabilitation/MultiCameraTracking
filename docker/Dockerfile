@@ -65,9 +65,6 @@ COPY multi_camera /Mocap/multi_camera
 COPY model_data /Mocap/model_data
 RUN pip3 install -e /Mocap/
 
-COPY docker/start_acquisition_gui.sh /Mocap/start_acquisition_gui.sh
-RUN chmod +x /Mocap/start_acquisition_gui.sh
-
 # Copy entrypoint scripts
 COPY docker/entrypoints /Mocap/entrypoints
 RUN chmod +x /Mocap/entrypoints/*.sh
