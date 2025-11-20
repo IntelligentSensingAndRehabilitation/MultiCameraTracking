@@ -68,6 +68,10 @@ RUN pip3 install -e /Mocap/
 COPY docker/start_acquisition_gui.sh /Mocap/start_acquisition_gui.sh
 RUN chmod +x /Mocap/start_acquisition_gui.sh
 
+# Copy entrypoint scripts
+COPY docker/entrypoints /Mocap/entrypoints
+RUN chmod +x /Mocap/entrypoints/*.sh
+
 WORKDIR /
 RUN mkdir -p /data
 RUN mkdir -p /configs
@@ -76,14 +80,11 @@ RUN mkdir -p /configs
 COPY datajoint_config.json /root/.datajoint_config.json
 
 COPY tests /Mocap/tests
-COPY run_tests.sh /Mocap/run_tests.sh
 
 RUN pip3 install pytest
 
 RUN pip install --upgrade numpy
 RUN pip install --upgrade opencv-python opencv-contrib-python
-
-COPY run_reset.sh /Mocap/run_reset.sh
 
 # # Run bash script to start front end and back end
 ENTRYPOINT ["/bin/bash"]

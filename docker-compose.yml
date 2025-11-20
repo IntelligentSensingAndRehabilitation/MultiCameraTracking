@@ -19,7 +19,7 @@ services:
 
   test:
     image: isr/mct_acquisition
-    command: /Mocap/run_tests.sh
+    command: /Mocap/entrypoints/run_tests.sh
     volumes:
       - ${DATA_VOLUME:-/data}:/data
       - ${CAMERA_CONFIGS:-/camera_configs}:/configs
@@ -31,7 +31,7 @@ services:
 
   reset:
     image: isr/mct_acquisition
-    command: /Mocap/run_reset.sh
+    command: /Mocap/entrypoints/run_reset.sh
     volumes:
       - ${CAMERA_CONFIGS:-/camera_configs}:/configs
       - /etc/localtime:/etc/localtime:ro
