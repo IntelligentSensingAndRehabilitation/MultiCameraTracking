@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: ./docker/Dockerfile
-    image: peabody124/mocap
+    image: isr/mct_acquisition
     tty: true
     stdin_open: true
     environment:
@@ -18,7 +18,7 @@ services:
     command: /Mocap/start_acquisition_gui.sh
 
   test:
-    image: peabody124/mocap
+    image: isr/mct_acquisition
     command: /Mocap/run_tests.sh
     volumes:
       - ${DATA_VOLUME:-/data}:/data
@@ -30,7 +30,7 @@ services:
     network_mode: host
 
   reset:
-    image: peabody124/mocap
+    image: isr/mct_acquisition
     command: /Mocap/run_reset.sh
     volumes:
       - ${CAMERA_CONFIGS:-/camera_configs}:/configs
@@ -41,7 +41,7 @@ services:
     build:
       context: .
       dockerfile: ./docker/Dockerfile.annotation
-    image: standalone_annotation
+    image: isr/mct_annotation
     tty: true
     stdin_open: true
     environment:

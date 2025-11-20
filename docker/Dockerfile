@@ -45,7 +45,7 @@ RUN apt-get install -y net-tools
 
 ### Install EasyMocap
 WORKDIR /
-RUN git clone https://github.com/peabody124/EasyMocap
+RUN git clone https://github.com/IntelligentSensingAndRehabilitation/EasyMocap
 RUN pip install --upgrade pip
 RUN pip install -e /EasyMocap
 
@@ -60,8 +60,6 @@ RUN pip3 install numba
 ### Install MultiCameraTracking package and dependencies
 
 WORKDIR /Mocap
-# COPY requirements.txt .
-# RUN pip3 install -r requirements.txt
 COPY pyproject.toml README.md /Mocap/
 COPY multi_camera /Mocap/multi_camera
 COPY model_data /Mocap/model_data
