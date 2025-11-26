@@ -21,7 +21,7 @@ nmcli con up id "DHCP-Server"
 Go to the root of the `MultiCameraTracking` repository and run:
 
 ```
-sudo sh set_mtu.sh
+sudo sh scripts/acquisition/set_mtu.sh
 ```
 
 Ensure the script runs without any errors. The most likely error would be something like 'Cannot find device enp37s0'. If this error shows up, make sure the set_mtu.sh script has the correct adapter name set and ensure that adapter is connected to the computer.

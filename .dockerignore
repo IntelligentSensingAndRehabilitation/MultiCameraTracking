@@ -1,1 +1,42 @@
-notebooks/*
+# Git
+.git
+.gitignore
+.github
+
+# Development
+.devcontainer
+.vscode
+.env
+.env.template
+.env.example
+.datajoint_config.json
+.datajoint_config.json.example
+.multi_cam_mount_check
+.editorconfig
+.pre-commit-config.yaml
+.DS_Store
+
+# Documentation
+README.md
+CHANGELOG.md
+CONTRIBUTING.md
+CODE_OF_CONDUCT.md
+SECURITY.md
+DEVELOPMENT.md
+docs/
+
+# Build artifacts
+__pycache__
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Node modules
+node_modules/
+.npm
+
+# Testing
+notebooks/
+tests/testdata/
