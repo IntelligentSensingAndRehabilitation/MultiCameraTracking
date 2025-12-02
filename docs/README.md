@@ -23,4 +23,7 @@ Use the links below to navigate:
 ## Calibration
 1. [Calibration Procedure](calibration/calibration_procedure.md)
 
+## Data Processing
+1. [Processing Pipeline](processing/processing_pipeline.md)
+2. [SMPL Model Setup](processing/smpl_setup.md)
 
