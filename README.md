@@ -47,7 +47,7 @@ pip install -e .
 
 ## Data Processing Pipeline
 
-See the [Processing Pipeline documentation](docs/processing/processing_pipeline.md) for detailed instructions on the complete workflow from acquisition through final 3D reconstruction, including:
+See the [Processing Pipeline documentation](docs/analysis/processing_pipeline.md) for detailed instructions on the complete workflow from acquisition through final 3D reconstruction, including:
 
 - Automated pipeline script: `session_pipeline.py`
 - Step-by-step manual processing for individual recordings
@@ -55,7 +55,7 @@ See the [Processing Pipeline documentation](docs/processing/processing_pipeline.
 
 ## SMPL Model Setup
 
-See the [SMPL Model Setup documentation](docs/processing/smpl_setup.md) for details on:
+See the [SMPL Model Setup documentation](docs/analysis/smpl_setup.md) for details on:
 
 - Obtaining SMPL model files
 - Directory structure and file placement
