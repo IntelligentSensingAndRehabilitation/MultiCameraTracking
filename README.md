@@ -6,7 +6,7 @@ A comprehensive system for multi-camera video acquisition, pose estimation, 3D r
 
 This tool is under active development and used by multiple research labs. The infrastructure is technical to set up and primarily supports internal use and collaborators. We have limited bandwidth to support special or custom use cases beyond the current core functionality.
 
-Breaking changes may be introduced during development. Issues and pull requests are welcome.
+Breaking changes may be introduced during development. Issues and pull requests are welcome ([CONTRIBUTING](CONTRIBUTING)).
 
 ## Overview
 
@@ -26,7 +26,7 @@ This library provides an end-to-end processing pipeline from multi-camera video 
 - `multi_camera.datajoint` - Database schema and computational pipelines
 - `multi_camera.utils` - Miscellaneous utilities
 
-## Getting Started (Acquisition)
+## Acquisition System Setup
 
 To set up the acquisition system, follow the comprehensive setup **[docs](docs/README.md)**:
 
@@ -37,9 +37,9 @@ To set up the acquisition system, follow the comprehensive setup **[docs](docs/R
 5. **[Calibration Procedure](docs/calibration/calibration_procedure.md)** - Camera calibration
 6. **[Annotation Setup](docs/annotation/annotation_software_setup.md)** - Annotation system configuration
 
-## Installation (Analysis Only)
+## Installation (Analysis Pipeline)
 
-To use the analysis code without the acquisition system, install the package in development mode:
+To install the multi_camera package:
 
 ```bash
 pip install -e .
@@ -62,24 +62,9 @@ See the [SMPL Model Setup documentation](docs/analysis/smpl_setup.md) for detail
 - Configuration and custom paths
 - Optional extended models (SMPLx, SMPLh)
 
-## Troubleshooting
-
-See the documentation directory for detailed setup and troubleshooting:
-- [General System Setup](docs/acquisition/general_system_setup.md)
-- [Acquisition Software Setup](docs/acquisition/acquisition_software_setup.md)
-- [Annotation Setup](docs/annotation/annotation_software_setup.md)
-- [Calibration Procedure](docs/calibration/calibration_procedure.md)
-
 ## Key Dependencies
 
 - [PosePipeline](https://github.com/IntelligentSensingAndRehabilitation/PosePipeline) - 2D pose detection
 - [EasyMocap](https://github.com/IntelligentSensingAndRehabilitation/EasyMocap/) - SMPL model fitting
 - [DataJoint](https://datajoint.io/) - Database management and pipeline orchestration
 - [Aniposelib](https://github.com/lambdaloop/aniposelib) - Camera calibration and triangulation
-
-## Credits
-
-- **Calibration & Triangulation**: Bundle adjustment code from [Aniposelib](https://github.com/lambdaloop/aniposelib)
-- **SMPL Fitting**: [EasyMocap](https://github.com/zju3dv/EasyMocap/) implementation
-- **2D Pose Estimation**: [PosePipeline](https://github.com/IntelligentSensingAndRehabilitation/PosePipeline) wrappers
-- **Data Management**: [DataJoint](https://datajoint.io/) framework
