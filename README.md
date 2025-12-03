@@ -8,6 +8,10 @@ This tool is under active development and used by multiple research labs. The in
 
 Breaking changes may be introduced during development. Issues and pull requests are welcome ([CONTRIBUTING](CONTRIBUTING)).
 
+## Platform Compatibility
+
+This software is designed and tested on Linux. While it has been used on Windows previously, we only guarantee functionality on Linux, and we will not provide support for cross-platform issues.
+
 ## Overview
 
 This library provides an end-to-end processing pipeline from multi-camera video acquisition through to 3D skeletal reconstruction and body model fitting:
@@ -15,7 +19,6 @@ This library provides an end-to-end processing pipeline from multi-camera video 
 - **Acquisition**: Multi-camera video recording with hardware synchronization (FLIR cameras with IEEE1588 support)
 - **2D Pose Estimation**: Per-view pose detection using PosePipeline (state-of-the-art models)
 - **3D Reconstruction**: Multi-view triangulation and temporal tracking of skeletal keypoints
-- **SMPL Fitting**: Automatic fitting of SMPL body models to 3D keypoints with temporal smoothing
 - **Data Management**: Structured database pipeline via DataJoint for organizing recordings, calibrations, and results
 
 ### Core Modules
