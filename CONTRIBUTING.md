@@ -4,7 +4,7 @@ We welcome contributions from the community. This document provides guidelines f
 
 ## TL;DR
 
-- Contributions welcome as Pull Requests
+- Contributions welcome as pull requests
 - Feature requests and bug reports welcome as GitHub Issues
 
 ## Getting Started
@@ -36,7 +36,7 @@ We welcome contributions from the community. This document provides guidelines f
 ## Submitting Changes
 
 1. Push your branch to the repository
-2. Open a Pull Request against the main branch
+2. Open a pull request against the main branch
 3. Provide a clear description of what your changes do
 4. Reference any related issues using #issue-number
 
