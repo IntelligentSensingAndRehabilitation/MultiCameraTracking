@@ -17,7 +17,7 @@ All contributors, maintainers, and participants are expected to:
 
 ## Unacceptable Behavior
 
-The following behaviours are not tolerated:
+The following behaviors are not tolerated:
 
 - Harassment or discrimination of any kind
 - Offensive comments related to identity or beliefs
@@ -29,7 +29,7 @@ The following behaviours are not tolerated:
 
 ## Reporting
 
-If you witness or experience unacceptable behaviour, please report it by:
+If you witness or experience unacceptable behavior, please report it by:
 
 1. Contacting the project maintainers directly
 2. Email: peabody124@gmail.com, kshah@sralab.org
@@ -39,18 +39,18 @@ All reports will be handled confidentially and investigated promptly. Retaliatio
 ## Our Responsibilities
 
 Project maintainers are responsible for clarifying and enforcing our standards of
-acceptable behaviour and will take appropriate and fair corrective action in
-response to any instances of unacceptable behaviour.
+acceptable behavior and will take appropriate and fair corrective action in
+response to any instances of unacceptable behavior.
 
 Project maintainers have the right and responsibility to remove, edit, or reject
 comments, commits, code, wiki edits, issues, and other contributions that are
 not aligned to this Code of Conduct, or to ban
-temporarily or permanently any contributor for other behaviours that they deem
+temporarily or permanently any contributor for other behaviors that they deem
 inappropriate, threatening, offensive, or harmful.
 
 ## Enforcement
 
-Instances of abusive, harassing, or otherwise unacceptable behaviour may be
+Instances of abusive, harassing, or otherwise unacceptable behavior may be
 reported to the community leaders responsible for enforcement.
 All complaints will be reviewed and investigated promptly and fairly.
 

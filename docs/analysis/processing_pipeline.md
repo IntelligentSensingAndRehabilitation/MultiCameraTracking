@@ -7,7 +7,7 @@ The standard workflow for processing multi-camera recordings from acquisition th
 1. **Acquisition** - Record trials and calibration videos using the GUI
 2. **Push to DataJoint** - Transfer videos to database via the GUI
 3. **Calibration** - Run camera calibration and link to trials
-4. **Bridging** - Run bottom-up pose detection across all views
+4. **Keypoint Detection** - Run bottom-up/top-down keypoint detection on all views
 5. **EasyMocap** - Fit SMPL body models to 3D reconstructed keypoints
 6. **Post-Annotation Pipeline** - Run top-down person-specific refinement
 7. **Person Keypoint Reconstruction** - Final triangulation with annotated data
@@ -26,20 +26,18 @@ python scripts/session_pipeline.py \
 
 This script automatically handles:
 - Calibration assignment (links closest valid calibration to each trial)
-- Bottom-up bridging across all views
+- Keypoint detection across all views
 - EasyMocap SMPL fitting with temporal smoothing
 - Post-annotation pipeline with person-specific top-down detection
 
 ### Optional Flags
 
 - `--project PROJECT_NAME` - Filter by video project
-- `--bottom_up` - Run only the bridging step
+- `--bottom_up` - Run only the bottom-up step
 - `--top_down_method_name METHOD` - Specify top-down detection method (default: Bridging_bml_movi_87)
 - `--hand_estimation` - Include hand keypoint estimation
 
-## Step-by-Step Manual Processing
-
-If processing individual recordings manually:
+## Step-by-Step Workflow
 
 ### 1. Record Videos and Calibration
 
@@ -51,10 +49,11 @@ See [Acquisition Startup Guide](../acquisition/acquisition_startup.md) for detai
 
 ### 2. Push Data to DataJoint
 
-Use the GUI to:
-1. Import trial videos into `MultiCameraRecording`
-2. Import calibration videos into `Calibration`
-3. Process calibration to compute camera parameters
+After acquisition, in the Analysis tab of the GUI:
+1. Toggle any videos you do not want to process
+2. Set a video_project name
+3. Press the `Push to DataJoint` button to populate into the Video, SingleCameraVideo, MultiCameraRecording, and Recording tables
+4. Press the calibration button next to calibration trials to compute camera parameters and have them inserted into the Calibration table
 
 ### 3. Link Calibration to Trials
 
@@ -72,17 +71,17 @@ calibration_offset = (Calibration * MultiCameraRecording).proj(
 # Check viable candidates before assigning
 ```
 
-### 4. Run Bridging and EasyMocap
+### 4. Run Keypoint Detection and EasyMocap
 
 ```python
 from scripts.session_pipeline import preannotation_session_pipeline
 
-# Run bottom-up bridging + EasyMocap SMPL fitting
+# Run bottom-up step + EasyMocap SMPL fitting
 preannotation_session_pipeline(keys=your_keys, bottom_up=True, easy_mocap=True)
 ```
 
 This performs:
-- Bottom-up pose detection with bridging method
+- Bottom-up pose detection (default: MeTRAbs)
 - EasyMocap tracking across frames
 - SMPL model fitting with temporal smoothing to 3D keypoints
 
@@ -104,7 +103,7 @@ postannotation_session_pipeline(
 ```
 
 This performs:
-- Person-specific top-down detection (typically copies 3D keypoints from bridging)
+- Person-specific top-down detection (Default copies 3D keypoints from MeTRAbs)
 - Final triangulation with annotated tracking data
 
 ### 7. Person Keypoint Reconstruction

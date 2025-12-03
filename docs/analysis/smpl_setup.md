@@ -1,6 +1,6 @@
 # SMPL Model Setup
 
-The pipeline requires SMPL body model files for fitting 3D skeletal data to a parametric body model. This guide explains what files are needed and how to set them up.
+The pipeline requires SMPL body model files for the Easymocap step and for the Annotation GUI. This guide explains what files are needed and how to set them up.
 
 ## Minimal Files Required
 
@@ -15,8 +15,6 @@ model_data/
 └── smpl_clean/
     └── SMPL_NEUTRAL.pkl                    (Body model for annotation)
 ```
-
-Total size: ~220 MB
 
 ## Obtaining SMPL Models
 
