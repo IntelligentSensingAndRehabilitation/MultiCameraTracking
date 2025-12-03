@@ -10,7 +10,7 @@
     - An example config.yaml file can be found [here](example_config.md)
 5. Rename `.env.template` to `.env` in the root of the **MultiCameraTracking** repo
     - Fill in `.env` file with the following info, corresponding to your setup
-        
+
         ```python
         DJ_USER=root # DataJoint username
         DJ_PASS=pose # DataJoint password
@@ -18,7 +18,7 @@
         DJ_PORT=3306 # DataJoint DB port number
         NETWORK_INTERFACE=enp5s0 # You get this from the DHCP Setup step
         REACT_APP_BASE_URL=localhost # Can set this to FQDN of the machine running the software
-        DATA_VOLUME=/data # This is the path from Step 3 
+        DATA_VOLUME=/data # This is the path from Step 3
         CAMERA_CONFIGS=/camera_configs # This is the path from Step 4
         DATAJOINT_EXTERNAL=/mnt/datajoint_external # This is your datajoint external localattach
         ```

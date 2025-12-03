@@ -2,7 +2,7 @@
 import './App.css';
 import React from 'react';
 
-// This is currently requiring 
+// This is currently requiring
 // npm install react-router-dom@5.2.0 react-router-bootstrap@0.25.0
 // if upgrading, then Switch changes to Routes (I think)
 import { Routes, Route } from 'react-router-dom';

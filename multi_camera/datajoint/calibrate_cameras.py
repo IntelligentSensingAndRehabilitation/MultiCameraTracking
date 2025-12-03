@@ -79,18 +79,18 @@ if __name__ == "__main__":
         response = input()
         if response[0].upper() != "Y":
             print("Cancelling")
-            
+
     vid_path, vid_base = os.path.split(args.vid_base)
     entry["recording_base"] = vid_base # we default to using using input vid_path with path+base then we split here
 
     if args.charuco == "charuco": # is "charuco" string the right type?
         entry["calibration_type"] = "charuco"
 
-  
+
     print('Does the calibration visualization on port 8050 look correct? Are you sure you would like to store this in the database? [Yes/No]')
     response = input()
     if response[0].upper() != "Y":
-        print("Cancelling")    
+        print("Cancelling")
     else:
         print("Storing calibration in database...")
         Calibration.insert1(entry)

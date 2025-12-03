@@ -149,7 +149,7 @@ def init_camera(
                 print(f"Flipping image for camera {c.DeviceSerialNumber}")
                 c.ReverseX = True
                 c.ReverseY = True
-    
+
     # Now applying desired binning to maximum frame size
     c.BinningHorizontal = binning
     c.BinningVertical = binning
@@ -171,7 +171,7 @@ def init_camera(
     else:
         c.GevSCPSPacketSize = 1500
 
-    # c.DeviceLinkThroughputLimit = throughput_limit #94371840 # 106954752 # 
+    # c.DeviceLinkThroughputLimit = throughput_limit #94371840 # 106954752 #
     c.GevSCPD = 25000
 
     line0 = gpio_settings['line0']
@@ -387,7 +387,7 @@ def write_metadata_queue(json_queue: Queue, records_queue: Queue, json_file: str
             bad_frame = frame["first_bad_frame"]
 
         if current_filename != frame["base_filename"]:
-            
+
             # This means a new file should be started
             json_file = current_filename + ".json"
 
@@ -494,7 +494,7 @@ class FlirRecorder:
         self.status_callback = status_callback
         self.set_status("Uninitialized")
 
-        self.pixel_format_conversion = {'BayerRG8': cv2.COLOR_BAYER_RG2RGB, 
+        self.pixel_format_conversion = {'BayerRG8': cv2.COLOR_BAYER_RG2RGB,
                                         'BayerBG8': cv2.COLOR_BAYER_BG2RGB,
                                         'Mono8': cv2.COLOR_GRAY2RGB}
 
@@ -506,7 +506,7 @@ class FlirRecorder:
 
         # Create hash of encoded config file and return
         return hashlib.sha256(encoded_config).hexdigest()[:hash_len]
-    
+
     def get_detailed_processor_info(self):
         cpu_info = ""
 
@@ -520,7 +520,7 @@ class FlirRecorder:
             cpu_info = "CPU information not available for this system"
 
         return cpu_info
-    
+
     def get_system_info(self):
         info = {
             "system": platform.system(),
@@ -650,7 +650,7 @@ class FlirRecorder:
             self.chunk_data = []
             self.camera_info = {}
 
-        # Updating the binning needed to run at 60 Hz. 
+        # Updating the binning needed to run at 60 Hz.
         # TODO: make this check more robust in the future
         if frame_rate == 60:
             binning = 2
@@ -676,7 +676,7 @@ class FlirRecorder:
 
         self.cams.sort(key=lambda x: x.DeviceSerialNumber)
 
-        # Get the pixel format for each camera 
+        # Get the pixel format for each camera
         pixel_formats = [c.PixelFormat for c in self.cams]
 
         unrecognized = [pf for pf in pixel_formats if pf not in self.pixel_format_conversion]
@@ -735,10 +735,10 @@ class FlirRecorder:
                 "system_info": self.get_system_info(),
                 "chunk_data": self.chunk_data
             }
-        
+
         self.acquisition_type = "max_frames"
         self.video_segment_len = max_frames
-        
+
         return {
             "meta_info": "No Config",
             "camera_info": [c.DeviceSerialNumber for c in self.cams],
@@ -750,7 +750,7 @@ class FlirRecorder:
             "system_info": self.get_system_info(),
             "chunk_data": self.chunk_data
         }
-    
+
     def update_filename(self, current_filename):
 
         base_name = current_filename.split("/")[-1]
@@ -787,9 +787,9 @@ class FlirRecorder:
                 frame_idx = 0
 
         return frame_idx
-    
+
     def initialize_frame_metadata(self):
-            
+
         # Get the current real time
         real_time = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
         local_time = datetime.datetime.now()
@@ -809,7 +809,7 @@ class FlirRecorder:
             frame_metadata["serial_msg"] = []
 
         return frame_metadata
-    
+
     def process_serial_data(self, c):
         serial_msg = []
         frame_count = -1
@@ -826,7 +826,7 @@ class FlirRecorder:
                     frame_count |= (b & 0x7F) << (7 * i)
 
         return serial_msg, frame_count
-    
+
     def monitor_frames(self, frame_idx, frame_id, timestamp, camera_serial):
         curr_frame_diff = (frame_idx+1) - frame_id
         if curr_frame_diff != self.frame_diff[camera_serial] and curr_frame_diff != 0:
@@ -836,7 +836,7 @@ class FlirRecorder:
             print("checking acquisition queue sizes")
             # self.check_queue_sizes(self.acquisition_queue)
             self.frame_diff[camera_serial] = (frame_idx+1) - frame_id
-            
+
             if timestamp != 0 and self.prev_timestamp[camera_serial] != 0:
                 cur_timestamp_diff = timestamp - self.prev_timestamp[camera_serial]
 
@@ -857,7 +857,7 @@ class FlirRecorder:
     def get_frame_count(self):
         with self.frame_counter_lock:
             return self.frame_counter
-        
+
     def set_stop_frame(self, cleanup_frames):
         self.stop_frame = self.get_frame_count() + cleanup_frames
         self.stop_frame_set.set()
@@ -876,10 +876,10 @@ class FlirRecorder:
             # Split the video_base_name to get the root and the date
             # self.video_datetime = "_".join(self.video_base_name.split("_")[-2:])
             self.video_root = "_".join(self.video_base_name.split("_")[:-2])
-        
+
         config_metadata = self._prepare_config_metadata(max_frames)
 
-        # Set max_frames = self.video_segment_len. self.video_segment_len is either set to max_frames or 
+        # Set max_frames = self.video_segment_len. self.video_segment_len is either set to max_frames or
         # a value from the config file.
         max_frames = self.video_segment_len
 
@@ -1010,14 +1010,14 @@ class FlirRecorder:
 
                 try:
                     im_ref = camera.get_image()
-                    
+
                     if im_ref.IsIncomplete():
-                        
+
                         im_stat = im_ref.GetImageStatus()
                         print(f"{camera_serial}: Image incomplete\n{PySpin.Image.GetImageStatusDescription(im_stat)}")
                         im_ref.Release()
                         continue
-                    
+
                     timestamp = im_ref.GetTimeStamp()
                     frame_id = im_ref.GetFrameID()
 
@@ -1043,7 +1043,7 @@ class FlirRecorder:
                 if im_ref is None:
                     print("############################################### IMAGE IS NONE ******************************************")
                     continue
-                
+
                 try:
                     im = im_ref.GetNDArray()
 
@@ -1068,7 +1068,7 @@ class FlirRecorder:
                         frame_data['frame_id_abs'] = frame_id_abs
                         frame_data['serial_msg'] = serial_msg
                         frame_data['frame_count'] = frame_count
-                        
+
                     # put the frame data into the acquisition queue
                     self.acquisition_queue[camera_serial].put(frame_data)
 
@@ -1080,11 +1080,11 @@ class FlirRecorder:
                     # always be sure to release the image reference
                     if im_ref is not None:
                         im_ref.Release()
-                    
+
                     im_ref = None
                     im = None
                     frame_data = None
-                
+
                 frame_idx += 1
 
         def process_synchronized_metadata():
@@ -1095,7 +1095,7 @@ class FlirRecorder:
             while self.acquisition_type == "continuous" or frame_idx < max_frames:
 
                 if self.stop_recording.is_set():
-                    
+
                     # Set the current stop_frame
                     if not self.stop_frame_set.is_set():
                         print("setting stop frame")
@@ -1115,7 +1115,7 @@ class FlirRecorder:
                     continue
 
                 # Wait until all queues have at least one item
-                # acquisition_frames = [self.acquisition_queue[c].get() for c in self.cam_serials] 
+                # acquisition_frames = [self.acquisition_queue[c].get() for c in self.cam_serials]
                 acquisition_frames = []
                 for c in self.cam_serials:
                     acquisition_frames.append(self.acquisition_queue[c].get())
@@ -1130,7 +1130,7 @@ class FlirRecorder:
                 for frame_data in acquisition_frames:
 
                     camera_serial = frame_data['camera_serial']
-                    
+
                     self.frame_metadata['timestamps'].append(frame_data['timestamp'])
                     self.frame_metadata['frame_id'].append(frame_data['frame_id'])
                     self.frame_metadata['camera_serials'].append(camera_serial)
@@ -1148,8 +1148,8 @@ class FlirRecorder:
 
                     if frame_idx == 0:
                         self.initial_timestamp[camera_serial] = frame_data['timestamp']
-                    
-                    # self.monitor_frames( 
+
+                    # self.monitor_frames(
                     #     frame_idx,
                     #     frame_data['frame_id'],
                     #     frame_data['timestamp'],
@@ -1164,7 +1164,7 @@ class FlirRecorder:
                     self.json_queue.put(self.frame_metadata)
 
                 # Handle preview callback
-                if self.preview_callback: 
+                if self.preview_callback:
                     self.preview_callback(real_time_images)
 
                 frame_idx += 1
@@ -1172,7 +1172,7 @@ class FlirRecorder:
         # Start threads for acquisition
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(self.cams)) as camera_executor, \
             concurrent.futures.ThreadPoolExecutor(max_workers=1) as metadata_executor:
-            
+
             # Start all camera captures in parallel
             future_to_camera = {camera_executor.submit(get_camera_image, camera): camera for camera in self.cams}
 

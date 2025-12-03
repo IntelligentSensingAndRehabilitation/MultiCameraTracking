@@ -400,7 +400,7 @@
 						<apply>true</apply>
 						<!--Weight given to the task when solving inverse kinematics problems, default is 0.-->
 						<weight>10</weight>
-					</IKMarkerTask>				
+					</IKMarkerTask>
 					<IKMarkerTask name="LKnee">
 						<!--Whether or not this task will be used during inverse kinematics solve, default is true.-->
 						<apply>true</apply>
@@ -424,7 +424,7 @@
 						<apply>true</apply>
 						<!--Weight given to the task when solving inverse kinematics problems, default is 0.-->
 						<weight>10</weight>
-					</IKMarkerTask>			
+					</IKMarkerTask>
 					<IKMarkerTask name="RShoulder">
 						<!--Whether or not this task will be used during inverse kinematics solve, default is true.-->
 						<apply>true</apply>

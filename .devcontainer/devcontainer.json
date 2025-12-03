@@ -44,6 +44,6 @@
     },
     "runArgs": ["--env-file", ".env"],
     "hostRequirements": {
-        "gpu": "optional" 
+        "gpu": "optional"
       }
 }

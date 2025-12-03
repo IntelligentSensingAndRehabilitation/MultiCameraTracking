@@ -162,9 +162,9 @@ async def lifespan(app: FastAPI):
     # this can happen if the database is not running or if the network is down
     try:
         synchronize_to_datajoint(db)
-    except Exception as e:  
+    except Exception as e:
         acquisition_logger.error(f"Could not synchronize to datajoint: {e}")
-        
+
 
     yield
 
@@ -417,7 +417,7 @@ async def update_recording(recording: PriorRecordings, db=Depends(db_dependency)
 
 
 @api_router.post("/calibrate")
-async def update_recording(recording: PriorRecordings, 
+async def update_recording(recording: PriorRecordings,
                            charuco_flag: bool = Query(..., description="True for Charuco, False for Checkerboard"),
                            db=Depends(db_dependency)):
     from multi_camera.datajoint.calibrate_cameras import run_calibration

@@ -3,7 +3,7 @@ This is the schema to organize recording sessions with the multi camera
 recording system. This may be updated in the future with a more comprehensive
 refactoring of the multi_camera_dj module and corresponding schema.
 
-For now this is designed so there is only one session on a given date for a 
+For now this is designed so there is only one session on a given date for a
 given subject. This could be modified making that field a datetime.
 
 The MultiCameraRecording table doesn't have any type of session organization,
@@ -11,7 +11,7 @@ which makes it independent of this experimental organization. This could be
 a strength for certain applications, although I think in the future we will
 replace this with a dj.Elements design. This table also includes a project
 field. In hindsite, this isn't the best place for it. The project identification
-probably makes sense more as tags here with the Subject or Session table. 
+probably makes sense more as tags here with the Subject or Session table.
 However, even that might not always generalize which is why I didn't make
 it explicit as fields in those tables. For example, we may ultimately want
 some recordings to be associated with multiple projects. Thus I think it makes

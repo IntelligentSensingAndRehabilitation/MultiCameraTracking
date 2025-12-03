@@ -3,7 +3,7 @@
 All materials listed in this document can be found in [Required Hardware](docs/acquisition/acquisition_hardware.md)
 
 This BOM assumes you are using:
-- 6 cameras 
+- 6 cameras
 - 4.4-11mm Varifocal Lens
 - Mounted with tripods
 - 50ft Cat7 Ethernet Cables

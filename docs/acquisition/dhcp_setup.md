@@ -8,7 +8,7 @@
 - In a terminal run:
 
 ```
- ip link show 
+ ip link show
 ```
 
 - The interface names will be listed, it will likely be something like enp#s0 where the # could be any number. This `interface_name` will be used for the remainder of the guide.
@@ -37,7 +37,7 @@ default-lease-time 600;
 max-lease-time 7200;
 ```
 
-Configure subnet and IP range (`yourdomainname` can be set to anything, it is optional, I usually just put the computer host name) 
+Configure subnet and IP range (`yourdomainname` can be set to anything, it is optional, I usually just put the computer host name)
 
 Add this block under the max-lease-time line. Be sure to update the `MAC Address for interface` in the host switch section.
 
@@ -48,7 +48,7 @@ subnet 192.168.1.0 netmask 255.255.255.0 {
     option domain-name "yourdomainname";
     option routers 192.168.1.1;
     option broadcast-address 192.168.1.255;
-    
+
     host switch {
 		    hardware ethernet MAC Address for interface;
 		    fixed-address 192.168.1.2;

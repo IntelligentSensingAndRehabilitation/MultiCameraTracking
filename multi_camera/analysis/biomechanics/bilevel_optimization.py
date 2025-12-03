@@ -1,5 +1,5 @@
 """
-Implements Werling et al., “Rapid Bilevel Optimization to Concurrently Solve Musculoskeletal Scaling, 
+Implements Werling et al., “Rapid Bilevel Optimization to Concurrently Solve Musculoskeletal Scaling,
 Marker Registration, and Inverse Kinematic Problems for Human Motion Reconstruction.”
 
 Code largely adopted from

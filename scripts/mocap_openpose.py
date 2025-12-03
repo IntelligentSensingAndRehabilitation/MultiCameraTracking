@@ -3,7 +3,7 @@ from pose_pipeline import Video
 from pose_pipeline.utils.standard_pipelines import bottom_up_pipeline
 
 from pose_pipeline.pipeline import PersonBbox
-from multi_camera.datajoint.sessions import Recording 
+from multi_camera.datajoint.sessions import Recording
 from multi_camera.datajoint.gaitrite_comparison import GaitRiteRecording
 from multi_camera.datajoint.easymocap import EasymocapSmpl
 from multi_camera.datajoint.multi_camera_dj import *

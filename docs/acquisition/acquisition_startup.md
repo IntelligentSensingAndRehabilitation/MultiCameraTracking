@@ -1,6 +1,6 @@
 # Acquisition System Startup
 
-## Complete all [Acquisition Setup Guides](../README.md) 
+## Complete all [Acquisition Setup Guides](../README.md)
 ## Create a [config.yaml](example_config.md) file in your configs/ directory
 
 ### 1. Hardware Setup
@@ -65,7 +65,7 @@ make run
 ### 8. Open a browser http://localhost:3000/
 - Select a config file from the dropdown
 - Set a Participant ID and click **New Session**
-- Update the **Recording Base Filename** if desired 
+- Update the **Recording Base Filename** if desired
 - Start recording from cameras by:
     1. **Preview**: Will show video being collected from cameras but will not save any videos
     2. **New Trial**: Will record video from each camera and will save the videos in the **Recording Dir** in the format of `RecordingBaseFilename_YYYYMMDD_HHMMSS.camera_id.mp4`

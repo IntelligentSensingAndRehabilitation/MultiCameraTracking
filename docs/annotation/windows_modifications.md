@@ -1,6 +1,6 @@
 # Windows Modifications
 
-The annotation system expects a Linux OS by default. If you 
+The annotation system expects a Linux OS by default. If you
 are running on Windows or WSL the following modifications are
 needed.
 
@@ -26,7 +26,7 @@ needed.
     ```
 - Add the following to the docker-compose for the annotation service
     ```
-    networks: 
+    networks:
       <network_name>:
         external: true
     ```

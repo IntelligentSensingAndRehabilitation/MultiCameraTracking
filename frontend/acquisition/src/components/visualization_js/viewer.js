@@ -150,7 +150,7 @@ class Viewer {
         if (guiElement != undefined) {
             guiElement.appendChild(this.gui.domElement);
         } else {
-            // if full screen or in an iframe, this works. 
+            // if full screen or in an iframe, this works.
             this.domElement.parentElement.appendChild(this.gui.domElement);
             this.gui.domElement.style.position = 'absolute';
             this.gui.domElement.style.right = '0%';
@@ -261,7 +261,7 @@ class Viewer {
     }
 
     setFilter(filter) {
-        /* if true, then only show the meshes that are in the selected list and make the others 
+        /* if true, then only show the meshes that are in the selected list and make the others
         transparent */
 
         this.filter = filter;

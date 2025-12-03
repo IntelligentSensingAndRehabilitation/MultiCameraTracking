@@ -449,7 +449,7 @@ class ReprojectionError(dj.Computed):
         from multi_camera.datajoint.multi_camera_dj import SingleCameraVideo, MultiCameraRecording, PersonKeypointReconstruction
         from multi_camera.datajoint.calibrate_cameras import Calibration
         from pose_pipeline import TopDownPerson
-        
+
         def fetch_key_data(key):
             """Fetch necessary data for a given key."""
             calibration_key = (Calibration & key).fetch1("KEY")
@@ -469,14 +469,14 @@ class ReprojectionError(dj.Computed):
                 & recording_key
             ).fetch("keypoints", "camera_name")
             recording_timestamps = (MultiCameraRecording & recording_key).fetch1("recording_timestamps")
-            
+
             return k3d, camera_calibration, camera_names, keypoints, camera_name, recording_timestamps
-        
+
         def pad_keypoints(keypoints):
             """Pad keypoints with zeros for missing frames."""
             N = max(len(k) for k in keypoints)
             return np.stack([np.pad(k, ((0, N - len(k)), (0, 0), (0, 0)), mode='constant') for k in keypoints], axis=0)
-        
+
         def reorder_keypoints(keypoints, camera_names, camera_name):
             """Reorder keypoints to match the calibration order."""
             camera_name_list = camera_name.tolist()  # Convert to list
@@ -489,20 +489,20 @@ class ReprojectionError(dj.Computed):
             points2d = points2d[:, :, :num_joints, :]
             points3d = points3d[:, :num_joints, :]
             return points2d, points3d
-        
+
         k3d, camera_calibration, camera_names, keypoints, camera_name, recording_timestamps = fetch_key_data(key)
         keypoints = pad_keypoints(keypoints)
         points2d = reorder_keypoints(keypoints, camera_names, camera_name)
         points2d, k3d = match_joint_count(points2d, k3d)
         reprojection_values = np.nanmean(reprojection_loss(camera_calibration, points2d, k3d,huber_max=50, average = False),axis=2)
-        
+
         for camera_name, reprojection_value in zip(camera_names, reprojection_values):
             num_zeros = np.sum(reprojection_value == 0)
             num_nans = np.sum(np.isnan(reprojection_value))
-            
+
             # Replace 0s with NaNs
             reprojection_value_with_nans = np.where(reprojection_value == 0, np.nan, reprojection_value)
-            
+
             # Calculate reprojection error after replacing 0s with NaNs
             reprojection_error_with_nans = float(np.nanmean(reprojection_value_with_nans))
             if np.isnan(reprojection_error_with_nans):

@@ -18,7 +18,7 @@ const RecordingControl = () => {
                 {`
                 .form-recording {
                     background-color: purple;
-                    color: white; 
+                    color: white;
                 }`
                 }
 

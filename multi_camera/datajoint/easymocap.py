@@ -169,7 +169,7 @@ class EasymocapTracking(dj.Computed):
         # Add Easymocap as a tracking method if it is not already in TrackingBboxMethodLookup
         if not TrackingBboxMethodLookup & {'tracking_method': 21}:
             TrackingBboxMethodLookup.insert1({'tracking_method': 21, 'tracking_method_name': 'Easymocap'})
-            
+
         results = self.fetch1('tracking_results')
 
         camera_names = (SingleCameraVideo * MultiCameraRecording & self).fetch('camera_name')
