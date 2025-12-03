@@ -17,7 +17,7 @@ All contributors, maintainers, and participants are expected to:
 
 ## Unacceptable Behavior
 
-The following behaviors are not tolerated:
+The following behaviours are not tolerated:
 
 - Harassment or discrimination of any kind
 - Offensive comments related to identity or beliefs
@@ -29,7 +29,7 @@ The following behaviors are not tolerated:
 
 ## Reporting
 
-If you witness or experience unacceptable behavior, please report it by:
+If you witness or experience unacceptable behaviour, please report it by:
 
 1. Contacting the project maintainers directly
 2. Email: peabody124@gmail.com, kshah@sralab.org
