@@ -37,17 +37,17 @@ def shift_calibration(camera_params, offset, rotation=np.eye(3), zoffset=None):
     return camera_params
 
 def run_calibration_APL(
-        vid_base, 
-        charuco="charuco", 
-        checkerboard_size=109, 
-        checkerboard_dim=(5,7), 
+        vid_base,
+        charuco="charuco",
+        checkerboard_size=109,
+        checkerboard_dim=(5,7),
         marker_bits=6,
         releveling_type="no_leveling", # "no_leveling", "z_up", "stroller", "floor", "custom"
         board = None, # if not set we fall back to default board defined in run_AniposeLib_calibration
-        z_offset_set = 1.534, # in meters, height of board when using the stroller or custom releveling 
+        z_offset_set = 1.534, # in meters, height of board when using the stroller or custom releveling
         min_height=2.0, # min height of lowest cam in meters when using z_up
         min_cameras=2, # minimum number of cameras to use for fitting board pose
-        board_ground_time= (0,200), # range in samples when the board is on the ground/known position, used in floor or custom releveling 
+        board_ground_time= (0,200), # range in samples when the board is on the ground/known position, used in floor or custom releveling
         board_axis=(0,-1,0), # board axis in the board frame to align with global axis, used in floor or custom releveling
         global_axis=(0,0,1), # global axis in the global frame to align with board axis, used in floor or custom releveling
         board_secondary=(1,0,0), # secondary axis in the board frame to align with global secondary axis, used in floor or custom releveling
@@ -55,12 +55,12 @@ def run_calibration_APL(
         ):
     #APL calibration
     entry, board = run_AniposeLib_calibration(vid_base, charuco=charuco, checkerboard_size=checkerboard_size, checkerboard_dim=checkerboard_dim, marker_bits=marker_bits)
-    
+
     # Releveling calibration
-    params_dict_levelled, per_frame_p3ds_transformed, poses_transformed = relevel_calibration( entry= entry, releveling_type=releveling_type, board=board, 
-                                                                                              z_offset_set=z_offset_set, min_height=min_height, 
-                                                                                              min_cameras=min_cameras, board_ground_time=board_ground_time, 
-                                                                                              board_axis=board_axis, global_axis=global_axis, board_secondary=board_secondary, 
+    params_dict_levelled, per_frame_p3ds_transformed, poses_transformed = relevel_calibration( entry= entry, releveling_type=releveling_type, board=board,
+                                                                                              z_offset_set=z_offset_set, min_height=min_height,
+                                                                                              min_cameras=min_cameras, board_ground_time=board_ground_time,
+                                                                                              board_axis=board_axis, global_axis=global_axis, board_secondary=board_secondary,
                                                                                               global_secondary=global_secondary)
     print(f"[run_calibration_APL] Releveling completed with method: '{releveling_type}'")
 
@@ -71,26 +71,26 @@ def run_calibration_APL(
 
     return entry, board
     #db insert
-    
+
 
 def relevel_calibration(
         entry,
-        releveling_type = "stroller", 
+        releveling_type = "stroller",
         z_offset_set = 1.534, # in meters
         min_height=2.0, # in meters
-        min_cameras=2, 
+        min_cameras=2,
         board=None,
-        board_ground_time= (0,200), # in samples when the board is on the ground 
-        board_axis=(0,-1,0), 
-        global_axis=(0,0,1), 
-        board_secondary=(1,0,0), 
+        board_ground_time= (0,200), # in samples when the board is on the ground
+        board_axis=(0,-1,0),
+        global_axis=(0,0,1),
+        board_secondary=(1,0,0),
         global_secondary=(1,0,0)
         ):
     print(f"\n[relevel_calibration] Starting releveling with method: '{releveling_type}'")
 
     cal_points = entry["calibration_points"]
     cgroup = recreate_cgroup_from_entry(entry)
-    params_dict = entry["camera_calibration"] 
+    params_dict = entry["camera_calibration"]
 
     # Triangulate 3D points and get IDs
     per_frame_p3ds, per_frame_ids = triangulate_from_calibration_points(cal_points, cgroup, min_cameras=min_cameras)
@@ -146,9 +146,9 @@ def relevel_calibration(
         params_dict_custom, per_frame_p3ds_custom, poses_custom, shift_vec = shift_outputs_to_frame_z(
             params_dict_levelled, per_frame_p3ds_ground_transformed, poses_ground_transformed, best_frame=best_frame, z_offset_set=z_offset_set)
         return params_dict_custom, per_frame_p3ds_custom, poses_custom
-    
+
 def run_AniposeLib_calibration(vid_base = None, charuco="charuco", checkerboard_size=109, checkerboard_dim=(5,7), marker_bits=6):
-    
+
     vid_path, vid_base = os.path.split(vid_base) # vidbase full path to video without .camera.mp4 e.g. /mnt/CottonLab/mobile_system_data/20250122/q8o77/calibration_20250122_181045
 
     print(vid_path, vid_base)
@@ -156,7 +156,7 @@ def run_AniposeLib_calibration(vid_base = None, charuco="charuco", checkerboard_
 
     if not all_videos:
         print(f"No videos found for {vid_base}")
-        
+
 
     # Extract camera IDs
     camera_videos = {}
@@ -169,7 +169,7 @@ def run_AniposeLib_calibration(vid_base = None, charuco="charuco", checkerboard_
 
     if not camera_videos:
         print(f"Could not extract camera IDs from videos {vid_base}")
-        
+
 
     # Define camera names
     cam_names = []
@@ -177,7 +177,7 @@ def run_AniposeLib_calibration(vid_base = None, charuco="charuco", checkerboard_
     original_cam_ids = []
 
     for cam_id in sorted(camera_videos.keys()):
-        
+
         cam_names.append(str(cam_id))
         calib_videos.append(camera_videos[cam_id])
         original_cam_ids.append(str(cam_id))
@@ -189,7 +189,7 @@ def run_AniposeLib_calibration(vid_base = None, charuco="charuco", checkerboard_
 
     # Define the CharucoBoard parameters
     if charuco == "charuco":
-        board = CharucoBoard(squaresX=checkerboard_dim[1], squaresY=checkerboard_dim[0], square_length=checkerboard_size, marker_length=0.8*checkerboard_size, 
+        board = CharucoBoard(squaresX=checkerboard_dim[1], squaresY=checkerboard_dim[0], square_length=checkerboard_size, marker_length=0.8*checkerboard_size,
                             marker_bits=marker_bits, dict_size=250, manually_verify=False)
         print(f"Using CharucoBoard: {checkerboard_dim}, {checkerboard_size}, marker_bits={marker_bits}")
     else:
@@ -203,7 +203,7 @@ def run_AniposeLib_calibration(vid_base = None, charuco="charuco", checkerboard_
     cgroup = CameraGroup.from_names(cam_names, fisheye=False)
     error, all_rows = cgroup.calibrate_videos(calib_videos, board)
     num_frames = get_num_frames_from_videos(vid_path, vid_base, cam_names)
-    num_corners = len(board.objPoints) 
+    num_corners = len(board.objPoints)
     calibration_points = extract_calibration_points_from_all_rows(all_rows, cam_names,num_frames=num_frames, num_corners=num_corners)
 
     # Get camera dictionaries from camera group
@@ -220,10 +220,10 @@ def run_AniposeLib_calibration(vid_base = None, charuco="charuco", checkerboard_
         "tvec": np.array([c["translation"] for c in cam_dicts]) / 1000.0,
     }
 
- 
+
     # Create simplified placeholder for calibration points and shape
     num_cameras = len(cam_names)
-    
+
     calibration_shape = np.zeros((num_corners, 3))  # For a 4x6 grid
 
     # Try to get config hash from JSON file
@@ -325,52 +325,52 @@ def rotate_calibration_z_up_fixed(camera_params, min_height=2.0):
     """
     Rotate calibration data to make Z-axis point up and ensure cameras are properly oriented
     with Y-axes pointing downward (negative Z). Applies a unified transformation to all cameras.
-    
+
     Parameters:
         camera_params (dict): Dictionary with camera calibration parameters
         min_height (float): Minimum height (in meters) for cameras above ground
-        
+
     Returns:
         dict: Modified camera calibration parameters
     """
     import cv2
     import numpy as np
     import copy
-    
+
     # Create a deep copy to avoid modifying the original
     params = copy.deepcopy(camera_params)
-    
+
     # Extract vectors
     tvec = params["tvec"]
     rvec = params["rvec"]
-    
+
     # Convert rotation vectors to rotation matrices
     rmats = [cv2.Rodrigues(np.array(r[None, :]))[0] for r in rvec]
-    
+
     # Calculate camera positions in current space
     camera_positions = np.array([-np.linalg.inv(R).dot(t) for R, t in zip(rmats, tvec)])
-    
+
     # Step 1: First transformation - make Z-axis point up
     R_transform = np.array([
         [1, 0, 0],
         [0, 0, -1],  # Y becomes negative Z
         [0, 1, 0]    # Z becomes Y
     ])
-    
+
     # Step 2: Check if we need to flip all cameras to make Y point downward
     # Apply the transformation to the first camera's rotation matrix
     first_R_transformed = rmats[0] @ R_transform.T
-    
+
     # The second column of the rotation matrix represents the Y-axis direction in world coordinates
     first_y_axis = first_R_transformed[:, 1]
-    
+
     # Check if the Z component (index 2) of the Y-axis is positive
     # If so, the Y-axis is pointing upward after transformation
     # We need all cameras' Y-axes to point downward (negative Z component)
     need_flip = first_y_axis[2] > 0  # Z component is positive = pointing up
-    
+
     print(f"First camera's Y-axis after initial transform has Z component: {first_y_axis[2]:.4f}")
-    
+
     # Always apply the flip to force cameras to be upright
     # This ensures cameras have Y-axis pointing down consistently
     # regardless of initial orientation
@@ -379,7 +379,7 @@ def rotate_calibration_z_up_fixed(camera_params, min_height=2.0):
         [0, -1, 0],
         [0, 0, -1]
     ])
-    
+
     if need_flip:
         print("Y-axis has positive Z component (pointing up) - applying 180° flip")
         # Combine transformations
@@ -389,44 +389,44 @@ def rotate_calibration_z_up_fixed(camera_params, min_height=2.0):
         # Force the flip anyway to ensure consistency
         full_transform = R_transform @ flip_matrix
         print("Applying 180° flip to ensure all cameras are consistently oriented")
-    
+
     # Apply the unified transformation to all cameras
     new_rmats = []
     new_tvecs = []
     new_positions = []
-    
+
     for i, (R, t) in enumerate(zip(rmats, tvec)):
         # Apply full rotation to camera orientation
         new_R = R @ full_transform.T
-        
+
         # Calculate new camera position
         new_pos = full_transform @ camera_positions[i]
-        
+
         # Calculate new tvec
         new_tvec = -new_R @ new_pos
-        
+
         new_rmats.append(new_R)
         new_tvecs.append(new_tvec)
         new_positions.append(new_pos)
-    
+
     # Convert lists to numpy arrays
     new_rvecs = np.array([cv2.Rodrigues(R)[0].flatten() for R in new_rmats])
     new_tvecs = np.array(new_tvecs)
     new_positions = np.array(new_positions)
-    
+
     # Adjust heights to ensure minimum height above ground
     lowest_z = np.min(new_positions[:, 2])
-    
+
     if lowest_z < min_height:
         height_adjustment = min_height - lowest_z
-        
+
         # Apply the height adjustment to all camera positions
         for i in range(len(new_positions)):
             new_positions[i, 2] += height_adjustment
-            
+
             # Recalculate tvec based on the new position
             new_tvecs[i] = -new_rmats[i] @ new_positions[i]
-    
+
     # Verify the orientation of cameras after transformation
     downward_y_count = 0
     for i, R in enumerate(new_rmats):
@@ -434,17 +434,17 @@ def rotate_calibration_z_up_fixed(camera_params, min_height=2.0):
         is_pointing_down = y_axis_z_component < 0
         downward_y_count += is_pointing_down
         print(f"Camera {i} Y-axis Z component: {y_axis_z_component:.4f} ({'down' if is_pointing_down else 'up'})")
-    
+
     # Update the calibration parameters with new values
     params["rvec"] = new_rvecs
     params["tvec"] = new_tvecs
     shift = [0, 0, height_adjustment]
-    
+
     print(f"Calibration rotated with consistent transformation for all cameras.")
     print(f"{downward_y_count}/{len(new_rmats)} cameras have Y-axis pointing downward (negative Z).")
     print(f"All cameras are now at least {min_height}m above ground level.")
     print(f"Camera heights (Z): {new_positions[:, 2]}")
-    
+
     return params, full_transform, shift
 
 
@@ -708,7 +708,7 @@ def plot_per_frame_p3ds_with_board_slider(per_frame_p3ds, poses, board, params_d
                 text=True
             )
             process_ids = result.stdout.strip().split("\n")
-            
+
             # Kill the process if found
             for pid in process_ids:
                 if pid:
@@ -742,7 +742,7 @@ def plot_per_frame_p3ds_with_board_slider(per_frame_p3ds, poses, board, params_d
         print(f"Waiting for {delay} seconds before stopping the server...")
         time.sleep(delay)
         print("Stopping the server...")
-        
+
 
 
     # Show on port 8050
@@ -867,7 +867,7 @@ def align_calibration_to_board_best_frame(
     frame_range,
     board,
     params_dict,
-    
+
     board_axis=(0, 0, 1),
     global_axis=(0, 0, 1),
     board_secondary=(1, 0, 0),
@@ -994,7 +994,7 @@ def align_calibration_to_board_best_frame(
     # Transform to new global frame:
     t_board_global = R_global @ t_board
     board_z = t_board_global[2]
-        
+
     if z_offset != 0.0:
         # Move camera group so that the board's Z in the best frame matches z_offset
         tvec = params_dict_new["tvec"]
@@ -1019,7 +1019,7 @@ def align_calibration_to_board_best_frame(
             tvec[i] = -R @ C_world_new
         params_dict_new["tvec"] = tvec
 
- 
+
     # Also return R_global for transforming points/poses
     print(f"Best frame: {best_frame}, fit error: {best_fit_error:.4f}" if best_fit_error is not None else f"Best frame: {best_frame}")
     print(f"Selected from {len(best_count_frames)} frames with {max_count} detections.")
@@ -1260,8 +1260,8 @@ def recreate_cgroup_from_entry(entry):
             name=name,
             matrix=mtx,
             dist=params["dist"][i],
-            rvec=params["rvec"][i],      
-            tvec=params["tvec"][i]*1000  
+            rvec=params["rvec"][i],
+            tvec=params["tvec"][i]*1000
         )
         cameras.append(cam)
     return CameraGroup(cameras)

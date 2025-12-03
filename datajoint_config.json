@@ -1,0 +1,19 @@
+{
+    "connection.charset": "",
+    "connection.init_function": null,
+    "database.reconnect": false,
+    "database.use_tls": false,
+    "display.limit": 30,
+    "display.show_tuple_count": true,
+    "display.width": 14,
+    "enable_python_native_blobs": true,
+    "fetch_format": "array",
+    "loglevel": "INFO",
+    "safemode": true,
+    "stores": {
+        "localattach": {
+              "protocol": "file",
+              "location": "/datajoint_external"
+        }
+    }
+}

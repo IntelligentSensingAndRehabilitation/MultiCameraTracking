@@ -48,7 +48,7 @@ class BilevelLookup(dj.Lookup):
 class BiomechanicalReconstructionLookup(dj.Lookup):
     definition = """
     -> BilevelLookup
-    top_down_method         : int 
+    top_down_method         : int
     reconstruction_method   : int
     model_name              : varchar(255)
     ---

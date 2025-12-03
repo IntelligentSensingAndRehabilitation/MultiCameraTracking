@@ -103,7 +103,7 @@ class WalkingTypeLookup(dj.Lookup):
 class WalkingType(dj.Manual):
     definition = """
     # annotates the subtype of walking. This is only for overground walking.
-    -> VideoActivity 
+    -> VideoActivity
     ---
     -> WalkingTypeLookup
     """

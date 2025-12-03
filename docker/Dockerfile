@@ -32,20 +32,20 @@ RUN apt-get update && apt-get install nodejs -y
 RUN node -v
 RUN npm -v
 
-WORKDIR /Mocap/react_frontend
+WORKDIR /Mocap/frontend/acquisition
 
-COPY react_frontend/package*.json /Mocap/react_frontend/
+COPY frontend/acquisition/package*.json /Mocap/frontend/acquisition/
 
 RUN npm install
 
-COPY react_frontend /Mocap/react_frontend
+COPY frontend/acquisition /Mocap/frontend/acquisition
 
 ### Installing extra things (curl, screen, netstat) (can be removed after image is in stable state)
 RUN apt-get install -y net-tools
 
 ### Install EasyMocap
 WORKDIR /
-RUN git clone https://github.com/peabody124/EasyMocap
+RUN git clone https://github.com/IntelligentSensingAndRehabilitation/EasyMocap
 RUN pip install --upgrade pip
 RUN pip install -e /EasyMocap
 
@@ -60,15 +60,14 @@ RUN pip3 install numba
 ### Install MultiCameraTracking package and dependencies
 
 WORKDIR /Mocap
-# COPY requirements.txt .
-# RUN pip3 install -r requirements.txt
 COPY pyproject.toml README.md /Mocap/
 COPY multi_camera /Mocap/multi_camera
 COPY model_data /Mocap/model_data
 RUN pip3 install -e /Mocap/
 
-COPY docker/start_acquisition_gui.sh /Mocap/start_acquisition_gui.sh
-RUN chmod +x /Mocap/start_acquisition_gui.sh
+# Copy entrypoint scripts
+COPY docker/entrypoints /Mocap/entrypoints
+RUN chmod +x /Mocap/entrypoints/*.sh
 
 WORKDIR /
 RUN mkdir -p /data
@@ -78,14 +77,11 @@ RUN mkdir -p /configs
 COPY datajoint_config.json /root/.datajoint_config.json
 
 COPY tests /Mocap/tests
-COPY run_tests.sh /Mocap/run_tests.sh
 
 RUN pip3 install pytest
 
 RUN pip install --upgrade numpy
 RUN pip install --upgrade opencv-python opencv-contrib-python
-
-COPY run_reset.sh /Mocap/run_reset.sh
 
 # # Run bash script to start front end and back end
 ENTRYPOINT ["/bin/bash"]

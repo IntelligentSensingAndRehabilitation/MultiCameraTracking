@@ -667,7 +667,7 @@ def render_raw_collated(
     video_keys = (SingleCameraVideo.proj() * videos).fetch("KEY")
 
     width = np.unique((VideoInfo & video_keys).fetch("width"))[0]
-    height = np.unique((VideoInfo & video_keys).fetch("height"))[0] 
+    height = np.unique((VideoInfo & video_keys).fetch("height"))[0]
     fps = np.unique((VideoInfo & video_keys).fetch("fps"))[0]
 
     total_frames = np.min((VideoInfo & video_keys).fetch("num_frames"))
@@ -677,7 +677,7 @@ def render_raw_collated(
         video = videos[video_idx]
         cap = cv2.VideoCapture(video)
         results = []
-        
+
         if video_idx == 0:
             iter = tqdm(range(total_frames), desc=f"Extracting frames {recording_fn}")
         else:
@@ -689,14 +689,14 @@ def render_raw_collated(
                 print(f"Frame {frame_idx} could not be read from video {video_idx}")
                 continue
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            
+
             # Resize frame to target width while maintaining aspect ratio
             scale = portrait_width / frame.shape[1]
             target_height = int(frame.shape[0] * scale)
             frame = cv2.resize(frame, (portrait_width, target_height))
-            
+
             results.append(frame)
-        
+
         cap.release()
         return results
 
@@ -725,7 +725,7 @@ def render_raw_collated(
     os.close(fd)
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     writer = cv2.VideoWriter(filename, fourcc, fps, (results[0].shape[1], results[0].shape[0]))
-    
+
     for frame in tqdm(results, desc="Writing"):
         writer.write(cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
     writer.release()

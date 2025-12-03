@@ -1,113 +1,74 @@
+# MultiCameraTracking
 
-# Introduction
+A comprehensive system for multi-camera video acquisition, pose estimation, 3D reconstruction, and SMPL body model fitting. Designed for clinical movement analysis and biomechanics research using multi-view synchronous recording.
 
-This library supports multiview recordings, pose estimation, fitting SMPL meshes, and exporting the fits into OpenSim. It uses [DataJoint](https://github.com/datajoint) for the data management.
+## Overview
 
-Modules:
-- `multi_camera.acquisition` - the recording software
-- `multi_camera.acquisition.diagnostics` - tools to debug the recording software
-- `multi_camera.analysis` - core analysis code
-- `multi_camera.datajoint` - data management and bridges between recording software and analysis code
-- `multi_camera.utils` - miscellaneous utilities.
+This library provides an end-to-end processing pipeline from multi-camera video acquisition through to 3D skeletal reconstruction and body model fitting:
 
+- **Acquisition**: Multi-camera video recording with hardware synchronization (FLIR cameras with IEEE1588 support)
+- **2D Pose Estimation**: Per-view pose detection using PosePipeline (state-of-the-art models)
+- **3D Reconstruction**: Multi-view triangulation and temporal tracking of skeletal keypoints
+- **Data Management**: Structured database pipeline via DataJoint for organizing recordings, calibrations, and results
 
-Acquisition is designed to perform simple multi-camera video acquisition with FLIR cameras. These use network synchronization and are tested on BFS-PGE-31S4C. Requires recent firmware to support IEEE1588 synchronization.
+### Core Modules
 
-# TODO and Warning
+- `multi_camera.acquisition` - Recording software
+- `multi_camera.acquisition.diagnostics` - Debugging tools for the recording system
+- `multi_camera.analysis` - Core 3D reconstruction and analysis algorithms
+- `multi_camera.datajoint` - Database schema and computational pipelines
+- `multi_camera.utils` - Miscellaneous utilities
 
-This project is under active development and breaking changes may be introduced.
+## Project Status and Development Note
 
-- [ ] Develop a session management schema, ideally that is integrated into acquisition system
-- [ ] Migrate existing gaitrite_comparison code and biomechanics code to a validation module
-- [ ] Generalize biomechanical reconstructions to any acquisition session
+This tool is under active development and used by multiple research labs. The infrastructure is technical to set up and primarily supports internal use and collaborators. We have limited bandwidth to support special or custom use cases beyond the current core functionality.
 
-# Usage
+Breaking changes may be introduced during development. Issues and pull requests are welcome ([CONTRIBUTING](CONTRIBUTING)).
 
-## Installation:
-Activate your desired environment manager (conda or venv) and install with:
+## Platform Compatibility
 
-    pip install -e .
+This software is designed and tested on Linux. While it has been used on Windows previously, we only guarantee functionality on Linux, and we will not provide support for cross-platform issues.
 
-If uv is installed on your system, install with:
+## Acquisition System Setup
 
-    uv pip install -e .
+To set up the acquisition system, follow the comprehensive setup **[docs](docs/README.md)**:
 
-more details can be found [here](https://gist.github.com/peifferjd/0afc6484a99cf968cde16edb26752901).
+1. **[Hardware Setup](docs/acquisition/acquisition_hardware.md)** - Required camera equipment
+2. **[System Setup](docs/acquisition/general_system_setup.md)** - Network and OS configuration
+3. **[Docker Setup](docs/acquisition/docker_setup.md)** - Build the acquisition system
+4. **[Acquisition Software Setup](docs/acquisition/acquisition_software_setup.md)** - Configure the recording application
+5. **[Calibration Procedure](docs/calibration/calibration_procedure.md)** - Camera calibration
+6. **[Annotation Setup](docs/annotation/annotation_software_setup.md)** - Annotation system configuration
 
-## Running Web GUI
+## Installation (Analysis Pipeline Only)
 
-See the [Startup Instructions](docs/acquisition/acquisition_startup.md)
+To install the multi_camera package:
 
-## Calibration
+```bash
+pip install -e .
+```
 
-To record calibration data, analyze it, and insert it into the database run
+NOTE: This pip install does not install the acquisition system, just the code required for the analysis pipeline
 
-    python -m multi_camera.acquisition.flir_recording_api [-n NUM_CAMS] calibration
-    python -m multi_camera.datajoint.calibrate_cameras calibration_<basefile>
+## Data Processing Pipeline
 
-## Video analysis
+See the [Processing Pipeline documentation](docs/analysis/processing_pipeline.md) for detailed instructions on the complete workflow from acquisition through final 3D reconstruction, including:
 
-Please follow steps from [PosePipeline](github.com/peabody124/PosePipeline)
-- Annotate person of interest in videos. Note this currently requires annotating each view.
-- Perform top down person keypoint detection
+- Automated pipeline script: `session_pipeline.py`
+- Information about each pipeline stage
 
-## Triangulation
+## SMPL Model Setup
 
-Insert `CalibratedRecording` to indicate valid combinations of `Calibrations` and `MultiCameraRecording`. To find likely candidates can check:
+See the [SMPL Model Setup documentation](docs/analysis/smpl_setup.md) for details on:
 
-    calibration_offset = (Calibration * MultiCameraRecording).proj(cal_offset = 'ABS(recording_timestamps-cal_timestamp)')
-    calibration_offset = (calibration_offset & 'cal_offset < 10000')
-    MultiCameraRecording * calibration_offset - CalibratedRecording
+- Obtaining SMPL model files
+- Directory structure and file placement
+- Configuration and custom paths
+- Optional extended models (SMPLx, SMPLh)
 
-One that is set up, you can insert entries into `PersonKeypointReconstructionMethod` to indicate which `TopDownMethod` to triangulate, then run `PersonKeypointReconsturction.populate()`.
+## Key Dependencies
 
-To visualize a skeleton of the raw triangulated coordinates run `PersonKeypointReconstructionVideo.populate()`.
-
-## SMPL Reconstruction
-
-First, follow the [instructions from EasyMocap](https://github.com/arashsm79/EasyMocap/blob/master/doc/installation.md) to set up the SMPL models.
-
-**Note:** Set up the `data/` directory from `installation.md` in your clone of the **EasyMocap** repo.
-
-To perform SMPL fitting on the 3D keypoints with some temporal smoothing
-
-    SMPLReconstruction.populate(key)
-
-And to export a TRC file that can be loaded into OpenSim
-
-    (SMPLReconstruction & key).export_trc('outfile.trc')
-
-## Visualization and annotation.
-
-We have CLI support using the EasyMocap visualization. This can be used to select the person
-of interest from an Easymocap reconstruction for further top down analysis and visualization
-of the top down results. The smpl flag will show the SMPL reconstructions versus stick figures.
-
-    python apps/visualize.py --smpl FILENAME
-
-You can confirm the person you want by filtering
-
-    python apps/visualize.py --smpl FILENAME --filter SUBJECT_ID
-
-And if happy can even annotate accordingly
-
-    python apps/visualize.py --smpl FILENAME --filter SUBJECT_ID --annotate
-
-Finally, it can be used to visualize the results after annotation using the top down flag. This visualizes
-the SMPLReconstruction results
-
-    python apps/visualize.py --smpl --top_down FILENAME
-
-# Resources
-
-Web App:
-- https://docs.pydantic.dev/
-- https://fastapi.tiangolo.com/
-- https://react-bootstrap.github.io/
-- https://coreui.io/bootstrap-react/
-
-# Credits
-
-- Bundle adjustment from [Aniposelib](https://github.com/lambdaloop/aniposelib) is used for the calibration and triangulation.
-- [Easymocap](https://github.com/zju3dv/EasyMocap/) is used for fitting SMPL meshes to the 3D joint locations.
-- Code from [Pose2Sim](https://github.com/perfanalytics/pose2sim) is used for exporting to OpenSim and models from this repository are used for performing Inverse Kinematics on the extracted keypoints.
+- [PosePipeline](https://github.com/IntelligentSensingAndRehabilitation/PosePipeline) - 2D pose detection
+- [EasyMocap](https://github.com/IntelligentSensingAndRehabilitation/EasyMocap/) - SMPL model fitting
+- [DataJoint](https://datajoint.io/) - Database management and pipeline orchestration
+- [Aniposelib](https://github.com/lambdaloop/aniposelib) - Camera calibration and triangulation

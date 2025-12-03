@@ -4,7 +4,7 @@ version = "2024.01.14"
 description = "Library for multi-camera acquisition and analysis."
 authors = [
   {name = "James Cotton", email = "peabody124@gmail.com"},
-  {name = "Kunal Shah", email = "kshah@ricres.org"},
+  {name = "Kunal Shah", email = "kshah@sralab.org"},
   ]
 readme = "README.md"
 requires-python = ">=3.8"

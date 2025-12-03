@@ -21,11 +21,11 @@ import datetime
 #     # Use the mounted volume for output
 #     output_dir = '/Mocap/tests/testdata'
 #     os.makedirs(output_dir, exist_ok=True)
-    
+
 #     # Generate a unique filename for this test run
 #     video_filename = "test_recording"
 #     recording_path = os.path.join(output_dir, video_filename)
-    
+
 #     print("Recording Path: ", recording_path)
 
 #     acquisition.start_acquisition(recording_path=recording_path, max_frames=500)
@@ -61,25 +61,25 @@ def test_flir_recording_no_config(num_cams, max_frames):
     asyncio.run(acquisition.configure_cameras(num_cams=num_cams))
     print("Camera Status:")
     print(asyncio.run(acquisition.get_camera_status()))
-    
+
     # Use the mounted volume for output
     output_dir = '/Mocap/tests/testdata'
     os.makedirs(output_dir, exist_ok=True)
-    
+
     num_repetitions = 3  # Number of times to repeat each acquisition
     all_records = []
     quality_errors = []
-    
+
     try:
         for rep in range(num_repetitions):
             # Generate a unique filename for this test run and repetition
             video_filename = f"test_recording_no_config_rep{rep}"
             recording_path = os.path.join(output_dir, video_filename)
-            
+
             print(f"Recording Path (Repetition {rep + 1}/{num_repetitions}): {recording_path}")
             records = acquisition.start_acquisition(recording_path=recording_path, max_frames=max_frames)
             all_records.append(records)
-            
+
             # Process and save results for this repetition
             results, json_quality_errors = json_quality_test(os.path.join(output_dir, f'{video_filename}.json'), num_cams, max_frames)
 
@@ -91,7 +91,7 @@ def test_flir_recording_no_config(num_cams, max_frames):
             results['repetition'] = rep
             results['timestamp_spread'] = np.round(np.max(records[0]['timestamp_spread']), 3)
             results['recording_timestamp'] = records[0]['recording_timestamp'].strftime('%Y%m%d_%H%M%S')
-            
+
             # Save results for this repetition
             results_file = os.path.join(output_dir, 'test_matrix_results.json')
             if os.path.exists(results_file):
@@ -99,13 +99,13 @@ def test_flir_recording_no_config(num_cams, max_frames):
                     test_results = json.load(f)
             else:
                 test_results = {}
-                
+
             test_key = f"test_{num_cams}_{max_frames}_rep{rep}"
             test_results[test_key] = results
-            
+
             with open(results_file, 'w') as f:
                 json.dump(test_results, f, indent=4)
-            
+
     finally:
         acquisition.close()
 
@@ -122,7 +122,7 @@ def test_flir_recording_no_config(num_cams, max_frames):
     newline = "\n"
     # assert t json_quality_errors, f"Quality Errors in repetition {rep}: {newline.join(json_quality_errors)}"
     assert test_failures == 0, f"Quality Test Failures: {test_failures}/{num_repetitions}"
-    
+
 
 def video_quality_test(video_path):
     cap = cv2.VideoCapture(video_path)
@@ -167,7 +167,7 @@ def video_quality_test(video_path):
 
         # Get frame timestamp
         timestamp = cap.get(cv2.CAP_PROP_POS_MSEC)
-        
+
         # Check timestamp consistency
         if prev_timestamp is not None:
             if timestamp <= prev_timestamp:
@@ -218,7 +218,7 @@ def check_lengths(json_data, num_cams, max_frames):
 def check_timestamp_zeros(json_data):
 
     timestamp_results = {}
-    
+
     # Create dataframe wtih timestamps
     df = pd.DataFrame(json_data['timestamps'], columns=json_data['serials'])
 
@@ -282,7 +282,7 @@ def calculate_fps(timestamp_df):
 def calculate_overall_timespread(timestamp_df):
     # each column has the timestamps for a given camera (the camera id is the column name)
     # calculate the time spread for each camera
-    
+
     # convert the timestamps to ms from ns
     initial_ts = timestamp_df.iloc[0,0]
 
@@ -393,7 +393,7 @@ def json_quality_test(json_path, num_cams, max_frames):
 
 # def test_recording_quality():
 #     # Check the quality of the recorded video
-    
+
 #     # read the video files and check how many frames are in each and the fps
 #     # the video filenames are test_recording.cam_id.mp4
 
@@ -403,5 +403,5 @@ def json_quality_test(json_path, num_cams, max_frames):
 #     #     if filename.endswith(".mp4"):
 #     #         video_quality_test(os.path.join(test_data_dir, filename))
 
-        
+
 #     json_quality_test(os.path.join(test_data_dir, 'test_recording.json'))

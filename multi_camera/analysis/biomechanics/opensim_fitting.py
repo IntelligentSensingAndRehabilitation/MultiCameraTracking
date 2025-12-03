@@ -1,11 +1,11 @@
-""" 
+"""
 Fit an OpenSim model to the markers. Code is adopted from OpenCap
 https://github.com/stanfordnmbl/opencap-core/blob/main/main.py#L369
 https://github.com/stanfordnmbl/opencap-core/blob/main/utilsOpenSim.py#L10
 
 This requires OpenSim, which can be installed with
 
-    conda install -c opensim-org opensim=4.4=py38np120 
+    conda install -c opensim-org opensim=4.4=py38np120
 
 Under an Apache 2.0 license
 """

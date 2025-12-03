@@ -1,4 +1,4 @@
-""" 
+"""
 This file uses implicit functions to reconstruct the 3D joint locations
 from the 2D joint locations. This is an alternative to triangulation that
 allows adding additional constraints such as constant limb lengths and also

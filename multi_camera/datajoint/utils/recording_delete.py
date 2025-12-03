@@ -19,7 +19,7 @@ def thorough_delete_recording(recording):
     video_keys = (Video & single_camera_keys).fetch("KEY")
 
     assert len(video_keys) < 20, "Too many videos to delete"
-    
+
     print("Deleting recording:", recording_key)
     print("MMC Entry", multicamera_key)
     print("Video Entries", video_keys)
