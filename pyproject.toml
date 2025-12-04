@@ -1,6 +1,6 @@
 [project]
 name = "multi_camera"
-version = "2024.01.14"
+version = "2025.12.03"
 description = "Library for multi-camera acquisition and analysis."
 authors = [
   {name = "James Cotton", email = "peabody124@gmail.com"},
