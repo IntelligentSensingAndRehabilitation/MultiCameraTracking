@@ -58,13 +58,6 @@ def print_overall_summary(results: Dict[str, Any]):
 
     print(f"\nTotal test runs: {total_tests}")
     print(f"Number of configurations: {len(configs)}")
-    print(f"\nConfigurations tested:")
-    print(f"{'Cameras':<10} {'Frames':<10} {'Repetitions':<15}")
-    print('-' * 35)
-
-    for (num_cams, max_frames), tests in sorted(configs.items()):
-        print(f"{num_cams:<10} {max_frames:<10} {len(tests):<15}")
-
 
 def print_test_configuration_summary(results: Dict[str, Any]):
     """Print summary statistics grouped by test configuration."""
@@ -77,7 +70,7 @@ def print_test_configuration_summary(results: Dict[str, Any]):
         configs[(num_cams, max_frames)].append(test_data)
 
     # Print table header
-    header = f"{'Cams':<6} {'Frames':<8} {'Reps':<6} {'Avg FPS':<12} {'Spread (ms)':<15} {'Skips':<10} {'Dups':<10} {'Zero Counts':<12}"
+    header = f"{'Cams':<6} {'Frames':<8} {'Reps':<6} {'Avg FPS':<12} {'Avg Spread (ms)':<17} {'Skips':<8} {'Duplicates':<12} {'Zero Counts':<12}"
     print(f"\n{header}")
     print('-' * len(header))
 
@@ -112,8 +105,8 @@ def print_test_configuration_summary(results: Dict[str, Any]):
         avg_spread = statistics.mean(spread_values) if spread_values else 0
 
         print(f"{num_cams:<6} {max_frames:<8} {len(tests):<6} "
-              f"{avg_fps:<12.3f} {avg_spread * 1000:<15.3f} "
-              f"{total_skips:<10} {total_dups:<10} {total_zeros:<12}")
+              f"{avg_fps:<12.3f} {avg_spread:<17.3f} "
+              f"{total_skips:<8} {total_dups:<12} {total_zeros:<12}")
 
 
 def print_detailed_results(results: Dict[str, Any], config_filter: tuple = None):
@@ -391,34 +384,6 @@ def print_failure_analysis(results: Dict[str, Any]):
     if not issues_found:
         print("\nNo issues detected! All tests passed successfully.")
 
-
-def print_fps_comparison(results: Dict[str, Any]):
-    """Print FPS comparison across different camera counts."""
-    print_header("FPS COMPARISON BY CAMERA COUNT")
-
-    # Group by number of cameras
-    fps_by_cam_count = defaultdict(list)
-
-    for test_name, test_data in results.items():
-        num_cams, _, _ = parse_test_name(test_name)
-        cam_fps = list(test_data['timestamp_metrics']['raw_fps'].values())
-        if cam_fps:
-            fps_by_cam_count[num_cams].extend(cam_fps)
-
-    print(f"\n{'Cameras':<10} {'Count':<10} {'Mean FPS':<12} {'Min FPS':<12} {'Max FPS':<12} {'Std Dev':<12}")
-    print('-' * 68)
-
-    for num_cams in sorted(fps_by_cam_count.keys()):
-        fps_values = fps_by_cam_count[num_cams]
-        mean_fps = statistics.mean(fps_values)
-        min_fps = min(fps_values)
-        max_fps = max(fps_values)
-        std_fps = statistics.stdev(fps_values) if len(fps_values) > 1 else 0
-
-        print(f"{num_cams:<10} {len(fps_values):<10} {mean_fps:<12.3f} "
-              f"{min_fps:<12.3f} {max_fps:<12.3f} {std_fps:<12.3f}")
-
-
 def main():
     """Main entry point."""
     # Check for input file
@@ -436,7 +401,6 @@ def main():
     print_overall_summary(results)
     print_test_matrix(results)
     print_test_configuration_summary(results)
-    print_fps_comparison(results)
     print_failure_analysis(results)
 
     # Optional: Print detailed results for a specific configuration
