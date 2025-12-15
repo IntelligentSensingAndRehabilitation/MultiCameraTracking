@@ -22,4 +22,5 @@
         CAMERA_CONFIGS=/camera_configs # This is the path from Step 4
         DATAJOINT_EXTERNAL=/mnt/datajoint_external # This is your datajoint external localattach
         ```
-6. Run `make build-mocap` from the root of **MultiCameraTracking** to build the Docker container
+6. Rename `template.datajoint_config.json` to `datajoint_config.json`
+7. Run `make build-mocap` from the root of **MultiCameraTracking** to build the Docker container
