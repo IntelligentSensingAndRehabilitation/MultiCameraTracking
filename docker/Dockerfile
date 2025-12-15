@@ -45,8 +45,10 @@ RUN apt-get install -y net-tools
 
 ### Install EasyMocap
 WORKDIR /
+
+RUN pip install --no-build-isolation git+https://github.com/IntelligentSensingAndRehabilitation/chumpy.git
+
 RUN git clone https://github.com/IntelligentSensingAndRehabilitation/EasyMocap
-RUN pip install --upgrade pip
 RUN pip install -e /EasyMocap
 
 RUN git clone https://github.com/IntelligentSensingAndRehabilitation/PosePipeline.git
