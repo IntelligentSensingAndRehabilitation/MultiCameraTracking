@@ -45,3 +45,5 @@ results/
 diagnostics_output/
 
 .env
+
+datajoint_config.json
