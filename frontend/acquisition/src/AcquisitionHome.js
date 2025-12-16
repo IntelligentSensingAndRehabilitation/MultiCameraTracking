@@ -7,6 +7,7 @@ import RecordingControl from './components/RecordingControl';
 import Video from './components/Video';
 import CameraStatusTable from './components/CameraStatusTable';
 import PriorRecordingsTable from './components/PriorRecordingsTable';
+import DiskSpaceWarningModal from './components/DiskSpaceWarningModal';
 
 
 const AcquisitionHome = () => {
@@ -19,6 +20,7 @@ const AcquisitionHome = () => {
             <Video />
             <PriorRecordingsTable />
             <CameraStatusTable />
+            <DiskSpaceWarningModal />
         </Container>
     )
 }
