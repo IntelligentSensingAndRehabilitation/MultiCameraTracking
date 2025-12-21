@@ -3,6 +3,9 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+node_modules/
+annotation_frontend
+
 # C extensions
 *.so
 
