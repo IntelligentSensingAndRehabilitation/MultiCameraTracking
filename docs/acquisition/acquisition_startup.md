@@ -3,13 +3,27 @@
 ## Complete all [Acquisition Setup Guides](../README.md)
 ## Create a [config.yaml](example_config.md) file in your configs/ directory
 
-## Prerequisites
+## Quick Start (Recommended)
 
-If you have completed the [Persistent Settings](persistent_settings.md) setup, the MTU and DHCP server settings will be applied automatically. The startup process is simplified below.
+If you have completed the [Persistent Settings](persistent_settings.md) setup, use the unified startup script:
 
-If you have not run the persistence script, see the [Manual Startup](#manual-startup) section.
+```bash
+./scripts/acquisition/start_acquisition.sh
+```
 
-## Automated Startup (After Persistence Setup)
+The script will:
+1. Run system checks to validate your configuration
+2. Activate the DHCP-Server network profile (laptop mode only)
+3. Verify network settings (MTU, IP, DHCP server)
+4. Check disk space and camera configs
+5. Wait for cameras to connect
+6. Start the acquisition software
+
+The browser will automatically open at http://localhost:3000
+
+For manual startup or if you haven't run the persistence script, see the sections below.
+
+## Step-by-Step Startup (After Persistence Setup)
 
 ### 1. Hardware Setup
 

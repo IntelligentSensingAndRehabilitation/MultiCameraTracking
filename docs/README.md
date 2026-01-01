@@ -14,7 +14,9 @@ Use the links below to navigate:
 5. [Acquisition Software Setup](acquisition/acquisition_software_setup.md)
 6. [Persistent Settings (Recommended)](acquisition/persistent_settings.md)
 
-## [Acquisition Startup Guide](acquisition/acquisition_startup.md)
+## Acquisition Startup
+1. [Acquisition Startup Guide](acquisition/acquisition_startup.md)
+2. [Unified Startup Script](acquisition/startup_script.md)
 
 ## Annotation System
 1. [Annotation Software Setup](annotation/annotation_software_setup.md)
