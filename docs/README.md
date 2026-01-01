@@ -12,6 +12,7 @@ Use the links below to navigate:
 3. [DHCP Server Setup](acquisition/dhcp_setup.md)
 4. [Spinnaker App Setup](acquisition/spinnaker_app_setup.md)
 5. [Acquisition Software Setup](acquisition/acquisition_software_setup.md)
+6. [Persistent Settings (Recommended)](acquisition/persistent_settings.md)
 
 ## [Acquisition Startup Guide](acquisition/acquisition_startup.md)
 
