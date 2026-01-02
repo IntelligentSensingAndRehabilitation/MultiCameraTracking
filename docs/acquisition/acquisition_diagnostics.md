@@ -19,13 +19,44 @@ From the root of the MultiCameraTracking repository:
 sudo ./scripts/acquisition/acquisition_diagnostics.sh
 ```
 
-For more detailed output:
+### Command Line Options
+
+**Verbose mode** - Show additional detailed output:
 
 ```bash
 sudo ./scripts/acquisition/acquisition_diagnostics.sh --verbose
 ```
 
+**Quick mode** - Run only critical checks (network, MTU, DHCP):
+
+```bash
+sudo ./scripts/acquisition/acquisition_diagnostics.sh --quick
+```
+
+Quick mode is useful for fast pre-recording validation and skips:
+- Camera detection (section 5)
+- System logs collection (section 6)
+- Recent recordings check (section 7)
+- Hardware information (section 8)
+- DataJoint connectivity test (section 9)
+- Tarball generation
+
+**Combined options**:
+
+```bash
+sudo ./scripts/acquisition/acquisition_diagnostics.sh --quick --verbose
+```
+
 Running with sudo is recommended to access all system information, though the script will run without it (with limited diagnostics).
+
+### Deployment Mode Awareness
+
+The diagnostics script automatically detects the `DEPLOYMENT_MODE` from your `.env` file:
+
+- **Laptop mode**: Runs all DHCP server checks (section 4)
+- **Network mode**: Skips DHCP server checks since they're not needed when using building network infrastructure
+
+This ensures you only see relevant diagnostics for your deployment configuration.
 
 ## What It Checks
 
@@ -54,10 +85,14 @@ The diagnostics script performs comprehensive system validation across 9 section
 
 ### 4. DHCP Server Status
 
-- Verifies isc-dhcp-server is running (laptop mode only)
-- Shows recent DHCP logs
-- Lists active DHCP leases
-- Displays connected camera IP addresses
+- Checks deployment mode from `.env` file
+- In laptop mode:
+  - Verifies isc-dhcp-server is running
+  - Shows recent DHCP logs
+  - Lists active DHCP leases
+  - Displays connected camera IP addresses
+- In network mode:
+  - Skips all DHCP checks (not required when using building network infrastructure)
 
 ### 5. Camera Detection
 
@@ -164,6 +199,8 @@ At the end, the script displays:
 
 ```bash
 sudo ./scripts/acquisition/acquisition_diagnostics.sh --verbose
+# or short form:
+sudo ./scripts/acquisition/acquisition_diagnostics.sh -v
 ```
 
 Shows additional information:
@@ -171,28 +208,56 @@ Shows additional information:
 - Complete camera configuration files
 - Detailed network logs
 
+### Quick Mode
+
+```bash
+sudo ./scripts/acquisition/acquisition_diagnostics.sh --quick
+# or short form:
+sudo ./scripts/acquisition/acquisition_diagnostics.sh -q
+```
+
+Runs only critical checks for fast validation:
+- System information (section 1)
+- Environment configuration (section 2)
+- Network configuration (section 3)
+- DHCP server status (section 4, if laptop mode)
+
+Skips camera detection, log collection, recordings check, hardware info, and DataJoint connectivity.
+
 ### Help
 
 ```bash
 ./scripts/acquisition/acquisition_diagnostics.sh --help
 ```
 
-(Note: current script version uses `-v` flag only)
+Shows usage information (invalid arguments will also display usage).
 
 ## Use Cases
 
-### Pre-Flight Check Before Recording
+### System Checks Before Recording
 
-Run diagnostics before an important recording session:
+For a fast validation before recording, use quick mode:
+
+```bash
+sudo ./scripts/acquisition/acquisition_diagnostics.sh --quick
+```
+
+This runs in seconds and validates:
+- 0 errors found
+- Network is configured (MTU 9000, IP 192.168.1.1 in laptop mode)
+- DHCP server running (laptop mode only)
+- Sufficient disk space
+
+For comprehensive pre-recording checks including camera detection:
 
 ```bash
 sudo ./scripts/acquisition/acquisition_diagnostics.sh
 ```
 
-Review the summary and fix any errors. The system is ready when:
+The system is ready when:
 - 0 errors found
-- Network is configured (MTU 9000, IP 192.168.1.1)
-- DHCP server running
+- Network is configured (MTU 9000, IP 192.168.1.1 in laptop mode)
+- DHCP server running (laptop mode only)
 - Cameras detected
 - Sufficient disk space
 
