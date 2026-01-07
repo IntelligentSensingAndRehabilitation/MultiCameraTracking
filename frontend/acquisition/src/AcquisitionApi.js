@@ -136,12 +136,17 @@ export const AcquisitionApi = (props) => {
     }, [recordingDir, recordingFileBase, recordingFilename]);
 
     async function fetchSession() {
-        const response = await axios.get(`${API_BASE_URL}/session`);
-        const data = response.data;
+        try {
+            const response = await axios.get(`${API_BASE_URL}/session`);
+            const data = response.data;
 
-        setParticipant(data.participant_name);
-        setRecordingDir(data.recording_path);
-        setRecordingFileBase(data.participant_name);
+            setParticipant(data.participant_name);
+            setRecordingDir(data.recording_path);
+            setRecordingFileBase(data.participant_name);
+        } catch (error) {
+            // No session exists yet, which is fine - just ignore the error
+            console.log("No active session");
+        }
     }
 
     async function fetchDiskStatus() {
