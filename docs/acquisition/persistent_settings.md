@@ -72,30 +72,6 @@ The script behavior depends on the `DEPLOYMENT_MODE` variable in your `.env` fil
 - Network infrastructure provides DHCP
 - Only MTU and buffer settings are configured
 
-## After Running the Script
-
-### Laptop Mode
-
-You no longer need to manually run:
-- `set_mtu.sh` - MTU is set automatically when DHCP-Server connection activates
-- `sudo service isc-dhcp-server start` - DHCP server starts automatically on boot
-
-To start acquisition:
-```bash
-nmcli con up DHCP-Server
-make run
-```
-
-### Network Mode
-
-You no longer need to manually run:
-- `set_mtu.sh` - MTU applies automatically on the network connection
-
-To start acquisition:
-```bash
-make run
-```
-
 ## Verifying Settings
 
 Check MTU setting:
@@ -117,13 +93,6 @@ Check DHCP server status (laptop mode):
 systemctl is-enabled isc-dhcp-server
 systemctl status isc-dhcp-server
 ```
-
-## Re-running the Script
-
-The script is idempotent and can be safely re-run. It will:
-- Skip settings that are already configured
-- Update settings that have changed
-- Not create duplicate entries in configuration files
 
 ## Troubleshooting
 

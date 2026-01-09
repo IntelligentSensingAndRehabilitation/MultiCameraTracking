@@ -27,7 +27,6 @@ Before running the setup wizard:
    cd MultiCameraTracking
    ```
 3. **Network adapter connected** (for laptop mode)
-4. **Switch MAC address** (for laptop mode) - found on switch hardware label
 
 ## Running the Setup Wizard
 
@@ -39,20 +38,13 @@ sudo ./scripts/acquisition/setup_acquisition_system.sh
 
 The wizard must run with sudo to install packages and configure system settings.
 
-## Setup Process
+## Detailed Steps
 
 The wizard guides you through 9 steps:
 
 ### Step 1: System Prerequisites Check
 
-Validates your system meets requirements:
-- Ubuntu 22.04 (recommended)
-- Kernel version check
-- RAM (minimum 32GB recommended)
-- CPU cores (minimum 20+ recommended)
-- Repository structure
-
-If any check fails, you can choose to continue anyway or cancel setup.
+Validates your system meets requirements
 
 ### Step 2: Deployment Mode Selection
 
@@ -70,8 +62,6 @@ Choose how the system will be deployed:
 - Less common
 - Skips DHCP configuration steps
 
-**Selection:** Choose [1] or [2]
-
 ### Step 3: Docker Installation
 
 Checks if Docker is installed. If not:
@@ -81,9 +71,7 @@ Checks if Docker is installed. If not:
 - Adds user to docker group
 - Starts Docker service
 
-If Docker is already installed, checks docker group membership.
-
-**Note:** You'll need to log out and back in for docker group changes to take effect.
+**Note:** You'll need to open a new terminal for docker group changes to take effect.
 
 ### Step 4: Network Interface Detection
 
@@ -155,29 +143,11 @@ Automatically runs the persistence script to make settings survive reboots:
 - Network buffers configured in /etc/sysctl.conf
 - DHCP server enabled on boot (laptop mode only)
 
-**Prompt:** Apply persistent settings now? [Y/n]
-
-If skipped, you can run manually later:
-```bash
-./scripts/acquisition/make_settings_persistent.sh
-```
-
 ### Step 9: Docker Image Build
 
 Builds the mocap Docker image required for acquisition.
 
-**Warning:** This step takes 10-20 minutes depending on your system.
-
-**Prompt:** Build Docker image now? [Y/n]
-
-If skipped, you must build before first use:
-```bash
-make build-mocap
-```
-
 ## After Setup
-
-### Immediate Next Steps
 
 1. **Activate docker group** (choose one):
    - **Option A (immediate):** Run `newgrp docker` to activate in current shell
@@ -188,112 +158,6 @@ make build-mocap
    - Location: The camera configs directory you specified (e.g., /camera_configs)
    - Format: YAML files with camera serial numbers and settings
    - See: [Example Config](example_config.md)
-
-3. **Hardware setup:**
-   - **Laptop mode:** Connect cameras to network switch, switch to laptop
-   - **Network mode:** Ensure cameras are on the building network
-
-4. **Start acquisition:**
-   ```bash
-   ./scripts/acquisition/start_acquisition.sh
-   ```
-   Or:
-   ```bash
-   make start-acquisition
-   ```
-
-### Verification
-
-Verify your setup with the diagnostics script:
-
-```bash
-sudo ./scripts/acquisition/acquisition_diagnostics.sh
-```
-
-Should show:
-- 0 errors
-- Network configured correctly
-- DHCP server running (laptop mode)
-- Directories created
-
-## Troubleshooting
-
-### Error: Must run with sudo
-
-The setup script needs root privileges to install packages and configure system settings.
-
-```bash
-sudo ./scripts/acquisition/setup_acquisition_system.sh
-```
-
-### Error: Repository appears incomplete
-
-Ensure you're in the MultiCameraTracking repository root and all files were cloned correctly.
-
-```bash
-cd MultiCameraTracking
-git pull  # Update to latest
-```
-
-### Warning: System doesn't meet prerequisites
-
-Common warnings:
-- **RAM < 32GB:** Can still work but may have performance issues with 8-10 cameras
-- **CPU cores < 20:** Can still work but frame processing may be slower
-- **Not Ubuntu 22.04:** May work on other versions but is untested
-
-You can continue setup despite warnings, but functionality may be limited.
-
-### Docker group membership not working
-
-After setup completes, activate the docker group:
-
-**Option 1 (recommended for testing):**
-```bash
-newgrp docker
-```
-This activates the group immediately in your current shell.
-
-**Option 2 (permanent):**
-1. Log out completely
-2. Log back in
-3. Verify with: `groups` (should show "docker")
-
-### Could not detect MAC address
-
-If the wizard fails to detect the MAC address of your network interface:
-
-- Ensure the network cable is plugged in
-- Try `ip link show <interface-name>` manually to verify it has a MAC address
-- The interface must be a physical ethernet adapter (not virtual)
-
-### Docker build failed
-
-Common causes:
-- Insufficient disk space (need ~10GB free)
-- Network issues downloading dependencies
-- Missing download_flir.sh execution
-
-Fix and retry:
-```bash
-cd docker
-./download_flir.sh  # If you haven't run this
-cd ..
-make build-mocap
-```
-
-### DHCP server won't start
-
-After setup, check:
-```bash
-sudo systemctl status isc-dhcp-server
-sudo journalctl -u isc-dhcp-server
-```
-
-Common issues:
-- Network interface not connected
-- Invalid DHCP configuration
-- NetworkManager profile not activated
 
 ## Manual Setup Alternative
 
@@ -325,28 +189,11 @@ The wizard automates system setup but **does not:**
    - Should be run separately before Docker build
    - Script: `docker/download_flir.sh`
 
-## Unattended Setup
-
-For automated deployment, you can pre-configure answers (though not recommended for first-time setup):
-
-```bash
-# Example: Fully automated setup (dangerous - no validation)
-# This is just to show the concept - manual interaction is safer
-
-echo "1" | sudo ./scripts/acquisition/setup_acquisition_system.sh
-```
-
-However, we recommend interactive mode for proper validation and error checking.
-
 ## Getting Help
 
 If you encounter issues during setup:
 
 1. **Review error messages** - the wizard provides specific guidance
-2. **Run diagnostics:**
-   ```bash
-   sudo ./scripts/acquisition/acquisition_diagnostics.sh
-   ```
-3. **Check individual setup guides** for detailed manual steps
-4. **Report issues** with diagnostic output at:
+2. **Check individual setup guides** for detailed manual steps
+3. **Report issues** with diagnostic output at:
    https://github.com/IntelligentSensingAndRehabilitation/MultiCameraTracking/issues
