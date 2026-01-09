@@ -68,70 +68,15 @@ Shows usage information and available options.
 
 ## Troubleshooting
 
-### Error: .env file not found
+For detailed solutions to common issues, see the [Troubleshooting Guide](troubleshooting.md):
 
-Create `.env` from `.env.template` and fill in the required values. See [Acquisition Software Setup](acquisition_software_setup.md).
-
-### Error: Network interface not found
-
-The `NETWORK_INTERFACE` in your `.env` file doesn't match any physical interface.
-
-Check available interfaces:
-```bash
-ip link show
-```
-
-Update `NETWORK_INTERFACE` in `.env` to match your actual interface name.
-
-### Warning: MTU is not 9000
-
-Run the persistence script to make MTU settings permanent:
-```bash
-./scripts/acquisition/make_settings_persistent.sh
-```
-
-Or set it manually for this session:
-```bash
-sudo sh scripts/acquisition/set_mtu.sh
-```
-
-### Warning: Network buffers not configured
-
-Run the persistence script to configure buffers permanently:
-```bash
-./scripts/acquisition/make_settings_persistent.sh
-```
-
-### Error: Low disk space
-
-Free up space in your `DATA_VOLUME` directory. The threshold is set by `DISK_SPACE_WARNING_THRESHOLD_GB` in your `.env` file (default: 50GB).
-
-Check disk usage:
-```bash
-df -h /data  # or your DATA_VOLUME path
-```
-
-### Error: DHCP-Server profile not found
-
-Complete the DHCP setup first. See [DHCP Server Setup](dhcp_setup.md).
-
-### Warning: DHCP server not running
-
-If you've run the persistence script, the DHCP server should start automatically on boot.
-
-Start it manually:
-```bash
-sudo systemctl start isc-dhcp-server
-```
-
-Check status:
-```bash
-sudo systemctl status isc-dhcp-server
-```
-
-### Warning: No camera config files found
-
-Create a camera configuration YAML file in your `CAMERA_CONFIGS` directory. See [Example Config](example_config.md).
+- [Environment Configuration Issues](troubleshooting.md#environment-configuration-issues)
+- [Network Interface Issues](troubleshooting.md#network-interface-issues)
+- [MTU Configuration Issues](troubleshooting.md#mtu-configuration-issues)
+- [Network Buffer Issues](troubleshooting.md#network-buffer-issues)
+- [DHCP Server Issues](troubleshooting.md#dhcp-server-issues)
+- [Camera Configuration Issues](troubleshooting.md#camera-configuration-issues)
+- [Disk Space Issues](troubleshooting.md#disk-space-issues)
 
 ## Deployment Modes
 

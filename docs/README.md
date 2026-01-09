@@ -14,11 +14,13 @@ Use the links below to navigate:
 5. [Spinnaker App Setup](acquisition/spinnaker_app_setup.md)
 6. [Acquisition Software Setup](acquisition/acquisition_software_setup.md)
 7. [Persistent Settings](acquisition/persistent_settings.md)
+8. [Example Camera Configuration](acquisition/example_config.md)
 
 ## Acquisition Startup
 1. [Acquisition Startup Guide](acquisition/acquisition_startup.md)
 2. [Unified Startup Script](acquisition/startup_script.md)
 3. [Acquisition Diagnostics](acquisition/acquisition_diagnostics.md)
+4. [Troubleshooting Guide](acquisition/troubleshooting.md)
 
 ## Annotation System
 1. [Annotation Software Setup](annotation/annotation_software_setup.md)

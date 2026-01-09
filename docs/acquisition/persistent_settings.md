@@ -96,17 +96,9 @@ systemctl status isc-dhcp-server
 
 ## Troubleshooting
 
-**Error: .env file not found**
-- Create `.env` from `.env.template` and fill in required values
+For detailed solutions, see the [Troubleshooting Guide](troubleshooting.md):
 
-**Error: DHCP-Server connection profile not found**
-- Complete the [DHCP Setup](dhcp_setup.md) before running this script
-
-**Warning: No active connection found**
-- In network mode, ensure your network interface is connected before running the script
-- You may need to manually set MTU with: `nmcli con modify <connection-name> ethernet.mtu 9000`
-
-**DHCP server not starting on boot**
-- Check if isc-dhcp-server is installed: `dpkg -l | grep isc-dhcp-server`
-- Check systemd service status: `systemctl status isc-dhcp-server`
-- Review DHCP logs: `sudo journalctl -u isc-dhcp-server`
+- [Environment Configuration Issues](troubleshooting.md#environment-configuration-issues)
+- [MTU Configuration Issues](troubleshooting.md#mtu-configuration-issues)
+- [Network Buffer Issues](troubleshooting.md#network-buffer-issues)
+- [DHCP Server Issues](troubleshooting.md#dhcp-server-issues)

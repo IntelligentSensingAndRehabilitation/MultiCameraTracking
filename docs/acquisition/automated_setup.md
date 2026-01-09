@@ -64,42 +64,29 @@ Choose how the system will be deployed:
 
 ### Step 3: Docker Installation
 
-Checks if Docker is installed. If not:
-- Prompts for installation confirmation
-- Adds Docker repository
-- Installs Docker Engine and Docker Compose
-- Adds user to docker group
-- Starts Docker service
+Checks if Docker is installed. If not, the wizard will install it automatically.
 
-**Note:** You'll need to open a new terminal for docker group changes to take effect.
+**Note:** You'll need to activate the docker group after setup (see [After Setup](#after-setup)).
+
+For manual installation details, see [Docker Setup](docker_setup.md).
 
 ### Step 4: Network Interface Detection
 
-Auto-detects available ethernet interfaces and displays:
-- Interface name (e.g., enp5s0)
-- MAC address
-- Connection status
+Auto-detects available ethernet interfaces and prompts you to select which one connects to your cameras.
 
 **Selection:**
 - If only one interface found: Auto-selected
 - If multiple interfaces: Choose from numbered list
 
+For help identifying the correct interface, see [Network Interface Issues](troubleshooting.md#network-interface-issues).
+
 ### Step 5: DHCP Server Setup (Laptop Mode Only)
 
 Skipped in network mode.
 
-In laptop mode:
-- Installs isc-dhcp-server package
-- Auto-detects MAC address of selected network interface
-- Generates `/etc/dhcp/dhcpd.conf` with proper subnet configuration
-- Configures `/etc/default/isc-dhcp-server`
-- Creates NetworkManager "DHCP-Server" profile
+In laptop mode, the wizard automatically configures a DHCP server so your laptop can assign IP addresses to the cameras.
 
-**DHCP Configuration:**
-- Subnet: 192.168.1.0/24
-- Laptop IP: 192.168.1.1 (fixed reservation using detected MAC)
-- Camera range: 192.168.1.10 - 192.168.1.100
-- DNS: 8.8.8.8, 8.8.4.4
+For configuration details and manual setup, see [DHCP Server Setup](dhcp_setup.md).
 
 ### Step 6: Directory Creation
 
@@ -120,28 +107,21 @@ The wizard creates directories if they don't exist and sets proper ownership.
 
 ### Step 7: Environment Configuration
 
-Creates `.env` file with your configuration.
-
-**Database settings:**
-- Username (default: root)
-- Password (default: pose)
-- Host (default: 127.0.0.1)
-- Port (default: 3306)
-
-**Other settings:**
-- React app base URL (default: localhost)
-- Disk space warning threshold in GB (default: 50)
-
-All previously configured values (deployment mode, network interface, directories) are automatically included.
+Creates `.env` file with your configuration, including:
+- DataJoint database credentials
+- Deployment mode and network interface
+- Directory paths
+- System thresholds
 
 If `.env` already exists, prompts before overwriting.
 
+For details on all environment variables, see [Acquisition Software Setup](acquisition_software_setup.md).
+
 ### Step 8: Persistent Network Settings
 
-Automatically runs the persistence script to make settings survive reboots:
-- MTU set to 9000 via NetworkManager
-- Network buffers configured in /etc/sysctl.conf
-- DHCP server enabled on boot (laptop mode only)
+Automatically runs the persistence script to make network settings survive reboots.
+
+For details, see [Persistent Settings](persistent_settings.md).
 
 ### Step 9: Docker Image Build
 
@@ -194,6 +174,7 @@ The wizard automates system setup but **does not:**
 If you encounter issues during setup:
 
 1. **Review error messages** - the wizard provides specific guidance
-2. **Check individual setup guides** for detailed manual steps
-3. **Report issues** with diagnostic output at:
+2. **Check the [Troubleshooting Guide](troubleshooting.md)** for solutions to common issues
+3. **Check individual setup guides** for detailed manual steps
+4. **Report issues** with diagnostic output at:
    https://github.com/IntelligentSensingAndRehabilitation/MultiCameraTracking/issues

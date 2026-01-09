@@ -157,41 +157,15 @@ At the end, the script displays:
 
 ### Common Issues and Fixes
 
-**Error: NETWORK_INTERFACE not set in .env**
-- Edit `.env` and set NETWORK_INTERFACE to your ethernet adapter name
-- Use `ip link show` to find available interfaces
+For detailed solutions to all issues, see the [Troubleshooting Guide](troubleshooting.md):
 
-**Error: MTU is not 9000**
-- Run the persistence script: `./scripts/acquisition/make_settings_persistent.sh`
-- Or manually: `sudo sh scripts/acquisition/set_mtu.sh`
-
-**Error: Interface does not exist**
-- Check if the network cable is plugged in
-- Verify NETWORK_INTERFACE in `.env` matches actual interface name
-- Use `ip link show` to see available interfaces
-
-**Error: isc-dhcp-server is NOT running**
-- Start manually: `sudo systemctl start isc-dhcp-server`
-- Check logs: `sudo journalctl -u isc-dhcp-server`
-- Verify DHCP configuration: `/etc/dhcp/dhcpd.conf`
-
-**Warning: IP address is not 192.168.1.1**
-- Activate DHCP-Server profile: `nmcli con up DHCP-Server`
-- Check NetworkManager profile configuration
-
-**Warning: Network buffers not configured**
-- Run the persistence script: `./scripts/acquisition/make_settings_persistent.sh`
-
-**Error: No cameras detected**
-- Ensure cameras are powered and connected to network switch
-- Check DHCP server is running and issuing leases
-- Look for double-blink green LED on camera backs
-- Verify switch MAC address in `/etc/dhcp/dhcpd.conf`
-
-**Warning: DataJoint connection slow**
-- Check network connectivity to database host
-- Verify database host is reachable
-- Consider using local database for better performance
+- [Environment Configuration Issues](troubleshooting.md#environment-configuration-issues)
+- [Network Interface Issues](troubleshooting.md#network-interface-issues)
+- [MTU Configuration Issues](troubleshooting.md#mtu-configuration-issues)
+- [Network Buffer Issues](troubleshooting.md#network-buffer-issues)
+- [DHCP Server Issues](troubleshooting.md#dhcp-server-issues)
+- [Camera Detection Issues](troubleshooting.md#camera-detection-issues)
+- [DataJoint Connectivity Issues](troubleshooting.md#datajoint-connectivity-issues)
 
 ## Command Line Options
 
