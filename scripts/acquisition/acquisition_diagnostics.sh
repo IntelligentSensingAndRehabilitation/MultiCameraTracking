@@ -4,8 +4,9 @@
 # MultiCameraTracking Acquisition Diagnostics Script
 #
 # Purpose: Collect diagnostic information for debugging acquisition issues
-# Usage: sudo ./acquisition_diagnostics.sh [-v|--verbose]
+# Usage: sudo ./acquisition_diagnostics.sh [-v|--verbose] [-q|--quick]
 #        -v, --verbose: Show detailed output (DHCP leases, config files, etc.)
+#        -q, --quick:   Run only critical checks (network, MTU, DHCP)
 # Output: Creates ./diagnostics_output/acquisition_diagnostics_YYYYMMDD_HHMMSS.log
 #         and ./diagnostics_output/acquisition_diagnostics_YYYYMMDD_HHMMSS.tar.gz
 #
@@ -15,14 +16,19 @@
 
 # Parse command line arguments
 VERBOSE=false
+QUICK=false
 while [[ $# -gt 0 ]]; do
     case $1 in
         -v|--verbose)
             VERBOSE=true
             shift
             ;;
+        -q|--quick)
+            QUICK=true
+            shift
+            ;;
         *)
-            echo "Usage: $0 [-v|--verbose]"
+            echo "Usage: $0 [-v|--verbose] [-q|--quick]"
             exit 1
             ;;
     esac
@@ -284,6 +290,17 @@ collect_network_info() {
 
 collect_dhcp_info() {
     print_section "4. DHCP SERVER STATUS"
+
+    # Check deployment mode - skip DHCP checks if in network mode
+    if [ "${DEPLOYMENT_MODE}" = "network" ]; then
+        print_info "Deployment mode: network"
+        print_info "DHCP server checks skipped (not required in network mode)"
+        echo "Deployment mode: network - DHCP checks skipped" >> "${LOG_FILE}"
+        return 0
+    fi
+
+    print_info "Deployment mode: laptop"
+    print_info ""
 
     # Check DHCP server status
     print_info "Checking isc-dhcp-server status..."
@@ -685,11 +702,15 @@ generate_summary() {
         echo -e "${RED}✗${NC} Network interface ${NETWORK_INTERFACE} not found" | tee -a "${LOG_FILE}"
     fi
 
-    # DHCP check
-    if systemctl is-active --quiet isc-dhcp-server 2>/dev/null || service isc-dhcp-server status >/dev/null 2>&1; then
-        echo -e "${GREEN}✓${NC} DHCP server is running" | tee -a "${LOG_FILE}"
+    # DHCP check (only in laptop mode)
+    if [ "${DEPLOYMENT_MODE}" = "laptop" ]; then
+        if systemctl is-active --quiet isc-dhcp-server 2>/dev/null || service isc-dhcp-server status >/dev/null 2>&1; then
+            echo -e "${GREEN}✓${NC} DHCP server is running" | tee -a "${LOG_FILE}"
+        else
+            echo -e "${RED}✗${NC} DHCP server is not running" | tee -a "${LOG_FILE}"
+        fi
     else
-        echo -e "${RED}✗${NC} DHCP server is not running" | tee -a "${LOG_FILE}"
+        echo -e "${CYAN}○${NC} DHCP server check skipped (network mode)" | tee -a "${LOG_FILE}"
     fi
 
     # DataJoint check
@@ -759,6 +780,9 @@ main() {
     clear
     echo "================================================================================"
     echo -e "${BOLD}MultiCameraTracking Acquisition Diagnostics${NC}"
+    if [ "$QUICK" = true ]; then
+        echo -e "${CYAN}(Quick Mode - Critical Checks Only)${NC}"
+    fi
     echo "================================================================================"
     echo ""
     echo "Starting diagnostic collection at $(date)"
@@ -774,6 +798,11 @@ main() {
 
     # Initialize log file
     echo "MultiCameraTracking Acquisition Diagnostics" > "${LOG_FILE}"
+    if [ "$QUICK" = true ]; then
+        echo "Mode: Quick (critical checks only)" >> "${LOG_FILE}"
+    else
+        echo "Mode: Full" >> "${LOG_FILE}"
+    fi
     echo "Generated: $(date)" >> "${LOG_FILE}"
     echo "Hostname: $(hostname)" >> "${LOG_FILE}"
     echo "================================================================================" >> "${LOG_FILE}"
@@ -786,22 +815,34 @@ main() {
         echo ""
     fi
 
-    # Run all diagnostic functions
-    collect_system_info
-    collect_env_config
-    collect_network_info
-    collect_dhcp_info
-    collect_camera_info
-    collect_logs
-    check_recent_recordings
-    check_hardware
-    check_datajoint_connection
+    # Run diagnostic functions based on mode
+    if [ "$QUICK" = true ]; then
+        # Quick mode: only critical checks
+        collect_system_info
+        collect_env_config
+        collect_network_info
+        collect_dhcp_info
 
-    # Generate summary
-    generate_summary
+        # Generate summary (no tarball in quick mode)
+        generate_summary
+    else
+        # Full mode: all checks
+        collect_system_info
+        collect_env_config
+        collect_network_info
+        collect_dhcp_info
+        collect_camera_info
+        collect_logs
+        check_recent_recordings
+        check_hardware
+        check_datajoint_connection
 
-    # Create tarball and cleanup
-    create_tarball
+        # Generate summary
+        generate_summary
+
+        # Create tarball and cleanup
+        create_tarball
+    fi
 }
 
 # Run main function

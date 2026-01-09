@@ -17,10 +17,16 @@
         DJ_HOST=127.0.0.1 # DataJoint DB Hostname
         DJ_PORT=3306 # DataJoint DB port number
         NETWORK_INTERFACE=enp5s0 # You get this from the DHCP Setup step
+        DEPLOYMENT_MODE=laptop # "laptop" (with DHCP server) or "network" (building network)
         REACT_APP_BASE_URL=localhost # Can set this to FQDN of the machine running the software
         DATA_VOLUME=/data # This is the path from Step 3
         CAMERA_CONFIGS=/camera_configs # This is the path from Step 4
         DATAJOINT_EXTERNAL=/mnt/datajoint_external # This is your datajoint external localattach
+        DISK_SPACE_WARNING_THRESHOLD_GB=50 # Minimum free disk space in GB
         ```
 6. Rename `template.datajoint_config.json` to `datajoint_config.json`
 7. Run `make build-mocap` from the root of **MultiCameraTracking** to build the Docker container
+8. Run the persistence script to make network settings survive reboots (see [Persistent Settings](persistent_settings.md))
+    ```bash
+    ./scripts/acquisition/make_settings_persistent.sh
+    ```
