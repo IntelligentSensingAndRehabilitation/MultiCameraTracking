@@ -7,12 +7,6 @@ The unified startup script simplifies the acquisition system startup process by 
 From the root of the MultiCameraTracking repository:
 
 ```bash
-./scripts/acquisition/start_acquisition.sh
-```
-
-Or using the Makefile:
-
-```bash
 make start-acquisition
 ```
 
