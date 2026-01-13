@@ -20,7 +20,8 @@ Use the links below to navigate:
 1. [Acquisition Startup Guide](acquisition/acquisition_startup.md)
 2. [Unified Startup Script](acquisition/startup_script.md)
 3. [Acquisition Diagnostics](acquisition/acquisition_diagnostics.md)
-4. [Troubleshooting Guide](acquisition/troubleshooting.md)
+4. [Test Results Analysis](acquisition/test_results_analysis.md)
+5. [Troubleshooting Guide](acquisition/troubleshooting.md)
 
 ## Annotation System
 1. [Annotation Software Setup](annotation/annotation_software_setup.md)
