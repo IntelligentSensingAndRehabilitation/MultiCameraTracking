@@ -18,6 +18,7 @@ import datetime
 import cv2
 import os
 import asyncio
+import shutil
 
 from multi_camera.acquisition.flir_recording_api import FlirRecorder, CameraStatus
 from multi_camera.backend.recording_db import (
@@ -113,6 +114,43 @@ manager = ConnectionManager()
 RECORDING_BASE = "data"
 CONFIG_PATH = "/configs/"
 DEFAULT_CONFIG = os.path.join(CONFIG_PATH, "cotton_lab_config_20230620.yaml")
+DATA_VOLUME = os.environ.get("DATA_VOLUME", "/data")
+DISK_SPACE_WARNING_THRESHOLD_GB = float(os.environ.get("DISK_SPACE_WARNING_THRESHOLD_GB", "50"))
+
+
+def get_disk_space_info(path: str) -> Dict:
+    """
+    Get disk space information for the specified path.
+
+    Args:
+        path: The directory path to check
+
+    Returns:
+        Dictionary containing disk space information:
+        - disk_space_gb_remaining: Available space in GB
+        - disk_space_percent_remaining: Available space as percentage
+        - disk_space_warning: True if below threshold (in GB)
+    """
+    try:
+        stat = shutil.disk_usage(path)
+        total_gb = stat.total / (1024 ** 3)
+        free_gb = stat.free / (1024 ** 3)
+        percent_remaining = (stat.free / stat.total) * 100 if stat.total > 0 else 0
+
+        return {
+            "disk_space_gb_remaining": round(free_gb, 2),
+            "disk_space_percent_remaining": round(percent_remaining, 2),
+            "disk_space_warning": free_gb < DISK_SPACE_WARNING_THRESHOLD_GB,
+            "disk_space_total_gb": round(total_gb, 2)
+        }
+    except Exception as e:
+        acquisition_logger.error(f"Error checking disk space for {path}: {e}")
+        return {
+            "disk_space_gb_remaining": 0,
+            "disk_space_percent_remaining": 0,
+            "disk_space_warning": True,
+            "disk_space_total_gb": 0
+        }
 
 print(CONFIG_PATH)
 config_files = os.listdir(CONFIG_PATH)
@@ -280,6 +318,22 @@ async def get_session() -> Session:
     return state.current_session
 
 
+@api_router.get("/status")
+async def get_status() -> Dict:
+    """
+    Get system status including disk space information.
+
+    Returns:
+        Dictionary containing:
+        - disk_space_gb_remaining: Available space in GB
+        - disk_space_percent_remaining: Available space as percentage
+        - disk_space_warning: True if below threshold
+        - disk_space_total_gb: Total disk space in GB
+    """
+    disk_info = get_disk_space_info(DATA_VOLUME)
+    return disk_info
+
+
 @api_router.post("/new_trial")
 async def new_trial(data: NewTrialData, db: Session = Depends(db_dependency)):
     recording_dir = data.recording_dir
@@ -288,6 +342,14 @@ async def new_trial(data: NewTrialData, db: Session = Depends(db_dependency)):
     max_frames = data.max_frames
 
     print("New trial: ", data)
+
+    # Check disk space before starting recording
+    disk_info = get_disk_space_info(DATA_VOLUME)
+    if disk_info["disk_space_warning"]:
+        acquisition_logger.warning(
+            f"Low disk space: {disk_info['disk_space_percent_remaining']}% remaining "
+            f"({disk_info['disk_space_gb_remaining']} GB)"
+        )
 
     # Build the recording file name from the components
     now = datetime.datetime.now()
@@ -337,7 +399,10 @@ async def new_trial(data: NewTrialData, db: Session = Depends(db_dependency)):
 
     task.add_done_callback(task_done_callback)
 
-    return {"recording_file_name": recording_path}
+    return {
+        "recording_file_name": recording_path,
+        **disk_info
+    }
 
 
 @api_router.post("/preview")

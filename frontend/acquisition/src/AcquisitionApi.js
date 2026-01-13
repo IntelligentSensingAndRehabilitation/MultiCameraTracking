@@ -66,6 +66,9 @@ export const AcquisitionApi = (props) => {
     const [recordingFilename, setRecordingFilename] = useState('');
     const [recordingProgress, setRecordingProgress] = useState('');
     const [keypoints, setKeypoints] = useState([]);
+    const [diskSpaceInfo, setDiskSpaceInfo] = useState(null);
+    const [showDiskWarningModal, setShowDiskWarningModal] = useState(false);
+    const [diskWarningOnStartup, setDiskWarningOnStartup] = useState(false);
 
     useEffect(() => {
         // axios.interceptors.request.use(request => {
@@ -123,6 +126,7 @@ export const AcquisitionApi = (props) => {
         fetchCurrentConfig();
         fetchRecordingStatus();
         fetchSession();
+        fetchDiskStatus();
     }, []);
 
     useEffect(() => {
@@ -132,12 +136,34 @@ export const AcquisitionApi = (props) => {
     }, [recordingDir, recordingFileBase, recordingFilename]);
 
     async function fetchSession() {
-        const response = await axios.get(`${API_BASE_URL}/session`);
-        const data = response.data;
+        try {
+            const response = await axios.get(`${API_BASE_URL}/session`);
+            const data = response.data;
 
-        setParticipant(data.participant_name);
-        setRecordingDir(data.recording_path);
-        setRecordingFileBase(data.participant_name);
+            setParticipant(data.participant_name);
+            setRecordingDir(data.recording_path);
+            setRecordingFileBase(data.participant_name);
+        } catch (error) {
+            // No session exists yet, which is fine - just ignore the error
+            console.log("No active session");
+        }
+    }
+
+    async function fetchDiskStatus() {
+        try {
+            const response = await axios.get(`${API_BASE_URL}/status`);
+            const data = response.data;
+            console.log("Disk status: ", data);
+            setDiskSpaceInfo(data);
+
+            // Show warning modal on startup if disk space is low
+            if (data.disk_space_warning) {
+                setDiskWarningOnStartup(true);
+                setShowDiskWarningModal(true);
+            }
+        } catch (error) {
+            console.error("Error fetching disk status:", error);
+        }
     }
 
     async function newSession(participant) {
@@ -181,6 +207,21 @@ export const AcquisitionApi = (props) => {
 
             const data = response.data;
             console.log(data);
+
+            // Update disk space info from response
+            setDiskSpaceInfo({
+                disk_space_gb_remaining: data.disk_space_gb_remaining,
+                disk_space_percent_remaining: data.disk_space_percent_remaining,
+                disk_space_warning: data.disk_space_warning,
+                disk_space_total_gb: data.disk_space_total_gb
+            });
+
+            // Show warning if disk space is low
+            if (data.disk_space_warning) {
+                setDiskWarningOnStartup(false);
+                setShowDiskWarningModal(true);
+            }
+
             setRecordingProgress(0);
             setRecordingFilename(data.recording_file_name);
         }
@@ -402,6 +443,10 @@ export const AcquisitionApi = (props) => {
         recordingSystemStatus: recordingSystemStatus,
         recordingProgress: recordingProgress,
         keypoints: keypoints,
+        diskSpaceInfo: diskSpaceInfo,
+        showDiskWarningModal: showDiskWarningModal,
+        setShowDiskWarningModal: setShowDiskWarningModal,
+        diskWarningOnStartup: diskWarningOnStartup,
         resetCameras,
         newSession,
         newTrial,

@@ -7,13 +7,21 @@ Use the links below to navigate:
 2. [Bill of Materials (BOM)](acquisition/bill_of_materials.md)
 
 ## Acquisition Software Setup Guides
-1. [General System Setup and Requirements](acquisition/general_system_setup.md)
-2. [Docker Setup](acquisition/docker_setup.md)
-3. [DHCP Server Setup](acquisition/dhcp_setup.md)
-4. [Spinnaker App Setup](acquisition/spinnaker_app_setup.md)
-5. [Acquisition Software Setup](acquisition/acquisition_software_setup.md)
+1. [Automated Setup Wizard (Recommended for New Installations)](acquisition/automated_setup.md)
+2. [General System Setup and Requirements](acquisition/general_system_setup.md)
+3. [Docker Setup](acquisition/docker_setup.md)
+4. [DHCP Server Setup](acquisition/dhcp_setup.md)
+5. [Spinnaker App Setup](acquisition/spinnaker_app_setup.md)
+6. [Acquisition Software Setup](acquisition/acquisition_software_setup.md)
+7. [Persistent Settings](acquisition/persistent_settings.md)
+8. [Example Camera Configuration](acquisition/example_config.md)
 
-## [Acquisition Startup Guide](acquisition/acquisition_startup.md)
+## Acquisition Startup
+1. [Acquisition Startup Guide](acquisition/acquisition_startup.md)
+2. [Unified Startup Script](acquisition/startup_script.md)
+3. [Acquisition Diagnostics](acquisition/acquisition_diagnostics.md)
+4. [Test Results Analysis](acquisition/test_results_analysis.md)
+5. [Troubleshooting Guide](acquisition/troubleshooting.md)
 
 ## Annotation System
 1. [Annotation Software Setup](annotation/annotation_software_setup.md)
