@@ -701,11 +701,45 @@ apply_persistence() {
 }
 
 ################################################################################
-# Step 9: Build Docker Image
+# Step 9: Download FLIR SDK
+################################################################################
+
+download_flir_sdk() {
+    print_header "Step 9: Download FLIR SDK"
+
+    print_info "The Docker build requires the FLIR Spinnaker SDK"
+    echo ""
+
+    # Check if FLIR SDK already downloaded
+    if [ -d "$REPO_ROOT/docker/flir" ] && [ -n "$(ls -A $REPO_ROOT/docker/flir 2>/dev/null)" ]; then
+        print_success "FLIR SDK already downloaded"
+    else
+        print_info "Downloading FLIR SDK..."
+        echo ""
+
+        cd "$REPO_ROOT/docker"
+        sudo -u "$ACTUAL_USER" bash download_flir.sh
+
+        if [ $? -eq 0 ]; then
+            cd "$REPO_ROOT"
+            print_success "FLIR SDK downloaded and extracted"
+        else
+            cd "$REPO_ROOT"
+            print_error "FLIR SDK download failed"
+            print_info "You can try downloading again later with: cd docker && ./download_flir.sh"
+            return 1
+        fi
+    fi
+
+    echo ""
+}
+
+################################################################################
+# Step 10: Build Docker Image
 ################################################################################
 
 build_docker_image() {
-    print_header "Step 9: Docker Image Build"
+    print_header "Step 10: Docker Image Build"
 
     print_info "The acquisition system requires building a Docker image"
     print_warning "This process can take 10-20 minutes"
@@ -803,6 +837,7 @@ main() {
     create_directories
     create_env_file
     apply_persistence
+    download_flir_sdk
     build_docker_image
     show_summary
 }

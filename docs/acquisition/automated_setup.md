@@ -123,7 +123,13 @@ Automatically runs the persistence script to make network settings survive reboo
 
 For details, see [Persistent Settings](persistent_settings.md).
 
-### Step 9: Docker Image Build
+### Step 9: Download FLIR SDK
+
+Downloads the FLIR Spinnaker SDK required for camera support.
+
+If the SDK is already downloaded, this step is automatically skipped.
+
+### Step 10: Docker Image Build
 
 Builds the mocap Docker image required for acquisition.
 
@@ -164,10 +170,6 @@ The wizard automates system setup but **does not:**
 3. **Configure kernel pinning**
    - Recommended to prevent auto-updates breaking camera drivers
    - See [General System Setup](general_system_setup.md)
-
-4. **Download FLIR SDK**
-   - Should be run separately before Docker build
-   - Script: `docker/download_flir.sh`
 
 ## Getting Help
 
