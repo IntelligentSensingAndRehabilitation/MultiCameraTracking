@@ -11,12 +11,11 @@ The acquisition system requires specific network settings:
 
 By default, these settings must be configured manually each session. The persistence script automates this configuration to survive reboots.
 
+This persistence script is included as part of the automated setup wizard (recommended).
+
 ## Prerequisites
 
-Before running the persistence script, you must complete:
-1. [Docker Setup](docker_setup.md)
-2. [DHCP Setup](dhcp_setup.md) (laptop mode only)
-3. [Acquisition Software Setup](acquisition_software_setup.md) - ensure `.env` file is created
+If the persistence script needs to be run manually, ensure the acquisition system is fully set up beforehand.
 
 ## Running the Persistence Script
 
@@ -33,72 +32,10 @@ The script will:
 4. Enable DHCP server auto-start on boot (laptop mode only)
 5. Verify all settings are applied correctly
 
-## What Gets Configured
-
-### MTU Settings
-
-**Laptop Mode:**
-- Sets MTU to 9000 on the DHCP-Server NetworkManager connection profile
-- MTU automatically applies when DHCP-Server connection activates
-
-**Network Mode:**
-- Sets MTU to 9000 on the currently active connection for your network interface
-
-### Network Buffer Settings
-
-Adds the following to `/etc/sysctl.conf`:
-```
-net.core.rmem_max=10000000
-net.core.rmem_default=10000000
-```
-
-These settings increase the kernel's receive buffer size to handle high-bandwidth video streams from multiple cameras.
-
-### DHCP Server (Laptop Mode Only)
-
-Enables the `isc-dhcp-server` systemd service to start automatically on boot.
-
-## Deployment Modes
-
-The script behavior depends on the `DEPLOYMENT_MODE` variable in your `.env` file:
-
-**laptop** (default):
-- Cameras connect directly to laptop via network switch
-- Laptop acts as DHCP server
-- Requires DHCP server setup and auto-start configuration
-
-**network**:
-- Computer and cameras on existing building network
-- Network infrastructure provides DHCP
-- Only MTU and buffer settings are configured
-
-## Verifying Settings
-
-Check MTU setting:
-```bash
-# Laptop mode
-nmcli con show DHCP-Server | grep mtu
-
-# Network mode
-ip link show <interface-name>
-```
-
-Check network buffer settings:
-```bash
-sysctl net.core.rmem_max net.core.rmem_default
-```
-
-Check DHCP server status (laptop mode):
-```bash
-systemctl is-enabled isc-dhcp-server
-systemctl status isc-dhcp-server
-```
-
 ## Troubleshooting
 
 For detailed solutions, see the [Troubleshooting Guide](troubleshooting.md):
 
-- [Environment Configuration Issues](troubleshooting.md#environment-configuration-issues)
 - [MTU Configuration Issues](troubleshooting.md#mtu-configuration-issues)
 - [Network Buffer Issues](troubleshooting.md#network-buffer-issues)
 - [DHCP Server Issues](troubleshooting.md#dhcp-server-issues)

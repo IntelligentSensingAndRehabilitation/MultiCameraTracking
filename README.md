@@ -29,9 +29,11 @@ Breaking changes may be introduced during development. Issues and pull requests 
 
 This software is designed and tested on Linux. While it has been used on Windows previously, we only guarantee functionality on Linux, and we will not provide support for cross-platform issues.
 
-## Acquisition System Setup
+## Acquisition System Installation
 
-To set up the acquisition system, follow the comprehensive setup **[docs](docs/README.md)**:
+To set up the acquisition system, use the **[installation wizard (recommended)](docs/acquisition/automated_setup.md)**
+
+If you prefer manual installation, follow the comprehensive setup **[docs](docs/README.md)**:
 
 1. **[Hardware Setup](docs/acquisition/acquisition_hardware.md)** - Required camera equipment
 2. **[System Setup](docs/acquisition/general_system_setup.md)** - Network and OS configuration
