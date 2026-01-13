@@ -7,8 +7,10 @@ The unified startup script simplifies the acquisition system startup process by 
 From the root of the MultiCameraTracking repository:
 
 ```bash
-make start-acquisition
+make run
 ```
+
+This command runs the startup script with full system validation (recommended).
 
 ## What the Script Does
 
@@ -40,17 +42,22 @@ The script waits up to 30 seconds for cameras to connect and show up on the netw
 
 ### 4. Start Acquisition Software
 
-If all checks pass, the script launches the acquisition system using `make run`.
+If all checks pass, the script launches the acquisition Docker container.
 
 ## Command Line Options
 
-### Skip System Checks
+### Skip System Checks (Quick Start)
 
+```bash
+make run-no-checks
+```
+
+Or directly:
 ```bash
 ./scripts/acquisition/start_acquisition.sh --skip-checks
 ```
 
-Bypasses all validation checks and starts immediately. Not recommended unless you're debugging the checks themselves.
+Bypasses all validation checks and starts immediately. Useful for quick restarts when you know your system is already configured correctly.
 
 ### Help
 
@@ -91,15 +98,13 @@ The script adapts its behavior based on the `DEPLOYMENT_MODE` variable in `.env`
 - `0`: Success - acquisition system started
 - `1`: System checks failed or network activation failed
 
-## Integration with Make
+## Available Make Commands
 
-A Makefile target is available for convenience:
+The Makefile provides convenient shortcuts:
 
-```bash
-make start-acquisition
-```
-
-This is equivalent to running the startup script directly.
+- **`make run`**: Start with full system validation (recommended)
+- **`make run-no-checks`**: Quick start without validation checks
+- **`make build-mocap`**: Build the acquisition Docker image
 
 ## Logs
 

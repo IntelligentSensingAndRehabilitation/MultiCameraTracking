@@ -5,13 +5,18 @@
 
 ## Quick Start (Recommended)
 
-If you have completed the [Persistent Settings](persistent_settings.md) setup, use the unified startup script:
+If you have completed the [Persistent Settings](persistent_settings.md) setup:
 
 ```bash
-./scripts/acquisition/start_acquisition.sh
+make run
 ```
 
-The script validates your system and starts acquisition automatically. For details, see [Startup Script](startup_script.md).
+This validates your system and starts acquisition automatically. For details, see [Startup Script](startup_script.md).
+
+For quick restarts without validation:
+```bash
+make run-no-checks
+```
 
 For manual startup or if you haven't run the persistence script, see the sections below.
 

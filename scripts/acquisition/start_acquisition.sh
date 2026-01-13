@@ -355,8 +355,8 @@ start_acquisition() {
     print_info "Press Ctrl+C to stop the acquisition system"
     echo ""
 
-    # Start the acquisition system
-    make run
+    # Start the acquisition system using internal Docker target
+    make _docker-run
 }
 
 ################################################################################
