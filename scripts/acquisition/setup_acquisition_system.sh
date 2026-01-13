@@ -382,8 +382,39 @@ setup_dhcp_server() {
     echo ""
     print_info "Configuring DHCP server..."
 
-    # Create DHCP configuration
-    cat > /etc/dhcp/dhcpd.conf <<EOF
+    # Configure /etc/dhcp/dhcpd.conf
+    if [ -f /etc/dhcp/dhcpd.conf ]; then
+        print_warning "DHCP configuration file already exists: /etc/dhcp/dhcpd.conf"
+
+        # Check what's already configured
+        local has_lease_time=$(grep -q "^default-lease-time" /etc/dhcp/dhcpd.conf && echo "yes" || echo "no")
+        local has_subnet=$(grep -q "subnet 192.168.1.0" /etc/dhcp/dhcpd.conf && echo "yes" || echo "no")
+
+        if [ "$has_lease_time" = "yes" ] && [ "$has_subnet" = "yes" ]; then
+            # Config has required settings - check if MAC address matches
+            local current_mac=""
+            if grep -q "host laptop-interface" /etc/dhcp/dhcpd.conf; then
+                current_mac=$(grep -A2 "host laptop-interface" /etc/dhcp/dhcpd.conf | grep "hardware ethernet" | awk '{print $3}' | tr -d ';')
+            fi
+
+            if [ -n "$current_mac" ] && [ "$current_mac" = "$INTERFACE_MAC" ]; then
+                # Everything matches - no changes needed
+                print_success "DHCP config already correct (lease times, subnet, and MAC address $INTERFACE_MAC)"
+            elif [ -n "$current_mac" ]; then
+                # MAC address mismatch
+                print_warning "DHCP config has different MAC address"
+                print_info "Configured MAC: $current_mac"
+                print_info "Detected MAC:   $INTERFACE_MAC"
+                echo ""
+
+                if ask_yes_no "Update DHCP config with new MAC address?"; then
+                    # Create backup
+                    local backup_file="/etc/dhcp/dhcpd.conf.backup.$(date +%Y%m%d_%H%M%S)"
+                    cp /etc/dhcp/dhcpd.conf "$backup_file"
+                    print_info "Backup created: $backup_file"
+
+                    # Recreate with new MAC
+                    cat > /etc/dhcp/dhcpd.conf <<EOF
 default-lease-time 600;
 max-lease-time 7200;
 
@@ -400,24 +431,143 @@ subnet 192.168.1.0 netmask 255.255.255.0 {
     }
 }
 EOF
+                    print_success "Updated /etc/dhcp/dhcpd.conf with new MAC address"
+                else
+                    print_info "Keeping existing DHCP configuration"
+                fi
+            else
+                # No laptop-interface host block found - this is unusual
+                print_warning "DHCP config missing laptop-interface host block"
+                echo ""
 
-    print_success "Created /etc/dhcp/dhcpd.conf"
+                if ask_yes_no "Add laptop-interface host block with MAC $INTERFACE_MAC?"; then
+                    # Create backup
+                    local backup_file="/etc/dhcp/dhcpd.conf.backup.$(date +%Y%m%d_%H%M%S)"
+                    cp /etc/dhcp/dhcpd.conf "$backup_file"
+                    print_info "Backup created: $backup_file"
 
-    # Configure DHCP interface
-    echo "INTERFACESv4=\"$NETWORK_INTERFACE\"" > /etc/default/isc-dhcp-server
-    print_success "Configured /etc/default/isc-dhcp-server"
+                    # Append host block to existing subnet
+                    # This is a simple append - more complex logic would modify the subnet block in place
+                    sed -i "/subnet 192.168.1.0/,/^}/ { /^}/i\\
+\\    host laptop-interface {\\
+\\        hardware ethernet $INTERFACE_MAC;\\
+\\        fixed-address 192.168.1.1;\\
+\\    }
+}" /etc/dhcp/dhcpd.conf
+                    print_success "Added laptop-interface host block"
+                else
+                    print_info "Keeping existing DHCP configuration"
+                fi
+            fi
+        else
+            # Config exists but is missing required settings - update it
+            print_info "DHCP config exists but missing required settings. Updating..."
 
-    # Create NetworkManager DHCP-Server profile
-    print_info "Creating NetworkManager DHCP-Server profile..."
+            # Create backup
+            local backup_file="/etc/dhcp/dhcpd.conf.backup.$(date +%Y%m%d_%H%M%S)"
+            cp /etc/dhcp/dhcpd.conf "$backup_file"
+            print_info "Backup created: $backup_file"
 
-    nmcli con add type ethernet con-name DHCP-Server ifname "$NETWORK_INTERFACE" \
-        autoconnect no \
-        ipv4.method manual \
-        ipv4.addresses 192.168.1.1/24 \
-        ipv4.gateway 192.168.1.1 \
-        ipv4.dns "8.8.8.8,8.8.4.4"
+            # Add missing lease times if needed
+            if [ "$has_lease_time" = "no" ]; then
+                sed -i '1i default-lease-time 600;\nmax-lease-time 7200;\n' /etc/dhcp/dhcpd.conf
+                print_success "Added lease time settings"
+            fi
 
-    print_success "NetworkManager DHCP-Server profile created"
+            # Add subnet block if needed
+            if [ "$has_subnet" = "no" ]; then
+                cat >> /etc/dhcp/dhcpd.conf <<EOF
+
+subnet 192.168.1.0 netmask 255.255.255.0 {
+    range 192.168.1.10 192.168.1.100;
+    option domain-name-servers 8.8.8.8, 8.8.4.4;
+    option domain-name "acquisition";
+    option routers 192.168.1.1;
+    option broadcast-address 192.168.1.255;
+
+    host laptop-interface {
+        hardware ethernet $INTERFACE_MAC;
+        fixed-address 192.168.1.1;
+    }
+}
+EOF
+                print_success "Added subnet 192.168.1.0 configuration"
+            fi
+        fi
+    else
+        # No existing config - create new one
+        cat > /etc/dhcp/dhcpd.conf <<EOF
+default-lease-time 600;
+max-lease-time 7200;
+
+subnet 192.168.1.0 netmask 255.255.255.0 {
+    range 192.168.1.10 192.168.1.100;
+    option domain-name-servers 8.8.8.8, 8.8.4.4;
+    option domain-name "acquisition";
+    option routers 192.168.1.1;
+    option broadcast-address 192.168.1.255;
+
+    host laptop-interface {
+        hardware ethernet $INTERFACE_MAC;
+        fixed-address 192.168.1.1;
+    }
+}
+EOF
+        print_success "Created /etc/dhcp/dhcpd.conf"
+    fi
+
+    # Configure /etc/default/isc-dhcp-server
+    if [ -f /etc/default/isc-dhcp-server ]; then
+        if grep -q "^INTERFACESv4=" /etc/default/isc-dhcp-server; then
+            # Update existing line
+            local current_interface=$(grep "^INTERFACESv4=" /etc/default/isc-dhcp-server | cut -d'"' -f2)
+            if [ "$current_interface" = "$NETWORK_INTERFACE" ]; then
+                print_success "INTERFACESv4 already set to $NETWORK_INTERFACE"
+            else
+                print_info "Updating INTERFACESv4 from $current_interface to $NETWORK_INTERFACE"
+                sed -i "s/^INTERFACESv4=.*/INTERFACESv4=\"$NETWORK_INTERFACE\"/" /etc/default/isc-dhcp-server
+                print_success "Updated INTERFACESv4 in /etc/default/isc-dhcp-server"
+            fi
+        else
+            # Append new line
+            echo "INTERFACESv4=\"$NETWORK_INTERFACE\"" >> /etc/default/isc-dhcp-server
+            print_success "Added INTERFACESv4 to /etc/default/isc-dhcp-server"
+        fi
+    else
+        # Create file
+        echo "INTERFACESv4=\"$NETWORK_INTERFACE\"" > /etc/default/isc-dhcp-server
+        print_success "Created /etc/default/isc-dhcp-server"
+    fi
+
+    # Create or update NetworkManager DHCP-Server profile
+    echo ""
+    print_info "Configuring NetworkManager DHCP-Server profile..."
+
+    if nmcli con show DHCP-Server &>/dev/null; then
+        print_warning "NetworkManager DHCP-Server profile already exists"
+
+        if ask_yes_no "Do you want to update the existing profile?"; then
+            print_info "Updating existing DHCP-Server profile..."
+            nmcli con modify DHCP-Server \
+                ifname "$NETWORK_INTERFACE" \
+                autoconnect no \
+                ipv4.method manual \
+                ipv4.addresses 192.168.1.1/24 \
+                ipv4.gateway 192.168.1.1 \
+                ipv4.dns "8.8.8.8,8.8.4.4"
+            print_success "Updated DHCP-Server profile"
+        else
+            print_info "Keeping existing DHCP-Server profile"
+        fi
+    else
+        nmcli con add type ethernet con-name DHCP-Server ifname "$NETWORK_INTERFACE" \
+            autoconnect no \
+            ipv4.method manual \
+            ipv4.addresses 192.168.1.1/24 \
+            ipv4.gateway 192.168.1.1 \
+            ipv4.dns "8.8.8.8,8.8.4.4"
+        print_success "Created NetworkManager DHCP-Server profile"
+    fi
 
     echo ""
 }
