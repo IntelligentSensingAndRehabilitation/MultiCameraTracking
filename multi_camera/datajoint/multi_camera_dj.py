@@ -516,8 +516,9 @@ class ReprojectionError(dj.Computed):
                 "num_nans": num_nans,
             })
 
+
 @schema
-class ReprojectionErrorPerJoint(dj.Computed):
+class ReprojectionErrorPerKeypoint(dj.Computed):
     definition = """
     # Reprojection error for each camera across all keypoints
     -> PersonKeypointReconstruction
@@ -583,31 +584,33 @@ class ReprojectionErrorPerJoint(dj.Computed):
         
         # Get reprojection errors without averaging across keypoints
         reprojection_errors = reprojection_loss(camera_calibration, points2d, k3d, huber_max=50, average=False)
-        # Shape: (num_frames, num_keypoints, num_cameras)
+        # Shape: (num_cameras, num_frames, num_keypoints)
 
         for camera_idx, camera_name_str in enumerate(camera_names):
-            # Get reprojection values for this camera across all keypoints
+            # Get reprojection values for this camera for all frames
             # Shape: (num_frames, num_keypoints)
-            reprojection_value = reprojection_errors[:, :, camera_idx]
+            reprojection_value = reprojection_errors[camera_idx, :, :]
             
             # Calculate per-keypoint metrics
             num_zeros = np.sum(reprojection_value == 0, axis=0)  # Shape: (num_keypoints,)
             num_nans = np.sum(np.isnan(reprojection_value), axis=0)  # Shape: (num_keypoints,)
 
             # Replace 0s with NaNs
+            # Shape: (num_frames, num_keypoints)
             reprojection_value_with_nans = np.where(reprojection_value == 0, np.nan, reprojection_value)
 
             # Calculate per-keypoint reprojection error (mean across frames)
-            reprojection_error_per_kp = np.nanmean(reprojection_value_with_nans, axis=0)  # Shape: (num_keypoints,)
+            # Shape: (num_keypoints,)
+            reprojection_error_per_kp = np.nanmean(reprojection_value_with_nans, axis=0)  
             reprojection_error_per_kp = np.where(np.isnan(reprojection_error_per_kp), -1.0, reprojection_error_per_kp)
             
             self.insert1({
                 **key,
                 "camera_name": camera_name_str,
-                "reprojection_error": reprojection_error_per_kp,
-                "reprojection_error_timeseries": reprojection_value_with_nans,
-                "num_zeros": num_zeros,
-                "num_nans": num_nans,
+                "reprojection_error": np.asarray(reprojection_error_per_kp),
+                "reprojection_error_timeseries": np.asarray(reprojection_value_with_nans),
+                "num_zeros": np.asarray(num_zeros, dtype=int),
+                "num_nans": np.asarray(num_nans, dtype=int),
             })
 
 
