@@ -154,6 +154,31 @@ class PersonKeypointReconstruction(dj.Computed):
                 ("Left Shoulder", "Left Elbow"),
                 ("Left Elbow", "Left Wrist"),
             ]
+
+        elif top_down_method_name == "Sam3dBody_movi87":
+            joints = TopDownPerson.joint_names("Sam3dBody_movi87")
+            pairs = [
+                    ("CHip", "RHip"),
+                    ("CHip", "LHip"),
+                    ("LAnkle", "LKnee"),
+                    ("RAnkle", "RKnee"),
+                    ("LKnee", "LHip"),
+                    ("RKnee", "RHip"),
+                    ("LHip", "CHip"),
+                    ("RHip", "CHip"),
+                    ("LShoulder", "LElbow"),
+                    ("RShoulder", "RElbow"),
+                    ("LElbow", "LWrist"),
+                    ("RElbow", "RWrist"),
+                    ("LHeel", "LBigToe"),
+                    ("RHeel", "RBigToe"),
+                    ("RShoulder", "LShoulder"),
+                    ("RShoulder", "RElbow"),
+                    ("RElbow", "RWrist"),
+                    ("LShoulder", "LElbow"),
+                    ("LElbow", "LWrist")
+                ]
+            
         else:
             joints = TopDownPerson.joint_names(top_down_method_name)
             pairs = [
