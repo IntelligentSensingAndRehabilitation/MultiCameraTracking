@@ -878,6 +878,18 @@ def make_single_camera_reprojection_video(
         kp2d_detected = keypoints2d_detected[:total_frames]
 
     # --------------------------------------------------
+    # Get SAM 3D Body Mesh
+    # --------------------------------------------------
+    top_down_method = (TopDownPerson & video_key).fetch1("top_down_method")
+    if top_down_method in (34, 35):
+        from pose_pipeline.wrappers.sam3d_body import get_sam3d_callback
+        sam3d_key = dict(video_key)
+        sam3d_key["sam3d_method"] = 3
+        mesh_overlay = get_sam3d_callback(sam3d_key)
+    else:
+        mesh_overlay = None
+
+    # --------------------------------------------------
     # Render frames
     # --------------------------------------------------
     cap = cv2.VideoCapture(video_path)
@@ -888,8 +900,14 @@ def make_single_camera_reprojection_video(
         if not ret:
             break
 
+        # OpenCV -> RGB
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
+        # Add mesh overlay if available
+        if mesh_overlay is not None:
+            frame = mesh_overlay(frame, frame_idx)
+
+        # Draw reprojected keypoints (blue)
         frame = draw_keypoints(
             frame,
             keypoints2d[frame_idx],
@@ -898,6 +916,7 @@ def make_single_camera_reprojection_video(
             threshold=visible_threshold,
         )
 
+        # Draw detected keypoints (red)
         frame = draw_keypoints(
             frame,
             kp2d_detected[frame_idx],
@@ -907,8 +926,8 @@ def make_single_camera_reprojection_video(
             threshold=visible_threshold,
         )
 
-        frame = bbox_fn(frame, frame_idx, width=2, color=(0, 0, 255))
-
+        # Draw bounding box (white)and crop
+        frame = bbox_fn(frame, frame_idx, width=2, color=(255, 255, 255))
         frame = crop_image_bbox(
             frame,
             bbox[frame_idx],
@@ -916,6 +935,7 @@ def make_single_camera_reprojection_video(
             dilate=dilate,
         )[0]
 
+        # Append frame
         frames.append(frame)
 
     cap.release()
