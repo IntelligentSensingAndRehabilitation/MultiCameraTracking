@@ -1,8 +1,26 @@
+import os
+
+import yaml
 import numpy as np
 import datajoint as dj
 
 from pose_pipeline import Video, VideoInfo, BottomUpPeople
 from .multi_camera_dj import schema, MultiCameraRecording, SingleCameraVideo, Calibration, CalibratedRecording
+
+_analysis_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'analysis')
+
+TRACKING_CONFIGS = [
+    ('default', os.path.join(_analysis_dir, 'mvmp1f_default.yml')),
+    ('fallback1', os.path.join(_analysis_dir, 'mvmp1f_fallback1.yml')),
+    ('fallback2', os.path.join(_analysis_dir, 'mvmp1f_fallback2.yml')),
+    ('fallback3', os.path.join(_analysis_dir, 'mvmp1f_fallback3.yml')),
+    ('fallback4', os.path.join(_analysis_dir, 'mvmp1f_fallback4.yml')),
+]
+
+
+def _load_config_settings(config_path):
+    with open(config_path) as f:
+        return yaml.safe_load(f)
 
 # Hardcoding a selected method
 bottom_up = (BottomUpPeople & {'bottom_up_method_name': 'Bridging_OpenPose'})
@@ -125,6 +143,18 @@ except ImportError:
     print("EasyMocap not installed. Will not be able to populate new entries")
 
 @schema
+class EasymocapTrackingSkipped(dj.Manual):
+    definition = '''
+    # Recordings that failed all tracking configs
+    -> CalibratedRecording
+    ---
+    skip_reason          : varchar(255)
+    configs_tried        : longblob   # list of dicts with config name and settings
+    insertion_time=CURRENT_TIMESTAMP : timestamp
+    '''
+
+
+@schema
 class EasymocapTracking(dj.Computed):
     definition = '''
     # Use EasyMocap to track and associate people in the view
@@ -132,6 +162,7 @@ class EasymocapTracking(dj.Computed):
     ---
     tracking_results     : longblob
     num_tracks           : int
+    tracking_config=null : longblob   # config settings used for tracking
     '''
 
     def make(self, key):
@@ -140,17 +171,50 @@ class EasymocapTracking(dj.Computed):
         assert len((SingleCameraVideo & key) - bottom_up) == 0, f"Missing OpenPose computations for {key}"
 
         dataset = MCTDataset(key)
-        results = mvmp_association_and_tracking(dataset)
 
-        key['tracking_results'] = results
-        key['num_tracks'] = len(np.unique([k['id'] for r in results for k in r]))
+        for config_name, config_path in TRACKING_CONFIGS:
+            try:
+                results = mvmp_association_and_tracking(dataset, config_file=config_path)
+                key['tracking_results'] = results
+                key['num_tracks'] = len(np.unique([k['id'] for r in results for k in r]))
+                key['tracking_config'] = {'name': config_name, 'settings': _load_config_settings(config_path)}
+                self.insert1(key)
+                return
+            except np.linalg.LinAlgError:
+                print(f'Config {config_name} failed with LinAlgError, trying next...')
+                continue
 
-        self.insert1(key)
+        self._skip_and_remove(key)
+
+    def _skip_and_remove(self, key):
+        from .sessions import Recording, SkippedRecording
+
+        configs_tried = [
+            {'name': name, 'settings': _load_config_settings(path)}
+            for name, path in TRACKING_CONFIGS
+        ]
+
+        EasymocapTrackingSkipped.insert1({
+            **key,
+            'skip_reason': 'All tracking configs failed with LinAlgError (SVD did not converge)',
+            'configs_tried': configs_tried,
+        })
+
+        recording_entries = (Recording & key).fetch(as_dict=True)
+        for entry in recording_entries:
+            SkippedRecording.insert1({
+                **entry,
+                'skip_reason': 'SVD convergence failure in all tracking configs',
+            }, skip_duplicates=True)
+            (Recording & entry).delete_quick()
+
+        print(f'All configs failed for {key}. Inserted into EasymocapTrackingSkipped and moved Recording to SkippedRecording.')
 
     @property
     def key_source(self):
-        # awkward double negative is to ensure all OpenPose views were computed
-        return CalibratedRecording & MultiCameraRecording - (SingleCameraVideo - bottom_up).proj()
+        return (CalibratedRecording & MultiCameraRecording
+                - (SingleCameraVideo - bottom_up).proj()
+                - EasymocapTrackingSkipped)
 
     def create_bounding_boxes(self, subject_ids):
         """ Create bounding boxes based on Easymocap tracks

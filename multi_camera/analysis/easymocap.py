@@ -6,7 +6,7 @@ from dataclasses import dataclass
 smplx_path: str = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../model_data/smplx/")
 model_path = os.getenv("SMPLX_PATH", smplx_path)
 
-def mvmp_association_and_tracking(dataset, keypoints='body25'):
+def mvmp_association_and_tracking(dataset, keypoints='body25', config_file=None):
     """
     Associate and track people across views and time
 
@@ -22,6 +22,7 @@ def mvmp_association_and_tracking(dataset, keypoints='body25'):
     Params:
         dataset (MVMPMF) : dataset containing the keypoints and camera calibration
         keypoints (String) : specify the expected keypoint set. 'body25' for OpenPose
+        config_file (str) : path to mvmp1f config YAML. Defaults to mvmp1f.yml next to this module.
 
     Returns a list of dictionaries for each frame containing the ids and 3d keypoints
     """
@@ -36,7 +37,8 @@ def mvmp_association_and_tracking(dataset, keypoints='body25'):
     # currently need to remove some of the additional criteria for association. likely
     # related to scale or keypoint ordering that makes them appear un-anatomic.
 
-    config_file = os.path.join(os.path.split(__file__)[0], 'mvmp1f.yml')
+    if config_file is None:
+        config_file = os.path.join(os.path.split(__file__)[0], 'mvmp1f.yml')
     cfg = Config.load(config_file)
 
     cfg.height = str(dataset.height)
