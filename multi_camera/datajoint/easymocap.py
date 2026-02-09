@@ -187,8 +187,6 @@ class EasymocapTracking(dj.Computed):
         self._skip_and_remove(key)
 
     def _skip_and_remove(self, key):
-        from .sessions import Recording, SkippedRecording
-
         configs_tried = [
             {'name': name, 'settings': _load_config_settings(path)}
             for name, path in TRACKING_CONFIGS
@@ -200,15 +198,7 @@ class EasymocapTracking(dj.Computed):
             'configs_tried': configs_tried,
         })
 
-        recording_entries = (Recording & key).fetch(as_dict=True)
-        for entry in recording_entries:
-            SkippedRecording.insert1({
-                **entry,
-                'skip_reason': 'SVD convergence failure in all tracking configs',
-            }, skip_duplicates=True)
-            (Recording & entry).delete_quick()
-
-        print(f'All configs failed for {key}. Inserted into EasymocapTrackingSkipped and moved Recording to SkippedRecording.')
+        print(f'All configs failed for {key}. Inserted into EasymocapTrackingSkipped.')
 
     @property
     def key_source(self):
