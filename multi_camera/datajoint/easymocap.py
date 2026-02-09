@@ -150,7 +150,7 @@ class EasymocapTrackingSkipped(dj.Manual):
     ---
     skip_reason          : varchar(255)
     configs_tried        : longblob   # list of dicts with config name and settings
-    insertion_time=CURRENT_TIMESTAMP : timestamp
+    insertion_time = CURRENT_TIMESTAMP : timestamp
     '''
 
 
@@ -162,7 +162,7 @@ class EasymocapTracking(dj.Computed):
     ---
     tracking_results     : longblob
     num_tracks           : int
-    tracking_config=null : longblob   # config settings used for tracking
+    tracking_config = NULL : longblob   # config settings used for tracking
     '''
 
     def make(self, key):
