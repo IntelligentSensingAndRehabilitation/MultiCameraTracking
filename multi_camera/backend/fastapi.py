@@ -748,11 +748,12 @@ async def receive_frames(frames):
 
 # @api_router.get("/video")
 async def video_endpoint():
+    state: GlobalState = get_global_state()
     async def generate_frames():
         while True:
             # Wait for the next frame to become available
             try:
-                frame = await asyncio.wait_for(preview_queue.get(), timeout=2.5)
+                frame = await asyncio.wait_for(state.preview_queue.get(), timeout=2.5)
                 print("Received JPEG")
             except asyncio.TimeoutError:
                 # TODO: if uvicorn lifecycle let us check a flag knowing that shutdown was in process then
