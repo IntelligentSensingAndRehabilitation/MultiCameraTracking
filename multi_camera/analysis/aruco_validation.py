@@ -111,9 +111,23 @@ class CoverageMatrix:
 
 def create_aruco_detector(
     dictionary_id: int = cv2.aruco.DICT_4X4_250,
+    aggressive: bool = True,
 ) -> cv2.aruco.ArucoDetector:
     dictionary = cv2.aruco.getPredefinedDictionary(dictionary_id)
     parameters = cv2.aruco.DetectorParameters()
+    if aggressive:
+        # Smaller adaptive threshold windows help detect small/distant markers
+        parameters.adaptiveThreshWinSizeMin = 3
+        parameters.adaptiveThreshWinSizeMax = 53
+        parameters.adaptiveThreshWinSizeStep = 4
+        # Lower perimeter threshold to detect markers that appear small at oblique angles
+        parameters.minMarkerPerimeterRate = 0.01
+        # More bits per cell for perspective-distorted markers viewed at grazing angles
+        parameters.perspectiveRemovePixelPerCell = 8
+        # Allow more error bits for partially occluded or glare-affected markers
+        parameters.maxErroneousBitsInBorderRate = 0.5
+        # Subpixel corner refinement
+        parameters.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
     return cv2.aruco.ArucoDetector(dictionary, parameters)
 
 
@@ -137,7 +151,14 @@ def detect_markers_in_video(
         if not ret or frame is None:
             break
 
-        corners, ids, _ = detector.detectMarkers(frame)
+        # CLAHE on luminance channel to cut through floor glare and specular reflections
+        lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
+        lab[:, :, 0] = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8)).apply(
+            lab[:, :, 0]
+        )
+        enhanced = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
+
+        corners, ids, _ = detector.detectMarkers(enhanced)
         detections: list[MarkerDetection] = []
 
         if ids is not None:
