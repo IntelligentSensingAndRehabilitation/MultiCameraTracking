@@ -36,6 +36,7 @@ from multi_camera.acquisition.flir_recording_api import FlirRecorder, CameraStat
 from multi_camera.backend.recording_db import (
     get_db,
     add_recording,
+    add_photo,
     get_recordings,
     modify_recording_entry,
     synchronize_to_datajoint,
@@ -374,6 +375,7 @@ MAX_UPLOAD_SIZE_MB = 25
 async def upload_image(
     file: UploadFile = File(...),
     description: Optional[str] = Form(None),
+    db=Depends(db_dependency),
 ) -> ImageUploadResponse:
     """
     Upload a patient identification image for the current session.
@@ -416,6 +418,19 @@ async def upload_image(
 
     with open(saved_path, "wb") as f:
         f.write(file_content)
+
+    add_photo(
+        db,
+        participant_name=current_session.participant_name,
+        session_date=current_session.session_date,
+        session_path=current_session.recording_path,
+        filename=saved_filename,
+        original_filename=file.filename or "unknown",
+        saved_path=saved_path,
+        file_size_mb=round(file_size_mb, 3),
+        upload_timestamp=timestamp,
+        description=description,
+    )
 
     acquisition_logger.info(
         f"Image saved: {saved_filename} ({file_size_mb:.2f}MB) "
