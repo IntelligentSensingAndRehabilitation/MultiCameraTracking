@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Boolean, Column, Integer, String, Date, DateTime, ForeignKey
+from sqlalchemy import create_engine, Boolean, Column, Float, Integer, String, Date, DateTime, ForeignKey
 from sqlalchemy.orm import relationship, declarative_base, joinedload
 from typing import Union, Tuple, List, Optional
 from pydantic import BaseModel
@@ -26,6 +26,7 @@ class Session(Base):
 
     participant = relationship("Participant", back_populates="sessions")
     recordings = relationship("Recording", back_populates="session")
+    photos = relationship("Photo", back_populates="session")
     imported = relationship("Imported", uselist=False, back_populates="session")
 
 
@@ -53,6 +54,23 @@ class Imported(Base):
     session_id = Column(Integer, ForeignKey("sessions.id"))
 
     session = relationship("Session", back_populates="imported")
+
+
+class Photo(Base):
+    """Tracks uploaded participant identification photos for a session"""
+
+    __tablename__ = "photos"
+
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(Integer, ForeignKey("sessions.id"))
+    filename = Column(String)
+    original_filename = Column(String)
+    saved_path = Column(String)
+    description = Column(String, nullable=True)
+    file_size_mb = Column(Float)
+    upload_timestamp = Column(DateTime)
+
+    session = relationship("Session", back_populates="photos")
 
 
 def add_recording(
@@ -118,6 +136,56 @@ def add_recording(
     return new_recording
 
 
+def add_photo(
+    db: Session,
+    participant_name: str,
+    session_date: Date,
+    session_path: str,
+    filename: str,
+    original_filename: str,
+    saved_path: str,
+    file_size_mb: float,
+    upload_timestamp: DateTime,
+    description: Optional[str] = None,
+):
+    # if date is a string, convert to a python date type
+    if isinstance(session_date, str):
+        from datetime import datetime
+
+        session_date = datetime.strptime(session_date, "%Y-%m-%d").date()
+
+    # Create or update the participant
+    participant = db.query(Participant).filter(Participant.name == participant_name).first()
+    if not participant:
+        participant = Participant(name=participant_name)
+        db.add(participant)
+        db.flush()
+
+    # Create or update the session
+    session = (
+        db.query(Session).filter(Session.participant_id == participant.id, Session.session_date == session_date).first()
+    )
+    if not session:
+        session = Session(participant_id=participant.id, session_path=session_path, session_date=session_date)
+        db.add(session)
+        db.flush()
+
+    # Create the photo entry
+    new_photo = Photo(
+        session_id=session.id,
+        filename=filename,
+        original_filename=original_filename,
+        saved_path=saved_path,
+        description=description,
+        file_size_mb=file_size_mb,
+        upload_timestamp=upload_timestamp,
+    )
+    db.add(new_photo)
+    db.commit()
+    db.refresh(new_photo)
+    return new_photo
+
+
 ### Data access API with Pydantic models
 
 
@@ -130,10 +198,20 @@ class RecordingOut(BaseModel):
     timestamp_spread: Optional[float]
 
 
+class PhotoOut(BaseModel):
+    filename: str
+    original_filename: str
+    saved_path: str
+    description: Optional[str]
+    file_size_mb: float
+    upload_timestamp: datetime
+
+
 class SessionOut(BaseModel):
     session_date: date
     session_path: str
     recordings: List[RecordingOut]
+    photos: List[PhotoOut]
     imported: bool
 
 
@@ -148,7 +226,10 @@ def get_recordings(
     filter_by_session_date: Optional[date] = None,
     order_by_date: Optional[bool] = False,
 ) -> Union[List[ParticipantOut], Tuple[List[SessionOut], List[str]]]:
-    query = db.query(Participant).options(joinedload(Participant.sessions).joinedload(Session.recordings))
+    query = db.query(Participant).options(
+        joinedload(Participant.sessions).joinedload(Session.recordings),
+        joinedload(Participant.sessions).joinedload(Session.photos),
+    )
 
     if participant_name:
         query = query.filter(Participant.name == participant_name)
@@ -167,6 +248,11 @@ def get_recordings(
                 for recording in session.recordings
             ]
 
+            photo_out_list = [
+                PhotoOut(**{k: v for k, v in photo.__dict__.items() if k != "_sa_instance_state"})
+                for photo in session.photos
+            ]
+
             # check if there is an imported entry for this session
             imported = db.query(Imported).filter(Imported.session_id == session.id).first()
 
@@ -174,6 +260,7 @@ def get_recordings(
                 session_date=session.session_date,
                 session_path=session.session_path,
                 recordings=recording_out_list,
+                photos=photo_out_list,
                 imported=imported is not None,
             )
             session_out_list.append(session_out)
