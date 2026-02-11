@@ -166,11 +166,14 @@ class EasymocapTracking(dj.Computed):
     '''
 
     def make(self, key):
+        import gc
+        import ctypes
         from multi_camera.analysis.easymocap import mvmp_association_and_tracking
 
         assert len((SingleCameraVideo & key) - bottom_up) == 0, f"Missing OpenPose computations for {key}"
 
         dataset = MCTDataset(key)
+        libc = ctypes.CDLL('libc.so.6')
 
         for config_name, config_path in TRACKING_CONFIGS:
             try:
@@ -182,6 +185,8 @@ class EasymocapTracking(dj.Computed):
                 return
             except np.linalg.LinAlgError:
                 print(f'Config {config_name} failed with LinAlgError, trying next...')
+                gc.collect()
+                libc.malloc_trim(0)
                 continue
 
         self._skip_and_remove(key)
