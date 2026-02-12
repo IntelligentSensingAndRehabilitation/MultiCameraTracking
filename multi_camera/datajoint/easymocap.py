@@ -10,11 +10,11 @@ from .multi_camera_dj import schema, MultiCameraRecording, SingleCameraVideo, Ca
 _analysis_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'analysis')
 
 TRACKING_CONFIGS = [
-    ('default', os.path.join(_analysis_dir, 'mvmp1f_default.yml')),
-    ('fallback1', os.path.join(_analysis_dir, 'mvmp1f_fallback1.yml')),
-    ('fallback2', os.path.join(_analysis_dir, 'mvmp1f_fallback2.yml')),
-    ('fallback3', os.path.join(_analysis_dir, 'mvmp1f_fallback3.yml')),
-    ('fallback4', os.path.join(_analysis_dir, 'mvmp1f_fallback4.yml')),
+    os.path.join(_analysis_dir, 'mvmp1f_default.yml'),
+    os.path.join(_analysis_dir, 'mvmp1f_fallback1.yml'),
+    os.path.join(_analysis_dir, 'mvmp1f_fallback3.yml'),
+    os.path.join(_analysis_dir, 'mvmp1f_fallback4.yml'),
+    os.path.join(_analysis_dir, 'mvmp1f_fallback2.yml'),
 ]
 
 
@@ -175,16 +175,16 @@ class EasymocapTracking(dj.Computed):
         dataset = MCTDataset(key)
         libc = ctypes.CDLL('libc.so.6')
 
-        for config_name, config_path in TRACKING_CONFIGS:
+        for i, config_path in enumerate(TRACKING_CONFIGS):
             try:
                 results = mvmp_association_and_tracking(dataset, config_file=config_path)
                 key['tracking_results'] = results
                 key['num_tracks'] = len(np.unique([k['id'] for r in results for k in r]))
-                key['tracking_config'] = {'name': config_name, 'settings': _load_config_settings(config_path)}
+                key['tracking_config'] = _load_config_settings(config_path)
                 self.insert1(key)
                 return
             except np.linalg.LinAlgError:
-                print(f'Config {config_name} failed with LinAlgError, trying next...')
+                print(f'Config {i + 1}/{len(TRACKING_CONFIGS)} failed with LinAlgError, trying next...')
                 gc.collect()
                 libc.malloc_trim(0)
                 continue
@@ -193,8 +193,8 @@ class EasymocapTracking(dj.Computed):
 
     def _skip_and_remove(self, key):
         configs_tried = [
-            {'name': name, 'settings': _load_config_settings(path)}
-            for name, path in TRACKING_CONFIGS
+            _load_config_settings(path)
+            for path in TRACKING_CONFIGS
         ]
 
         EasymocapTrackingSkipped.insert1({
