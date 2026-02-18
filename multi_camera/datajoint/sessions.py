@@ -72,19 +72,12 @@ class Recording(dj.Manual):
     """
 
 
-@schema
-class SkippedRecording(dj.Manual):
-    definition = """
-    -> Session
-    -> MultiCameraRecording
-    ---
-    comment              : varchar(255)
-    skip_reason          : varchar(255)
-    insertion_time=CURRENT_TIMESTAMP : timestamp
-    """
-
-
-def import_session(participant_id: str, session_date: date, video_project: str, recordings: List[Tuple[str, str]]):
+def import_session(
+    participant_id: str,
+    session_date: date,
+    video_project: str,
+    recordings: List[Tuple[str, str]],
+):
     """
     Import a session with a list of recordings
 
@@ -114,7 +107,9 @@ def import_session(participant_id: str, session_date: date, video_project: str, 
 
             vid_dir, vid_base = os.path.split(vid_base)
             print("vid_dir", vid_dir, "vid_base", vid_base)
-            key = import_recording(vid_base, vid_dir, video_project, skip_connection=True)
+            key = import_recording(
+                vid_base, vid_dir, video_project, skip_connection=True
+            )
             key = (MultiCameraRecording & key).fetch1("KEY")
             key.update(session_key)
             key["comment"] = comment
