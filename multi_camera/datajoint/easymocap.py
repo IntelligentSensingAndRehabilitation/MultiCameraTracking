@@ -283,7 +283,7 @@ class EasymocapTracking(dj.Computed):
             CalibratedRecording
             & MultiCameraRecording
             - (SingleCameraVideo - bottom_up).proj()
-            - SkippedRecording
+            - SkippedRecording.proj()
         )
 
     def create_bounding_boxes(self, subject_ids):
