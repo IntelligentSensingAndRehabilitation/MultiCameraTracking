@@ -279,9 +279,12 @@ class EasymocapTracking(dj.Computed):
 
     @property
     def key_source(self):
+        from .sessions import Recording
+
         return (
             CalibratedRecording
             & MultiCameraRecording
+            & Recording
             - (SingleCameraVideo - bottom_up).proj()
             - SkippedRecording.proj()
         )
