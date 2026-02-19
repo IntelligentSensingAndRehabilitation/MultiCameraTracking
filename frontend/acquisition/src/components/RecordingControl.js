@@ -5,10 +5,13 @@ import { AcquisitionState } from "../AcquisitionApi";
 import Spinner from 'react-bootstrap/Spinner';
 
 const RecordingControl = () => {
-    const { newTrial, recordingFilename, recordingProgress, recordingSystemStatus, calibrationVideo, previewVideo, stopAcquisition } = useContext(AcquisitionState);
+    const { participant, newTrial, recordingFilename, recordingProgress, recordingSystemStatus, calibrationVideo, previewVideo, stopAcquisition } = useContext(AcquisitionState);
 
     const [comment, setComment] = useState("");
     const [maxFrames, setMaxFrames] = useState(1000);
+
+    const needsParticipant = !participant || participant.length === 0;
+    const participantTooltip = needsParticipant ? "Please set a Participant ID and press Enter first" : "";
 
     return (
         <div >
@@ -34,6 +37,7 @@ const RecordingControl = () => {
                                 className="btn btn-secondary"
                                 disabled={recordingSystemStatus !== "Idle"}
                                 onClick={() => previewVideo(maxFrames)}
+                                title={participantTooltip}
                             >Preview</Button>
                         </Col>
                         <Col md="auto">
@@ -41,13 +45,16 @@ const RecordingControl = () => {
                                 className="btn btn-secondary"
                                 disabled={recordingSystemStatus !== "Idle"}
                                 onClick={() => calibrationVideo(maxFrames)}
+                                title={participantTooltip}
                             >Calibration</Button>
                         </Col>
                         <Col md="auto">
                             <Button id="new_trial"
                                 disabled={recordingSystemStatus !== "Idle"}
                                 onClick={() => newTrial(comment, maxFrames)}
-                                className="btn btn-primary">New Trial</Button>
+                                className="btn btn-primary"
+                                title={participantTooltip}
+                            >New Trial</Button>
                         </Col>
                         <Col md="auto">
                             <Button id="stop"

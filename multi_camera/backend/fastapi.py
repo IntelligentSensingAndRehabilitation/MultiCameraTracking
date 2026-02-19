@@ -673,9 +673,9 @@ def convert_rgb_to_jpeg(frame):
 def draw_serial_label(frame, serial: str):
     h, w = frame.shape[:2]
     font = cv2.FONT_HERSHEY_SIMPLEX
-    scale = max(0.4, w / 1000)
+    scale = max(0.6, w / 600)
     thickness = max(1, int(scale * 2))
-    pos = (8, int(25 * scale + 10))
+    pos = (10, int(30 * scale + 10))
     cv2.putText(frame, serial, pos, font, scale, (0, 0, 0), thickness + 2, cv2.LINE_AA)
     cv2.putText(
         frame, serial, pos, font, scale, (255, 255, 255), thickness, cv2.LINE_AA
