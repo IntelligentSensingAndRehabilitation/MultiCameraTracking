@@ -29,6 +29,13 @@ import asyncio
 import shutil
 
 from multi_camera.acquisition.flir_recording_api import FlirRecorder, CameraStatus
+from multi_camera.analysis.aruco_validation import (
+    MarkerDetection,
+    WalkwayMarkerConfig,
+    create_aruco_detector,
+    detect_markers_in_frame,
+    draw_aruco_overlay,
+)
 from multi_camera.backend.recording_db import (
     get_db,
     add_recording,
@@ -83,6 +90,14 @@ class GlobalState:
     recording_status: str = ""
     acquisition = None
     selected_camera: int | None = None
+    aruco_enabled: bool = False
+    aruco_detector: cv2.aruco.ArucoDetector | None = None
+    aruco_config: WalkwayMarkerConfig = field(default_factory=WalkwayMarkerConfig)
+    aruco_last_detections: dict[int, list[MarkerDetection]] = field(
+        default_factory=dict
+    )
+    aruco_frame_counter: int = 0
+    aruco_detection_interval: int = 5
 
 
 _global_state = GlobalState()
@@ -352,6 +367,9 @@ async def get_status() -> Dict:
 
 @api_router.post("/new_trial")
 async def new_trial(data: NewTrialData, db: Session = Depends(db_dependency)):
+    state: GlobalState = get_global_state()
+    state.aruco_enabled = False
+
     recording_dir = data.recording_dir
     recording_filename = data.recording_filename
     comment = data.comment
@@ -372,7 +390,6 @@ async def new_trial(data: NewTrialData, db: Session = Depends(db_dependency)):
     time_str = now.strftime("%Y%m%d_%H%M%S")
     recording_path = os.path.join(recording_dir, f"{recording_filename}_{time_str}")
 
-    state: GlobalState = get_global_state()
     state.selected_camera = None
     current_session = state.current_session
 
@@ -594,6 +611,36 @@ async def reset_cameras():
     return {"status": "success"}
 
 
+@api_router.post("/aruco/toggle")
+async def aruco_toggle() -> Dict:
+    state: GlobalState = get_global_state()
+    state.aruco_enabled = not state.aruco_enabled
+    if state.aruco_enabled and state.aruco_detector is None:
+        state.aruco_detector = create_aruco_detector(state.aruco_config.dictionary_id)
+    if not state.aruco_enabled:
+        state.aruco_last_detections.clear()
+        state.aruco_frame_counter = 0
+    return {"aruco_enabled": state.aruco_enabled}
+
+
+@api_router.get("/aruco/status")
+async def aruco_status() -> Dict:
+    state: GlobalState = get_global_state()
+    config = state.aruco_config
+    visibility: dict[str, dict[str, bool]] = {}
+    for pair_name, (left, right) in config.marker_pairs.items():
+        left_visible = any(
+            any(d.marker_id == left for d in dets)
+            for dets in state.aruco_last_detections.values()
+        )
+        right_visible = any(
+            any(d.marker_id == right for d in dets)
+            for dets in state.aruco_last_detections.values()
+        )
+        visibility[pair_name] = {"left": left_visible, "right": right_visible}
+    return {"enabled": state.aruco_enabled, "pairs": visibility}
+
+
 # create an endpoint that exposes the camera statuses
 @api_router.get("/camera_status")
 async def get_camera_status() -> List[CameraStatus]:
@@ -688,6 +735,20 @@ async def receive_frames(frames):
         if 0 <= idx < len(frames):
             frame, conversion, serial = frames[idx]
             rgb_frame = cv2.cvtColor(frame, conversion)
+            if state.aruco_enabled and state.aruco_detector is not None:
+                expected_ids = set(state.aruco_config.all_marker_ids)
+                run_detection = (
+                    state.aruco_frame_counter % state.aruco_detection_interval
+                ) == 0
+                state.aruco_frame_counter += 1
+                if run_detection:
+                    detections = detect_markers_in_frame(
+                        rgb_frame, state.aruco_detector, expected_ids
+                    )
+                    state.aruco_last_detections[idx] = detections
+                cached = state.aruco_last_detections.get(idx, [])
+                if cached:
+                    draw_aruco_overlay(rgb_frame, cached, state.aruco_config)
             h, w = rgb_frame.shape[:2]
             target_width = 1080
             target_height = int(target_width * h / w)
@@ -707,6 +768,26 @@ async def receive_frames(frames):
     for frame, conversion, serial in frames:
         rgb_frames.append(cv2.cvtColor(frame, conversion))
         serials.append(serial)
+
+    # ArUco detection overlay on individual frames before grid composition
+    if state.aruco_enabled and state.aruco_detector is not None:
+        expected_ids = set(state.aruco_config.all_marker_ids)
+        run_detection = (
+            state.aruco_frame_counter % state.aruco_detection_interval
+        ) == 0
+        state.aruco_frame_counter += 1
+
+        if run_detection:
+            for cam_idx, rgb_frame in enumerate(rgb_frames):
+                detections = detect_markers_in_frame(
+                    rgb_frame, state.aruco_detector, expected_ids
+                )
+                state.aruco_last_detections[cam_idx] = detections
+
+        for cam_idx, rgb_frame in enumerate(rgb_frames):
+            cached = state.aruco_last_detections.get(cam_idx, [])
+            if cached:
+                draw_aruco_overlay(rgb_frame, cached, state.aruco_config)
 
     # Calculate the size of each frame to fit in the grid
     frame_height, frame_width, _ = rgb_frames[0].shape
