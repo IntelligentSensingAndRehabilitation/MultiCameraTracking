@@ -670,6 +670,18 @@ def convert_rgb_to_jpeg(frame):
     return jpeg_image.tobytes()
 
 
+def draw_serial_label(frame, serial: str):
+    h, w = frame.shape[:2]
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    scale = max(0.4, w / 1000)
+    thickness = max(1, int(scale * 2))
+    pos = (8, int(25 * scale + 10))
+    cv2.putText(frame, serial, pos, font, scale, (0, 0, 0), thickness + 2, cv2.LINE_AA)
+    cv2.putText(
+        frame, serial, pos, font, scale, (255, 255, 255), thickness, cv2.LINE_AA
+    )
+
+
 async def receive_frames(frames):
     state: GlobalState = get_global_state()
     if not state.preview_queue.empty():
@@ -682,12 +694,13 @@ async def receive_frames(frames):
     if state.is_preview and state.selected_camera is not None:
         idx = state.selected_camera
         if 0 <= idx < len(frames):
-            frame, conversion = frames[idx]
+            frame, conversion, serial = frames[idx]
             rgb_frame = cv2.cvtColor(frame, conversion)
             h, w = rgb_frame.shape[:2]
             target_width = 1080
             target_height = int(target_width * h / w)
             downsampled = downsample_image(rgb_frame, target_width, target_height)
+            draw_serial_label(downsampled, serial)
             jpeg_image = convert_rgb_to_jpeg(downsampled)
             await state.preview_queue.put(jpeg_image)
             return
@@ -700,7 +713,11 @@ async def receive_frames(frames):
     grid_height = math.ceil(num_frames / grid_width)
 
     # Convert each frame to RGB and store in a list
-    rgb_frames = [cv2.cvtColor(frame, conversion) for frame, conversion in frames]
+    rgb_frames = []
+    serials = []
+    for frame, conversion, serial in frames:
+        rgb_frames.append(cv2.cvtColor(frame, conversion))
+        serials.append(serial)
 
     # Calculate the size of each frame to fit in the grid
     frame_height, frame_width, _ = rgb_frames[0].shape
@@ -717,6 +734,7 @@ async def receive_frames(frames):
 
         # Resize the frame to fit the grid
         resized_frame = cv2.resize(frame, (grid_frame_width, grid_frame_height))
+        draw_serial_label(resized_frame, serials[i])
 
         # Calculate the position in the grid
         y_start = row * grid_frame_height

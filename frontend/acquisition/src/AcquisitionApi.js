@@ -251,6 +251,7 @@ export const AcquisitionApi = (props) => {
     }
 
     async function previewVideo(max_frames) {
+        if (!participant || participant.length === 0) return;
         setIsPreview(true);
         setSelectedCamera(null);
         await axios.post(`${API_BASE_URL}/preview`,
