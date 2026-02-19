@@ -75,17 +75,6 @@
         <input id="status" type="text" class="form-control" readonly />
     </div>
 
-    <div style="margin-bottom: 8px;">
-        <label>
-            <input type="checkbox" id="aruco_toggle" onchange="toggleAruco()" disabled />
-            ArUco Detection
-        </label>
-        <span id="aruco_status_label" style="margin-left: 12px; font-size: 0.9em; color: #666;"></span>
-    </div>
-
-    <div id="aruco_marker_status" style="display:none; margin-bottom: 8px; font-size: 0.85em;">
-    </div>
-
     <div style="border: 1px solid black;">
         <img id="video_stream" width="640">
     </div>
@@ -163,53 +152,6 @@
         const commentInput = document.getElementById("comment");
         const configSelect = document.getElementById("config");
         const fileNameInput = document.getElementById("file_name");
-        const arucoToggle = document.getElementById("aruco_toggle");
-        const arucoStatusLabel = document.getElementById("aruco_status_label");
-        const arucoMarkerStatus = document.getElementById("aruco_marker_status");
-        let arucoPollingInterval = null;
-
-        async function toggleAruco() {
-            const resp = await sendData("/aruco/toggle", {});
-            if (resp.aruco_enabled) {
-                arucoStatusLabel.textContent = "ON";
-                arucoStatusLabel.style.color = "#090";
-                arucoMarkerStatus.style.display = "block";
-                startArucoPolling();
-            } else {
-                arucoStatusLabel.textContent = "OFF";
-                arucoStatusLabel.style.color = "#666";
-                arucoMarkerStatus.style.display = "none";
-                arucoMarkerStatus.innerHTML = "";
-                stopArucoPolling();
-            }
-        }
-
-        function startArucoPolling() {
-            stopArucoPolling();
-            arucoPollingInterval = setInterval(pollArucoStatus, 1000);
-        }
-
-        function stopArucoPolling() {
-            if (arucoPollingInterval) {
-                clearInterval(arucoPollingInterval);
-                arucoPollingInterval = null;
-            }
-        }
-
-        async function pollArucoStatus() {
-            const resp = await fetch(`${API_ENDPOINT}/aruco/status`);
-            const data = await resp.json();
-            if (!data.enabled) return;
-            let html = "";
-            for (const [pair, vis] of Object.entries(data.pairs)) {
-                const lc = vis.left ? "#090" : "#c00";
-                const rc = vis.right ? "#090" : "#c00";
-                html += `<span style="margin-right:12px;"><b>${pair}:</b> `;
-                html += `L <span style="color:${lc}">${vis.left ? "OK" : "---"}</span> `;
-                html += `R <span style="color:${rc}">${vis.right ? "OK" : "---"}</span></span>`;
-            }
-            arucoMarkerStatus.innerHTML = html;
-        }
 
         async function sendData(url, data) {
             console.log("Sending data:", data, "to", url);
@@ -243,7 +185,6 @@
                     const recordingFilename = data.recording_filename;
                     sessionDirInput.value = recordingDir;
                     sessionFilenameInput.value = recordingFilename;
-                    arucoToggle.disabled = false;
                 }
                 )
                 .catch(error => console.error(error));
@@ -251,11 +192,7 @@
         }
 
         async function newTrial() {
-            arucoToggle.checked = false;
-            arucoToggle.disabled = true;
-            arucoStatusLabel.textContent = "";
-            arucoMarkerStatus.style.display = "none";
-            stopArucoPolling();
+            const recordingDir = sessionDirInput.value;
 
             sendData("/new_trial", { recording_dir: sessionDirInput.value, recording_filename: sessionFilenameInput.value, comment: commentInput.value })
                 .then(data => {
@@ -270,7 +207,6 @@
         stopButton.addEventListener("click", () => {
             sendData("/stop", {}).then(data => {
                 statusInput.value = "recording stopped";
-                arucoToggle.disabled = false;
             });
         });
 
