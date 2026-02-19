@@ -1,4 +1,13 @@
-from fastapi import FastAPI, Depends, Request, APIRouter, WebSocket, WebSocketDisconnect, HTTPException, Query
+from fastapi import (
+    FastAPI,
+    Depends,
+    Request,
+    APIRouter,
+    WebSocket,
+    WebSocketDisconnect,
+    HTTPException,
+    Query,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
@@ -10,7 +19,6 @@ from pydantic import BaseModel
 from contextlib import asynccontextmanager
 from typing import List, Dict
 from dataclasses import dataclass, field
-import base64
 import numpy as np
 import logging
 import math
@@ -52,7 +60,8 @@ log_colors_config = {
     "CRITICAL": "red,bg_white",
 }
 log_format = colorlog.ColoredFormatter(
-    "%(log_color)s%(levelname)s (%(name)s):%(reset)s  %(message)s", log_colors=log_colors_config
+    "%(log_color)s%(levelname)s (%(name)s):%(reset)s  %(message)s",
+    log_colors=log_colors_config,
 )
 acquisition_logger = logging.getLogger("acquisition")
 streamHandler = logging.StreamHandler()
@@ -73,6 +82,8 @@ class GlobalState:
     current_session: Session = None
     recording_status: str = ""
     acquisition = None
+    selected_camera: int | None = None
+    is_preview: bool = False
 
 
 _global_state = GlobalState()
@@ -115,7 +126,9 @@ RECORDING_BASE = "data"
 CONFIG_PATH = "/configs/"
 DEFAULT_CONFIG = os.path.join(CONFIG_PATH, "cotton_lab_config_20230620.yaml")
 DATA_VOLUME = os.environ.get("DATA_VOLUME", "/data")
-DISK_SPACE_WARNING_THRESHOLD_GB = float(os.environ.get("DISK_SPACE_WARNING_THRESHOLD_GB", "50"))
+DISK_SPACE_WARNING_THRESHOLD_GB = float(
+    os.environ.get("DISK_SPACE_WARNING_THRESHOLD_GB", "50")
+)
 
 
 def get_disk_space_info(path: str) -> Dict:
@@ -133,15 +146,15 @@ def get_disk_space_info(path: str) -> Dict:
     """
     try:
         stat = shutil.disk_usage(path)
-        total_gb = stat.total / (1024 ** 3)
-        free_gb = stat.free / (1024 ** 3)
+        total_gb = stat.total / (1024**3)
+        free_gb = stat.free / (1024**3)
         percent_remaining = (stat.free / stat.total) * 100 if stat.total > 0 else 0
 
         return {
             "disk_space_gb_remaining": round(free_gb, 2),
             "disk_space_percent_remaining": round(percent_remaining, 2),
             "disk_space_warning": free_gb < DISK_SPACE_WARNING_THRESHOLD_GB,
-            "disk_space_total_gb": round(total_gb, 2)
+            "disk_space_total_gb": round(total_gb, 2),
         }
     except Exception as e:
         acquisition_logger.error(f"Error checking disk space for {path}: {e}")
@@ -149,8 +162,9 @@ def get_disk_space_info(path: str) -> Dict:
             "disk_space_gb_remaining": 0,
             "disk_space_percent_remaining": 0,
             "disk_space_warning": True,
-            "disk_space_total_gb": 0
+            "disk_space_total_gb": 0,
         }
+
 
 print(CONFIG_PATH)
 config_files = os.listdir(CONFIG_PATH)
@@ -202,7 +216,6 @@ async def lifespan(app: FastAPI):
         synchronize_to_datajoint(db)
     except Exception as e:
         acquisition_logger.error(f"Could not synchronize to datajoint: {e}")
-
 
     yield
 
@@ -257,12 +270,14 @@ class NewTrialData(BaseModel):
     comment: str
     max_frames: int
 
+
 class PreviewData(BaseModel):
     max_frames: int
 
 
 class ConfigFileData(BaseModel):
     config: str
+
 
 class PriorRecordings(BaseModel):
     participant: str
@@ -304,7 +319,9 @@ async def set_session(subject_id: str) -> Session:
     os.makedirs(session_dir, exist_ok=True)
 
     state: GlobalState = get_global_state()
-    state.current_session = Session(participant_name=subject_id, session_date=date, recording_path=session_dir)
+    state.current_session = Session(
+        participant_name=subject_id, session_date=date, recording_path=session_dir
+    )
     print("New session: ", state.current_session)
 
     return state.current_session
@@ -357,6 +374,8 @@ async def new_trial(data: NewTrialData, db: Session = Depends(db_dependency)):
     recording_path = os.path.join(recording_dir, f"{recording_filename}_{time_str}")
 
     state: GlobalState = get_global_state()
+    state.is_preview = False
+    state.selected_camera = None
     current_session = state.current_session
 
     def receive_frames_wrapper(frames):
@@ -382,7 +401,6 @@ async def new_trial(data: NewTrialData, db: Session = Depends(db_dependency)):
 
             # The result now contains a list of all the recordings after acquisition was started
             for record in result:
-
                 add_recording(
                     db,
                     participant_name=current_session.participant_name,
@@ -399,26 +417,24 @@ async def new_trial(data: NewTrialData, db: Session = Depends(db_dependency)):
 
     task.add_done_callback(task_done_callback)
 
-    return {
-        "recording_file_name": recording_path,
-        **disk_info
-    }
+    return {"recording_file_name": recording_path, **disk_info}
 
 
 @api_router.post("/preview")
 async def preview(data: PreviewData):
-
     max_frames = data.max_frames
 
     def receive_frames_wrapper(frames):
         loop.create_task(receive_frames(frames))
 
-    # run acquisition in a separate thread
-    import threading
-    from functools import partial
-
     state: GlobalState = get_global_state()
-    await run_in_threadpool(state.acquisition.start_acquisition, preview_callback=receive_frames_wrapper, max_frames=max_frames)
+    state.is_preview = True
+    state.selected_camera = None
+    await run_in_threadpool(
+        state.acquisition.start_acquisition,
+        preview_callback=receive_frames_wrapper,
+        max_frames=max_frames,
+    )
 
     return {}
 
@@ -426,6 +442,8 @@ async def preview(data: PreviewData):
 @api_router.post("/stop")
 async def stop():
     state: GlobalState = get_global_state()
+    state.is_preview = False
+    state.selected_camera = None
     state.acquisition.stop_acquisition()
     return {}
 
@@ -438,7 +456,9 @@ async def get_prior_recordings(db=Depends(db_dependency)) -> List[PriorRecording
     else:
         participant_name = state.current_session.participant_name
     prior_recordings = []
-    db_recordings: ParticipantOut = get_recordings(db, participant_name=participant_name)
+    db_recordings: ParticipantOut = get_recordings(
+        db, participant_name=participant_name
+    )
     for participant in db_recordings:
         participant: ParticipantOut = participant
         for session in participant.sessions:
@@ -482,9 +502,13 @@ async def update_recording(recording: PriorRecordings, db=Depends(db_dependency)
 
 
 @api_router.post("/calibrate")
-async def update_recording(recording: PriorRecordings,
-                           charuco_flag: bool = Query(..., description="True for Charuco, False for Checkerboard"),
-                           db=Depends(db_dependency)):
+async def update_recording(
+    recording: PriorRecordings,
+    charuco_flag: bool = Query(
+        ..., description="True for Charuco, False for Checkerboard"
+    ),
+    db=Depends(db_dependency),
+):
     from multi_camera.datajoint.calibrate_cameras import run_calibration
 
     print("Calibrating recording: ", recording)
@@ -493,15 +517,14 @@ async def update_recording(recording: PriorRecordings,
 
     if charuco_flag == True:
         print("Using charuco board")
-        checkerboard_size=109.0
-        checkerboard_dim=(5, 7)
+        checkerboard_size = 109.0
+        checkerboard_dim = (5, 7)
         charuco = True
     else:
         print("Using checkerboard")
-        checkerboard_size=110.0
-        checkerboard_dim=(4, 6)
+        checkerboard_size = 110.0
+        checkerboard_dim = (4, 6)
         charuco = False
-
 
     calibration_coroutine = run_in_threadpool(
         run_calibration,
@@ -524,7 +547,9 @@ class ProcessSession(BaseModel):
 
 @api_router.post("/process_session")
 async def update_recording(session: ProcessSession, db=Depends(db_dependency)):
-    push_to_datajoint(db, session.participant_name, session.session_date, session.video_project)
+    push_to_datajoint(
+        db, session.participant_name, session.session_date, session.video_project
+    )
     return {}
 
 
@@ -559,7 +584,9 @@ async def update_config(config: ConfigFileData):
     if config.config == "":
         state.acquisition.reset()
     else:
-        await state.acquisition.configure_cameras(os.path.join(CONFIG_PATH, config.config))
+        await state.acquisition.configure_cameras(
+            os.path.join(CONFIG_PATH, config.config)
+        )
     return {"status": "success", "config": config.config}
 
 
@@ -613,6 +640,21 @@ async def websocket_endpoint(websocket: WebSocket):
     logger.info("Regular websocket exited")
 
 
+class SelectCameraData(BaseModel):
+    camera_index: int | None = None
+
+
+@api_router.post("/select_camera")
+async def select_camera(data: SelectCameraData):
+    state: GlobalState = get_global_state()
+    if not state.is_preview:
+        raise HTTPException(
+            status_code=400, detail="Camera selection only available during preview"
+        )
+    state.selected_camera = data.camera_index
+    return {"selected_camera": data.camera_index}
+
+
 @api_router.get("/recording_status", response_model=str)
 async def get_recording_status() -> str:
     state: GlobalState = get_global_state()
@@ -631,20 +673,34 @@ def convert_rgb_to_jpeg(frame):
 async def receive_frames(frames):
     state: GlobalState = get_global_state()
     if not state.preview_queue.empty():
-        # If the queue is not empty, then we are not keeping up with the frames
-        # logger.warn("Dropping frame")
         return
 
     if frames is None:
         print("Received empty frame")
         return
 
+    if state.is_preview and state.selected_camera is not None:
+        idx = state.selected_camera
+        if 0 <= idx < len(frames):
+            frame, conversion = frames[idx]
+            rgb_frame = cv2.cvtColor(frame, conversion)
+            h, w = rgb_frame.shape[:2]
+            target_width = 1080
+            target_height = int(target_width * h / w)
+            downsampled = downsample_image(rgb_frame, target_width, target_height)
+            jpeg_image = convert_rgb_to_jpeg(downsampled)
+            await state.preview_queue.put(jpeg_image)
+            return
+
+    if not state.is_preview:
+        state.selected_camera = None
+
     num_frames = len(frames)
     grid_width = math.ceil(math.sqrt(num_frames))
     grid_height = math.ceil(num_frames / grid_width)
 
     # Convert each frame to RGB and store in a list
-    rgb_frames = [cv2.cvtColor(frame, conversion) for frame,conversion in frames]
+    rgb_frames = [cv2.cvtColor(frame, conversion) for frame, conversion in frames]
 
     # Calculate the size of each frame to fit in the grid
     frame_height, frame_width, _ = rgb_frames[0].shape
@@ -702,9 +758,13 @@ async def video_endpoint():
                 break
 
             # Write the boundary frame to the response
-            yield (b"--frame\r\n" b"Content-Type: image/jpeg\r\n\r\n" + frame + b"\r\n\r\n")
+            yield (b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + frame + b"\r\n\r\n")
 
-    return StreamingResponse(generate_frames(), status_code=206, media_type="multipart/x-mixed-replace; boundary=frame")
+    return StreamingResponse(
+        generate_frames(),
+        status_code=206,
+        media_type="multipart/x-mixed-replace; boundary=frame",
+    )
 
 
 @api_router.websocket("/video_ws")
@@ -740,12 +800,14 @@ class SMPLData(BaseModel):
 
 @api_router.get("/mesh", response_model=SMPLData)
 async def get_mesh(
-    filename: str = Query(None, description="Name of the file to be used."), downsample: int = Query(default=5)
+    filename: str = Query(None, description="Name of the file to be used."),
+    downsample: int = Query(default=5),
 ) -> SMPLData:
     from .annotation import get_mesh
 
     res = get_mesh(filename, downsample)
     return SMPLData(**res)
+
 
 # code for single person SMPL reconstructions
 
@@ -758,7 +820,7 @@ class ReconstructionTrials(BaseModel):
 
 @api_router.get("/smpl_trials", response_model=List[ReconstructionTrials])
 async def get_smpl_trials(
-    model: str = Query(default="smpl", description="Type of SMPL model to use.")
+    model: str = Query(default="smpl", description="Type of SMPL model to use."),
 ) -> List[ReconstructionTrials]:
     print(model)
     from .smpl import get_smpl_trials
@@ -777,7 +839,10 @@ async def get_smpl(
 
     res = get_smpl_trajectory(filename, model)
 
-    return SMPLData(ids=[0], frames=-1, type="smpl", faces=res["faces"], meshes=res["vertices"])
+    return SMPLData(
+        ids=[0], frames=-1, type="smpl", faces=res["faces"], meshes=res["vertices"]
+    )
+
 
 app.include_router(api_router)
 
@@ -788,13 +853,17 @@ def register_exception(app: FastAPI):
     from fastapi.responses import JSONResponse
 
     @app.exception_handler(RequestValidationError)
-    async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    async def validation_exception_handler(
+        request: Request, exc: RequestValidationError
+    ):
         exc_str = f"{exc}".replace("\n", " ").replace("   ", " ")
         # or logger.error(f'{exc}')
         # logger.error(request, exc_str)
         print(request, exc_str)
         content = {"status_code": 10422, "message": exc_str, "data": None}
-        return JSONResponse(content=content, status_code=status.HTTP_422_UNPROCESSABLE_ENTITY)
+        return JSONResponse(
+            content=content, status_code=status.HTTP_422_UNPROCESSABLE_ENTITY
+        )
 
 
 register_exception(app)
