@@ -357,8 +357,8 @@ def draw_aruco_overlay(
             thickness=max(1, int(3 * scale)),
         )
 
-        font_scale = 1.0 * scale
-        thickness = max(1, int(2 * scale))
+        font_scale = 2.0 * scale
+        thickness = max(2, int(3 * scale))
         text = str(det.marker_id)
         text_size = cv2.getTextSize(
             text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness

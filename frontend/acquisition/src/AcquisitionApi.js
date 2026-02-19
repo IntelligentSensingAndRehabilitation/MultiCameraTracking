@@ -71,6 +71,8 @@ export const AcquisitionApi = (props) => {
     const [diskWarningOnStartup, setDiskWarningOnStartup] = useState(false);
     const [isPreview, setIsPreview] = useState(false);
     const [selectedCamera, setSelectedCamera] = useState(null);
+    const [arucoEnabled, setArucoEnabled] = useState(false);
+    const [arucoStatus, setArucoStatus] = useState({});
 
     useEffect(() => {
         // axios.interceptors.request.use(request => {
@@ -229,6 +231,8 @@ export const AcquisitionApi = (props) => {
 
             setRecordingProgress(0);
             setRecordingFilename(data.recording_file_name);
+            setArucoEnabled(false);
+            setArucoStatus({});
         }
     }
 
@@ -265,6 +269,21 @@ export const AcquisitionApi = (props) => {
         setIsPreview(false);
         setSelectedCamera(null);
         await axios.post(`${API_BASE_URL}/stop`);
+    }
+
+    async function toggleAruco() {
+        const response = await axios.post(`${API_BASE_URL}/aruco/toggle`);
+        setArucoEnabled(response.data.aruco_enabled);
+        if (!response.data.aruco_enabled) {
+            setArucoStatus({});
+        }
+    }
+
+    async function fetchArucoStatus() {
+        const response = await axios.get(`${API_BASE_URL}/aruco/status`);
+        if (response.data.enabled) {
+            setArucoStatus(response.data.pairs);
+        }
     }
 
     const fetchCameraStatus = async () => {
@@ -480,6 +499,10 @@ export const AcquisitionApi = (props) => {
         processSession,
         fetchSmplTrials,
         fetchSmpl,
+        arucoEnabled,
+        arucoStatus,
+        toggleAruco,
+        fetchArucoStatus,
     }}> {props.children} </AcquisitionState.Provider >)
     //return (<div> {children} </div>)
 };

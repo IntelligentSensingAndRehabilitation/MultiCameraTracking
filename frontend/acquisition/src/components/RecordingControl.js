@@ -5,7 +5,7 @@ import { AcquisitionState } from "../AcquisitionApi";
 import Spinner from 'react-bootstrap/Spinner';
 
 const RecordingControl = () => {
-    const { participant, newTrial, recordingFilename, recordingProgress, recordingSystemStatus, calibrationVideo, previewVideo, stopAcquisition } = useContext(AcquisitionState);
+    const { participant, newTrial, recordingFilename, recordingProgress, recordingSystemStatus, calibrationVideo, previewVideo, stopAcquisition, arucoEnabled, toggleAruco } = useContext(AcquisitionState);
 
     const [comment, setComment] = useState("");
     const [maxFrames, setMaxFrames] = useState(1000);
@@ -31,7 +31,7 @@ const RecordingControl = () => {
             <Form className={recordingSystemStatus === "Recording" ? "g-4 p-2 border bg-warning" : "g-4 p-2 border"}>
 
                 <Container>
-                    <Row className="justify-content-md-left">
+                    <Row className="align-items-center">
                         <Col md="auto">
                             <Button id="preview"
                                 className="btn btn-secondary"
@@ -65,6 +65,17 @@ const RecordingControl = () => {
                         </Col>
                         <Col md="auto">
                             {recordingSystemStatus === "Recording" ? <Spinner animation="border" role="status" /> : null}
+                        </Col>
+                        <Col className="d-flex justify-content-end">
+                            <Form.Check
+                                type="switch"
+                                id="aruco-toggle"
+                                label="ArUco"
+                                checked={arucoEnabled}
+                                disabled={recordingSystemStatus === "Recording"}
+                                onChange={toggleAruco}
+                                className="mb-0"
+                            />
                         </Col>
                     </Row>
                 </Container>
