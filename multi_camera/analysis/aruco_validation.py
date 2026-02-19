@@ -131,6 +131,47 @@ def create_aruco_detector(
     return cv2.aruco.ArucoDetector(dictionary, parameters)
 
 
+def detect_markers_in_frame(
+    frame: np.ndarray,
+    detector: cv2.aruco.ArucoDetector,
+    expected_ids: set[int],
+) -> list[MarkerDetection]:
+    lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
+    lab[:, :, 0] = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8)).apply(
+        lab[:, :, 0]
+    )
+    enhanced = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
+
+    corners, ids, _ = detector.detectMarkers(enhanced)
+    detections: list[MarkerDetection] = []
+
+    if ids is not None:
+        for i, marker_id in enumerate(ids.flatten()):
+            if int(marker_id) in expected_ids:
+                corner_pts = corners[i][0]
+                center = np.mean(corner_pts, axis=0)
+                detections.append(
+                    MarkerDetection(
+                        marker_id=int(marker_id), corners=corner_pts, center=center
+                    )
+                )
+
+    return detections
+
+
+def get_marker_centers_by_frame(
+    result: CameraDetectionResult,
+    marker_id: int,
+) -> dict[int, np.ndarray]:
+    centers: dict[int, np.ndarray] = {}
+    for fd in result.frame_detections:
+        for det in fd.detections:
+            if det.marker_id == marker_id:
+                centers[fd.frame_idx] = det.center
+                break
+    return centers
+
+
 def detect_markers_in_video(
     video_path: str,
     detector: cv2.aruco.ArucoDetector,
@@ -151,27 +192,7 @@ def detect_markers_in_video(
         if not ret or frame is None:
             break
 
-        # CLAHE on luminance channel to cut through floor glare and specular reflections
-        lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
-        lab[:, :, 0] = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8)).apply(
-            lab[:, :, 0]
-        )
-        enhanced = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
-
-        corners, ids, _ = detector.detectMarkers(enhanced)
-        detections: list[MarkerDetection] = []
-
-        if ids is not None:
-            for i, marker_id in enumerate(ids.flatten()):
-                if int(marker_id) in expected_set:
-                    corner_pts = corners[i][0]
-                    center = np.mean(corner_pts, axis=0)
-                    detections.append(
-                        MarkerDetection(
-                            marker_id=int(marker_id), corners=corner_pts, center=center
-                        )
-                    )
-
+        detections = detect_markers_in_frame(frame, detector, expected_set)
         frame_detections.append(
             FrameDetections(frame_idx=frame_idx, detections=detections)
         )
