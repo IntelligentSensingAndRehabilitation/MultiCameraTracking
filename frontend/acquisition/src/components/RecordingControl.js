@@ -35,7 +35,7 @@ const RecordingControl = () => {
                         <Col md="auto">
                             <Button id="preview"
                                 className="btn btn-secondary"
-                                disabled={recordingSystemStatus !== "Idle"}
+                                disabled={recordingSystemStatus !== "Idle" || needsParticipant}
                                 onClick={() => previewVideo(maxFrames)}
                                 title={participantTooltip}
                             >Preview</Button>
@@ -43,14 +43,14 @@ const RecordingControl = () => {
                         <Col md="auto">
                             <Button id="calibration"
                                 className="btn btn-secondary"
-                                disabled={recordingSystemStatus !== "Idle"}
+                                disabled={recordingSystemStatus !== "Idle" || needsParticipant}
                                 onClick={() => calibrationVideo(maxFrames)}
                                 title={participantTooltip}
                             >Calibration</Button>
                         </Col>
                         <Col md="auto">
                             <Button id="new_trial"
-                                disabled={recordingSystemStatus !== "Idle"}
+                                disabled={recordingSystemStatus !== "Idle" || needsParticipant}
                                 onClick={() => newTrial(comment, maxFrames)}
                                 className="btn btn-primary"
                                 title={participantTooltip}
