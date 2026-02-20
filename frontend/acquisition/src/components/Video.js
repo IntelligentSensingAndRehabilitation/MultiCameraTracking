@@ -95,7 +95,7 @@ const Video = () => {
                                     style={{
                                         position: 'absolute',
                                         top: '10px',
-                                        right: '10px',
+                                        right: '25px',
                                         background: 'rgba(0, 0, 0, 0.6)',
                                         color: 'white',
                                         border: 'none',
