@@ -69,6 +69,8 @@ export const AcquisitionApi = (props) => {
     const [diskSpaceInfo, setDiskSpaceInfo] = useState(null);
     const [showDiskWarningModal, setShowDiskWarningModal] = useState(false);
     const [diskWarningOnStartup, setDiskWarningOnStartup] = useState(false);
+    const [isPreview, setIsPreview] = useState(false);
+    const [selectedCamera, setSelectedCamera] = useState(null);
 
     useEffect(() => {
         // axios.interceptors.request.use(request => {
@@ -195,6 +197,9 @@ export const AcquisitionApi = (props) => {
             max_frames = 100;
         }
 
+        setIsPreview(false);
+        setSelectedCamera(null);
+
         if (participant && participant.length > 0) {
             console.log("Starting recording for participant: ", participant);
             const response = await axios.post(`${API_BASE_URL}/new_trial`,
@@ -246,6 +251,9 @@ export const AcquisitionApi = (props) => {
     }
 
     async function previewVideo(max_frames) {
+        if (!participant || participant.length === 0) return;
+        setIsPreview(true);
+        setSelectedCamera(null);
         await axios.post(`${API_BASE_URL}/preview`,
             {
                 max_frames: max_frames
@@ -254,6 +262,8 @@ export const AcquisitionApi = (props) => {
     }
 
     async function stopAcquisition() {
+        setIsPreview(false);
+        setSelectedCamera(null);
         await axios.post(`${API_BASE_URL}/stop`);
     }
 
@@ -409,6 +419,11 @@ export const AcquisitionApi = (props) => {
         });
     };
 
+    async function selectCamera(cameraIndex) {
+        await axios.post(`${API_BASE_URL}/select_camera`, { camera_index: cameraIndex });
+        setSelectedCamera(cameraIndex);
+    }
+
     const processSession = async (participant, session, video_project) => {
         console.log(`Processing session ${session} for ${participant}`);
         await axios.post(`${API_BASE_URL}/process_session`, {
@@ -447,6 +462,9 @@ export const AcquisitionApi = (props) => {
         showDiskWarningModal: showDiskWarningModal,
         setShowDiskWarningModal: setShowDiskWarningModal,
         diskWarningOnStartup: diskWarningOnStartup,
+        isPreview: isPreview,
+        selectedCamera: selectedCamera,
+        selectCamera,
         resetCameras,
         newSession,
         newTrial,

@@ -1144,7 +1144,7 @@ class FlirRecorder:
                         self.frame_metadata['serial_msg'].append(frame_data['serial_msg'])
 
                     if self.preview_callback:
-                        real_time_images.append((frame_data['image'],self.pixel_format_conversion[frame_data['pixel_format']]))
+                        real_time_images.append((frame_data['image'], self.pixel_format_conversion[frame_data['pixel_format']], camera_serial))
 
                     if frame_idx == 0:
                         self.initial_timestamp[camera_serial] = frame_data['timestamp']
