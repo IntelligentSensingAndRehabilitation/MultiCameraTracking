@@ -83,7 +83,6 @@ class GlobalState:
     recording_status: str = ""
     acquisition = None
     selected_camera: int | None = None
-    is_preview: bool = False
 
 
 _global_state = GlobalState()
@@ -374,7 +373,6 @@ async def new_trial(data: NewTrialData, db: Session = Depends(db_dependency)):
     recording_path = os.path.join(recording_dir, f"{recording_filename}_{time_str}")
 
     state: GlobalState = get_global_state()
-    state.is_preview = False
     state.selected_camera = None
     current_session = state.current_session
 
@@ -428,7 +426,6 @@ async def preview(data: PreviewData):
         loop.create_task(receive_frames(frames))
 
     state: GlobalState = get_global_state()
-    state.is_preview = True
     state.selected_camera = None
     await run_in_threadpool(
         state.acquisition.start_acquisition,
@@ -442,7 +439,6 @@ async def preview(data: PreviewData):
 @api_router.post("/stop")
 async def stop():
     state: GlobalState = get_global_state()
-    state.is_preview = False
     state.selected_camera = None
     state.acquisition.stop_acquisition()
     return {}
@@ -647,10 +643,6 @@ class SelectCameraData(BaseModel):
 @api_router.post("/select_camera")
 async def select_camera(data: SelectCameraData):
     state: GlobalState = get_global_state()
-    if not state.is_preview:
-        raise HTTPException(
-            status_code=400, detail="Camera selection only available during preview"
-        )
     state.selected_camera = data.camera_index
     return {"selected_camera": data.camera_index}
 
@@ -691,7 +683,7 @@ async def receive_frames(frames):
         print("Received empty frame")
         return
 
-    if state.is_preview and state.selected_camera is not None:
+    if state.selected_camera is not None:
         idx = state.selected_camera
         if 0 <= idx < len(frames):
             frame, conversion, serial = frames[idx]
@@ -704,9 +696,6 @@ async def receive_frames(frames):
             jpeg_image = convert_rgb_to_jpeg(downsampled)
             await state.preview_queue.put(jpeg_image)
             return
-
-    if not state.is_preview:
-        state.selected_camera = None
 
     num_frames = len(frames)
     grid_width = math.ceil(math.sqrt(num_frames))
