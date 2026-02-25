@@ -274,6 +274,7 @@ class NewTrialData(BaseModel):
     recording_filename: str
     comment: str
     max_frames: int
+    diagnostics_level: int = 0
 
 
 class PreviewData(BaseModel):
@@ -495,6 +496,7 @@ async def new_trial(data: NewTrialData, db: Session = Depends(db_dependency)):
         recording_path=recording_path,
         preview_callback=receive_frames_wrapper,
         max_frames=max_frames,
+        diagnostics_level=data.diagnostics_level,
     )
     task = asyncio.create_task(acquisition_coroutine)
 
@@ -552,6 +554,13 @@ async def stop():
     state.selected_camera = None
     state.acquisition.stop_acquisition()
     return {}
+
+
+@api_router.post("/validate_sync")
+async def validate_sync():
+    state: GlobalState = get_global_state()
+    result = await run_in_threadpool(state.acquisition.validate_sync)
+    return result
 
 
 @api_router.get("/prior_recordings", response_model=List[PriorRecordings])
