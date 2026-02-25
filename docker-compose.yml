@@ -26,6 +26,7 @@ services:
     stdin_open: true
     environment:
       REACT_APP_BASE_URL: ${REACT_APP_BASE_URL:-localhost}
+      REACT_APP_TEST_MODE: "true"
       PYTHONUNBUFFERED: 1
     volumes:
       - ${TEST_DATA_VOLUME:-/data-test}:/data
