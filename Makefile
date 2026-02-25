@@ -1,7 +1,7 @@
 # This is the build file for the docker. Note this should be run from the
 # parent directory for the necessary files to be available
 
-.PHONY: clean build run run-no-checks _docker-run
+.PHONY: clean build run run-no-checks _docker-run run-mocap-test
 
 DIR := ${CURDIR}
 
@@ -22,6 +22,11 @@ run-no-checks:
 # Internal target - called by start_acquisition.sh, don't use directly
 _docker-run:
 	docker compose run --rm mocap
+
+# Start acquisition with isolated test data (TEST_DATA_VOLUME, default /data-test).
+# Cannot run simultaneously with 'make run' — both bind host ports 8000 and 3000.
+run-mocap-test:
+	docker compose run --rm mocap-test
 
 test:
 	docker compose run --rm test
