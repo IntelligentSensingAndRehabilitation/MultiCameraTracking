@@ -219,6 +219,24 @@ class TestSyncBottleneckInsight:
         assert "CAM_C" in bottleneck_insights[0]
         assert "8/10" in bottleneck_insights[0]
 
+    def test_uniform_distribution_suppressed(self, tmp_path: Path) -> None:
+        n = 20
+        wait_cycles = [1] * 10 + [0] * 10
+        bottleneck = [["CAM_A", "CAM_B", "CAM_C"]] * 10 + [[]] * 10
+
+        data = _make_json_data(
+            n_frames=n,
+            include_diagnostics=True,
+            sync_wait_cycles=wait_cycles,
+            sync_bottleneck_cameras=bottleneck,
+        )
+        _write_json(tmp_path, data)
+        report = load_session(tmp_path)
+        insights = diagnose_sync_issues(report)
+
+        bottleneck_insights = [i for i in insights if "sync bottleneck" in i]
+        assert len(bottleneck_insights) == 0
+
 
 class TestFrameIdMisalignmentPersistence:
     def test_consecutive_misalignment_detected(self, tmp_path: Path) -> None:
@@ -296,7 +314,7 @@ class TestMixedSession:
         diag_data = _make_json_data(
             include_diagnostics=True,
             sync_wait_cycles=[1] * 10 + [0] * 10,
-            sync_bottleneck_cameras=[["CAM_A"]] * 10 + [[]] * 10,
+            sync_bottleneck_cameras=[["CAM_A"]] * 8 + [["CAM_B"]] * 2 + [[]] * 10,
             camera_error_summary={
                 "CAM_A": {
                     "incomplete_frames": 1,
@@ -554,3 +572,22 @@ class TestNicRxDroppedInsight:
 
         nic_insights = [i for i in insights if "rx_dropped" in i]
         assert len(nic_insights) == 0
+
+
+class TestJsonCompaction:
+    def test_compacted_json_loads_correctly(self, tmp_path: Path) -> None:
+        """JSON with placeholder fields stripped should still parse correctly."""
+        data = _make_json_data(n_frames=10, include_diagnostics=True)
+        # Remove fields that _compact_json_data would strip (all-zero/empty defaults)
+        del data["frame_id_cross_delta"]
+        del data["sync_wait_cycles"]
+        del data["sync_bottleneck_cameras"]
+
+        _write_json(tmp_path, data)
+        report = load_session(tmp_path)
+
+        assert report.trials[0].max_timestamp_spread_ms > 0
+        assert report.trials[0].sync_wait_cycles is None
+        assert report.trials[0].sync_bottleneck_cameras is None
+        assert report.trials[0].frame_id_cross_delta is None
+        assert report.trials[0].has_diagnostics is True

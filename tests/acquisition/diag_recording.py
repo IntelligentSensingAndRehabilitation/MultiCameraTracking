@@ -45,8 +45,11 @@ async def main():
     print(f"Configuring cameras from {args.config}")
     await recorder.configure_cameras(config_file=args.config)
 
+    date_str = datetime.datetime.now().strftime("%Y%m%d")
     time_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    recording_path = f"{args.output_dir}/diag_test_{time_str}"
+    diag_dir = f"{args.output_dir}/diagnostics/{date_str}"
+    os.makedirs(diag_dir, exist_ok=True)
+    recording_path = f"{diag_dir}/diag_test_{time_str}"
 
     print(f"Recording {args.frames} frames with diagnostics_level=1")
     print(f"Output: {recording_path}")
@@ -61,7 +64,7 @@ async def main():
     for r in records:
         print(f"  {r['filename']}: spread={r['timestamp_spread']:.3f} ms")
 
-    print(f"\nAnalyze with: make diag-analyze DATA={args.output_dir}")
+    print(f"\nAnalyze with: make diag-analyze DATA={diag_dir}")
 
 
 asyncio.run(main())

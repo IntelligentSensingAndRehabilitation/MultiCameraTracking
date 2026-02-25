@@ -274,7 +274,7 @@ class NewTrialData(BaseModel):
     recording_filename: str
     comment: str
     max_frames: int
-    diagnostics_level: int = 0
+    diagnostics_level: int = 1
 
 
 class PreviewData(BaseModel):

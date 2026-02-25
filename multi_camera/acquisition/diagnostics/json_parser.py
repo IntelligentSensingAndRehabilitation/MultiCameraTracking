@@ -537,7 +537,7 @@ def diagnose_sync_issues(report: SessionSyncReport) -> list[str]:
                 lines.append(f"    cam {cam}: {n} / {len(drift_trials)} drift trials")
             insights.append("\n".join(lines))
 
-    # 6. Sync bottleneck camera: camera appearing as last holdout on >30% of waited frames
+    # 6. Sync bottleneck camera: only report cameras that are disproportionately slow
     for t in report.trials:
         if (
             not t.has_diagnostics
@@ -553,9 +553,17 @@ def diagnose_sync_issues(report: SessionSyncReport) -> list[str]:
             if i < len(t.sync_bottleneck_cameras):
                 for cam in t.sync_bottleneck_cameras[i]:
                     bottleneck_counts[cam] = bottleneck_counts.get(cam, 0) + 1
+        if not bottleneck_counts:
+            continue
         n_waited = len(waited_indices)
+        counts = list(bottleneck_counts.values())
+        min_count = min(counts)
+        max_count = max(counts)
+        if min_count > 0 and max_count / min_count < 1.5:
+            continue
+        mean_count = sum(counts) / len(counts)
         for cam, count in sorted(bottleneck_counts.items(), key=lambda x: -x[1]):
-            if count > n_waited * 0.3:
+            if count > mean_count * 1.5 and count > n_waited * 0.3:
                 insights.append(
                     f"Trial {t.trial_index}: Camera {cam} was sync bottleneck on {count}/{n_waited} waited frames"
                 )

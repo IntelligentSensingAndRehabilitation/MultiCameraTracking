@@ -435,6 +435,38 @@ def write_metadata_queue(
             if key in config_metadata:
                 json_data[key] = config_metadata[key]
 
+    def _compact_json_data(json_data: dict) -> dict:
+        """Remove per-frame arrays that contain only placeholder values to reduce JSON size."""
+        # chunk_serial_data: all -1 means no serial device connected
+        if "chunk_serial_data" in json_data:
+            if all(
+                all(v == -1 for v in frame) for frame in json_data["chunk_serial_data"]
+            ):
+                del json_data["chunk_serial_data"]
+        # serial_msg: all empty nested lists means no serial data
+        if "serial_msg" in json_data:
+            if all(
+                all(not cam_msgs for cam_msgs in frame)
+                for frame in json_data["serial_msg"]
+            ):
+                del json_data["serial_msg"]
+        # frame_id_cross_delta: all-zero means perfect sync (no drift)
+        if "frame_id_cross_delta" in json_data and json_data["frame_id_cross_delta"]:
+            if all(
+                all(v == 0 for v in fd.values())
+                for fd in json_data["frame_id_cross_delta"]
+            ):
+                del json_data["frame_id_cross_delta"]
+        # sync_bottleneck_cameras: omit if all empty (no waits occurred)
+        if "sync_bottleneck_cameras" in json_data:
+            if all(not cams for cams in json_data["sync_bottleneck_cameras"]):
+                del json_data["sync_bottleneck_cameras"]
+        # sync_wait_cycles: omit if all zero
+        if "sync_wait_cycles" in json_data:
+            if all(w == 0 for w in json_data["sync_wait_cycles"]):
+                del json_data["sync_wait_cycles"]
+        return json_data
+
     def _append_diagnostics(json_data: dict, frame: dict) -> None:
         if "sync_wait_cycles" in frame:
             json_data["sync_wait_cycles"].append(frame["sync_wait_cycles"])
@@ -467,6 +499,7 @@ def write_metadata_queue(
                 json_data["first_bad_frame"] = bad_frame
 
             _add_diagnostic_metadata(json_data, config_metadata)
+            _compact_json_data(json_data)
 
             with open(json_file, "w") as f:
                 json.dump(json_data, f)
@@ -531,6 +564,7 @@ def write_metadata_queue(
         json_data["first_bad_frame"] = bad_frame
 
     _add_diagnostic_metadata(json_data, config_metadata)
+    _compact_json_data(json_data)
 
     with open(json_file, "w") as f:
         json.dump(json_data, f)
