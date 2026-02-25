@@ -275,6 +275,7 @@ class NewTrialData(BaseModel):
     comment: str
     max_frames: int
     diagnostics_level: int = 1
+    frame_skip_recovery: bool = True
 
 
 class PreviewData(BaseModel):
@@ -497,6 +498,7 @@ async def new_trial(data: NewTrialData, db: Session = Depends(db_dependency)):
         preview_callback=receive_frames_wrapper,
         max_frames=max_frames,
         diagnostics_level=data.diagnostics_level,
+        frame_skip_recovery=data.frame_skip_recovery,
     )
     task = asyncio.create_task(acquisition_coroutine)
 

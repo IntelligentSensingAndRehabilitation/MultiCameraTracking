@@ -44,6 +44,7 @@ def _make_json_data(
     camera_temperature_end: dict[str, float] | None = None,
     timespread_alerts: dict | None = None,
     sync_timeout_events: list[dict] | None = None,
+    frame_skip_events: list[dict] | None = None,
 ) -> dict:
     cams = camera_ids or CAMERA_IDS
     n_cams = len(cams)
@@ -108,6 +109,9 @@ def _make_json_data(
 
     if sync_timeout_events is not None:
         data["sync_timeout_events"] = sync_timeout_events
+
+    if frame_skip_events is not None:
+        data["frame_skip_events"] = frame_skip_events
 
     return data
 
@@ -591,3 +595,208 @@ class TestJsonCompaction:
         assert report.trials[0].sync_bottleneck_cameras is None
         assert report.trials[0].frame_id_cross_delta is None
         assert report.trials[0].has_diagnostics is True
+
+
+class TestFrameSkipEventsParsing:
+    def test_skip_events_parsed(self, tmp_path: Path) -> None:
+        events = [
+            {
+                "frame_idx": 42,
+                "camera_serial": "CAM_B",
+                "expected_frame_id": 1042,
+                "actual_frame_id": 1043,
+                "gap_size": 1,
+                "recovered": True,
+            },
+        ]
+        data = _make_json_data(
+            include_diagnostics=True,
+            diagnostics_version=2,
+            frame_skip_events=events,
+        )
+        json_path = _write_json(tmp_path, data)
+        trial = load_trial(json_path, trial_index=0)
+
+        assert trial.frame_skip_events is not None
+        assert len(trial.frame_skip_events) == 1
+        assert trial.frame_skip_events[0]["camera_serial"] == "CAM_B"
+        assert trial.frame_skip_events[0]["gap_size"] == 1
+        assert trial.frame_skip_events[0]["recovered"] is True
+
+    def test_no_skip_events_returns_none(self, tmp_path: Path) -> None:
+        data = _make_json_data(include_diagnostics=True, diagnostics_version=2)
+        json_path = _write_json(tmp_path, data)
+        trial = load_trial(json_path, trial_index=0)
+
+        assert trial.frame_skip_events is None
+
+    def test_empty_skip_events_returns_none(self, tmp_path: Path) -> None:
+        data = _make_json_data(
+            include_diagnostics=True,
+            diagnostics_version=2,
+            frame_skip_events=[],
+        )
+        json_path = _write_json(tmp_path, data)
+        trial = load_trial(json_path, trial_index=0)
+
+        assert trial.frame_skip_events is None
+
+
+class TestFrameSkipInsight:
+    def test_recovered_skip_insight(self, tmp_path: Path) -> None:
+        events = [
+            {
+                "frame_idx": 100,
+                "camera_serial": "CAM_A",
+                "expected_frame_id": 1100,
+                "actual_frame_id": 1101,
+                "gap_size": 1,
+                "recovered": True,
+            },
+        ]
+        data = _make_json_data(
+            include_diagnostics=True,
+            diagnostics_version=2,
+            frame_skip_events=events,
+        )
+        _write_json(tmp_path, data)
+        report = load_session(tmp_path)
+        insights = diagnose_sync_issues(report)
+
+        skip_insights = [i for i in insights if "skipped" in i]
+        assert len(skip_insights) == 1
+        assert "CAM_A" in skip_insights[0]
+        assert "placeholder inserted" in skip_insights[0]
+        assert "frame 100" in skip_insights[0]
+
+    def test_unrecovered_skip_insight(self, tmp_path: Path) -> None:
+        events = [
+            {
+                "frame_idx": 50,
+                "camera_serial": "CAM_C",
+                "expected_frame_id": 1050,
+                "actual_frame_id": 1052,
+                "gap_size": 2,
+                "recovered": False,
+            },
+        ]
+        data = _make_json_data(
+            include_diagnostics=True,
+            diagnostics_version=2,
+            frame_skip_events=events,
+        )
+        _write_json(tmp_path, data)
+        report = load_session(tmp_path)
+        insights = diagnose_sync_issues(report)
+
+        skip_insights = [i for i in insights if "skipped" in i]
+        assert len(skip_insights) == 1
+        assert "CAM_C" in skip_insights[0]
+        assert "NOT recovered" in skip_insights[0]
+        assert "2 frames" in skip_insights[0]
+
+    def test_no_skip_events_no_insight(self, tmp_path: Path) -> None:
+        data = _make_json_data(include_diagnostics=True, diagnostics_version=2)
+        _write_json(tmp_path, data)
+        report = load_session(tmp_path)
+        insights = diagnose_sync_issues(report)
+
+        skip_insights = [i for i in insights if "skipped" in i]
+        assert len(skip_insights) == 0
+
+
+class TestMergedDriftFrequencyInsight:
+    """Verify that checks 2 and 5 are merged: a single pass produces both
+    the repeat-offender insight and the per-camera drift frequency table."""
+
+    def _make_drift_data(self, tmp_path: Path) -> None:
+        """Create two trials where CAM_B drifts in both, CAM_C in one."""
+        for trial_idx, (filename, drift_cam_c) in enumerate(
+            [
+                ("test_20250101_120000.json", True),
+                ("test_20250101_120100.json", False),
+            ]
+        ):
+            n = N_FRAMES
+            timestamps = []
+            frame_ids = []
+            for i in range(n):
+                row_ts = [
+                    BASE_TIMESTAMP_NS + i * FRAME_PERIOD_NS + c * 100 for c in range(3)
+                ]
+                fids = [1000 + i, 1000 + i, 1000 + i]
+                if i == 5:
+                    fids[1] += 1  # CAM_B drifts
+                    if drift_cam_c:
+                        fids[2] += 1  # CAM_C drifts in first trial only
+                timestamps.append(row_ts)
+                frame_ids.append(fids)
+
+            data = {
+                "serials": CAMERA_IDS,
+                "timestamps": timestamps,
+                "frame_id": frame_ids,
+                "real_times": [[0.0] * 3] * n,
+                "exposure_times": [15000] * 3,
+                "frame_rates_requested": [30] * 3,
+                "frame_rates_binning": [30] * 3,
+                "camera_config_hash": "abc",
+                "camera_info": {},
+                "meta_info": {},
+                "system_info": {},
+            }
+            _write_json(tmp_path, data, filename=filename)
+
+    def test_drift_frequency_table_emitted(self, tmp_path: Path) -> None:
+        self._make_drift_data(tmp_path)
+        report = load_session(tmp_path)
+        insights = diagnose_sync_issues(report)
+
+        freq_insights = [i for i in insights if "Per-camera drift frequency" in i]
+        assert len(freq_insights) == 1
+        assert "CAM_B" in freq_insights[0]
+
+    def test_repeat_offender_emitted(self, tmp_path: Path) -> None:
+        self._make_drift_data(tmp_path)
+        report = load_session(tmp_path)
+        insights = diagnose_sync_issues(report)
+
+        offender_insights = [i for i in insights if "Repeat offender" in i]
+        assert len(offender_insights) == 1
+        assert "CAM_B" in offender_insights[0]
+
+    def test_no_duplicate_drift_computation(self, tmp_path: Path) -> None:
+        """Frequency table and offender insight should not duplicate counts."""
+        self._make_drift_data(tmp_path)
+        report = load_session(tmp_path)
+        insights = diagnose_sync_issues(report)
+
+        freq_insights = [i for i in insights if "Per-camera drift frequency" in i]
+        assert len(freq_insights) == 1
+        assert "CAM_B: 2 / 2" in freq_insights[0]
+        assert "CAM_C: 1 / 2" in freq_insights[0]
+
+
+class TestModuleConstants:
+    """Verify that module-level diagnostic constants are importable and have expected values."""
+
+    def test_constants_importable(self) -> None:
+        from multi_camera.acquisition.diagnostics.json_parser import (
+            BOTTLENECK_DISPROPORTION_RATIO,
+            BOTTLENECK_MIN_FRACTION,
+            BURST_MIN_CONSECUTIVE,
+            FRAME_PERIOD_TOLERANCE,
+            PTP_DRIFT_THRESHOLD_US,
+            QUEUE_DEPTH_SPIKE_THRESHOLD,
+            REPEAT_OFFENDER_FRACTION,
+            TEMPERATURE_RISE_THRESHOLD_C,
+        )
+
+        assert FRAME_PERIOD_TOLERANCE == 0.15
+        assert REPEAT_OFFENDER_FRACTION == 0.3
+        assert BURST_MIN_CONSECUTIVE == 3
+        assert BOTTLENECK_DISPROPORTION_RATIO == 1.5
+        assert BOTTLENECK_MIN_FRACTION == 0.3
+        assert QUEUE_DEPTH_SPIKE_THRESHOLD == 10
+        assert PTP_DRIFT_THRESHOLD_US == 100
+        assert TEMPERATURE_RISE_THRESHOLD_C == 5.0

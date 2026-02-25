@@ -18,6 +18,16 @@ import plotly.graph_objects as go
 from numpy.typing import NDArray
 
 
+FRAME_PERIOD_TOLERANCE = 0.15
+REPEAT_OFFENDER_FRACTION = 0.3
+BURST_MIN_CONSECUTIVE = 3
+BOTTLENECK_DISPROPORTION_RATIO = 1.5
+BOTTLENECK_MIN_FRACTION = 0.3
+QUEUE_DEPTH_SPIKE_THRESHOLD = 10
+PTP_DRIFT_THRESHOLD_US = 100
+TEMPERATURE_RISE_THRESHOLD_C = 5.0
+
+
 @dataclass(frozen=True)
 class TrialSyncMetrics:
     """Per-JSON-file synchronization results."""
@@ -45,6 +55,7 @@ class TrialSyncMetrics:
     camera_temperature_end: dict[str, float] | None = None
     timespread_alerts: dict | None = None
     sync_timeout_events: list[dict] | None = None
+    frame_skip_events: list[dict] | None = None
 
     @property
     def reference_camera(self) -> str:
@@ -182,6 +193,8 @@ def load_trial(json_path: Path, trial_index: int) -> TrialSyncMetrics:
     camera_temperature_end: dict[str, float] | None = data.get("camera_temperature_end")
     timespread_alerts: dict | None = data.get("timespread_alerts")
     sync_timeout_events: list[dict] | None = data.get("sync_timeout_events")
+    # Coerce empty list to None so callers can use truthiness checks consistently
+    frame_skip_events: list[dict] | None = data.get("frame_skip_events") or None
 
     return TrialSyncMetrics(
         file_path=json_path,
@@ -207,6 +220,7 @@ def load_trial(json_path: Path, trial_index: int) -> TrialSyncMetrics:
         camera_temperature_end=camera_temperature_end,
         timespread_alerts=timespread_alerts,
         sync_timeout_events=sync_timeout_events,
+        frame_skip_events=frame_skip_events,
     )
 
 
@@ -433,6 +447,13 @@ def _print_acquisition_diagnostics(report: SessionSyncReport, width: int) -> Non
                     f"    Trial {t.trial_index}: {a['count']} timespread alert(s), "
                     f"max {a['max_spread_ms']:.3f} ms"
                 )
+            if t.frame_skip_events:
+                n_recovered = sum(1 for e in t.frame_skip_events if e["recovered"])
+                n_total = len(t.frame_skip_events)
+                print(
+                    f"    Trial {t.trial_index}: {n_total} frame skip event(s), "
+                    f"{n_recovered} recovered"
+                )
 
 
 # --- Diagnostics ---
@@ -454,7 +475,7 @@ def diagnose_sync_issues(report: SessionSyncReport) -> list[str]:
         return insights
 
     fps_estimate = 1000.0 / frame_period
-    tolerance = 0.15
+    tolerance = FRAME_PERIOD_TOLERANCE
 
     # 1. Frame-period spikes: max dT ≈ frame period → alignment error, not clock drift
     frame_period_trials: list[TrialSyncMetrics] = []
@@ -471,7 +492,7 @@ def diagnose_sync_issues(report: SessionSyncReport) -> list[str]:
             f"Trials: {', '.join(indices)}"
         )
 
-    # 2. Repeat offender cameras: camera appearing in >30% of affected drift trials
+    # 2. Per-camera drift frequency and repeat offenders
     drift_trials = [t for t in report.trials if t.has_frame_id_drift]
     if drift_trials:
         camera_drift_counts: dict[str, int] = {}
@@ -480,14 +501,23 @@ def diagnose_sync_issues(report: SessionSyncReport) -> list[str]:
                 if np.any(t.frame_id_delta[:, col_idx] != 0):
                     camera_drift_counts[cam_id] = camera_drift_counts.get(cam_id, 0) + 1
 
-        threshold = max(1, int(len(drift_trials) * 0.3))
-        offenders = {cam: n for cam, n in camera_drift_counts.items() if n >= threshold}
-        if offenders:
-            parts = [
-                f"cam {cam}: {n}/{len(drift_trials)} trials"
-                for cam, n in sorted(offenders.items(), key=lambda x: -x[1])
-            ]
-            insights.append(f"Repeat offender cameras: {'; '.join(parts)}")
+        if camera_drift_counts:
+            threshold = max(1, int(len(drift_trials) * REPEAT_OFFENDER_FRACTION))
+            offenders = {
+                cam: n for cam, n in camera_drift_counts.items() if n >= threshold
+            }
+            if offenders:
+                parts = [
+                    f"cam {cam}: {n}/{len(drift_trials)} trials"
+                    for cam, n in sorted(offenders.items(), key=lambda x: -x[1])
+                ]
+                insights.append(f"Repeat offender cameras: {'; '.join(parts)}")
+
+            header = "Per-camera drift frequency:"
+            lines = [header]
+            for cam, n in sorted(camera_drift_counts.items(), key=lambda x: -x[1]):
+                lines.append(f"    cam {cam}: {n} / {len(drift_trials)} drift trials")
+            insights.append("\n".join(lines))
 
     # 3. Burst patterns: 3+ consecutive affected trials → sustained issue
     if drift_trials:
@@ -498,10 +528,10 @@ def diagnose_sync_issues(report: SessionSyncReport) -> list[str]:
             if i in drift_indices:
                 current_run.append(i)
             else:
-                if len(current_run) >= 3:
+                if len(current_run) >= BURST_MIN_CONSECUTIVE:
                     runs.append(current_run)
                 current_run = []
-        if len(current_run) >= 3:
+        if len(current_run) >= BURST_MIN_CONSECUTIVE:
             runs.append(current_run)
         for run in runs:
             insights.append(
@@ -523,21 +553,7 @@ def diagnose_sync_issues(report: SessionSyncReport) -> list[str]:
                 )
                 break
 
-    # 5. Per-camera drift frequency table
-    if drift_trials:
-        all_camera_counts: dict[str, int] = {}
-        for t in drift_trials:
-            for col_idx, cam_id in enumerate(t.delta_camera_ids):
-                if np.any(t.frame_id_delta[:, col_idx] != 0):
-                    all_camera_counts[cam_id] = all_camera_counts.get(cam_id, 0) + 1
-        if all_camera_counts:
-            header = "Per-camera drift frequency:"
-            lines = [header]
-            for cam, n in sorted(all_camera_counts.items(), key=lambda x: -x[1]):
-                lines.append(f"    cam {cam}: {n} / {len(drift_trials)} drift trials")
-            insights.append("\n".join(lines))
-
-    # 6. Sync bottleneck camera: only report cameras that are disproportionately slow
+    # 5. Sync bottleneck camera: only report cameras that are disproportionately slow
     for t in report.trials:
         if (
             not t.has_diagnostics
@@ -559,11 +575,14 @@ def diagnose_sync_issues(report: SessionSyncReport) -> list[str]:
         counts = list(bottleneck_counts.values())
         min_count = min(counts)
         max_count = max(counts)
-        if min_count > 0 and max_count / min_count < 1.5:
+        if min_count > 0 and max_count / min_count < BOTTLENECK_DISPROPORTION_RATIO:
             continue
         mean_count = sum(counts) / len(counts)
         for cam, count in sorted(bottleneck_counts.items(), key=lambda x: -x[1]):
-            if count > mean_count * 1.5 and count > n_waited * 0.3:
+            if (
+                count > mean_count * BOTTLENECK_DISPROPORTION_RATIO
+                and count > n_waited * BOTTLENECK_MIN_FRACTION
+            ):
                 insights.append(
                     f"Trial {t.trial_index}: Camera {cam} was sync bottleneck on {count}/{n_waited} waited frames"
                 )
@@ -577,7 +596,9 @@ def diagnose_sync_issues(report: SessionSyncReport) -> list[str]:
             for cam, depth in qd.items():
                 if depth > max_depths.get(cam, 0):
                     max_depths[cam] = depth
-        spiked = {cam: d for cam, d in max_depths.items() if d > 10}
+        spiked = {
+            cam: d for cam, d in max_depths.items() if d > QUEUE_DEPTH_SPIKE_THRESHOLD
+        }
         if spiked:
             parts = [
                 f"{cam}={d}" for cam, d in sorted(spiked.items(), key=lambda x: -x[1])
@@ -664,7 +685,7 @@ def diagnose_sync_issues(report: SessionSyncReport) -> list[str]:
             start_ns = t.ptp_offset_start[cam]
             end_ns = t.ptp_offset_end[cam]
             drift_us = abs(end_ns - start_ns) / 1000
-            if drift_us > 100:
+            if drift_us > PTP_DRIFT_THRESHOLD_US:
                 insights.append(
                     f"Trial {t.trial_index}: Camera {cam} PTP offset drifted {drift_us:.0f} µs during recording "
                     f"(start={start_ns} ns, end={end_ns} ns)"
@@ -680,7 +701,7 @@ def diagnose_sync_issues(report: SessionSyncReport) -> list[str]:
             start_temp = t.camera_temperature_start[cam]
             end_temp = t.camera_temperature_end[cam]
             delta = end_temp - start_temp
-            if delta > 5.0:
+            if delta > TEMPERATURE_RISE_THRESHOLD_C:
                 insights.append(
                     f"Trial {t.trial_index}: Camera {cam} temperature rose {delta:.1f}°C "
                     f"({start_temp:.1f}→{end_temp:.1f}°C)"
@@ -722,6 +743,24 @@ def diagnose_sync_issues(report: SessionSyncReport) -> list[str]:
         if delta_dropped > 0:
             insights.append(
                 f"Trial {t.trial_index}: NIC rx_dropped increased by {delta_dropped} during recording"
+            )
+
+    # 16. Frame skip events: placeholder insertion or unrecovered skips
+    for t in report.trials:
+        if not t.frame_skip_events:
+            continue
+        for evt in t.frame_skip_events:
+            cam = evt["camera_serial"]
+            frame_idx = evt["frame_idx"]
+            gap = evt["gap_size"]
+            if evt["recovered"]:
+                action = "placeholder inserted"
+            else:
+                action = "NOT recovered"
+            plural = "s" if gap > 1 else ""
+            insights.append(
+                f"Trial {t.trial_index}: Camera {cam} skipped {gap} frame{plural} "
+                f"at frame {frame_idx} — {action}"
             )
 
     return insights

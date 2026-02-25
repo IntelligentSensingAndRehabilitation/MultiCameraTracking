@@ -417,6 +417,18 @@ def write_metadata_queue(
 
     bad_frame = 0
 
+    def _print_trial_skips(config_metadata: dict) -> list[dict]:
+        trial_skips = config_metadata.get("frame_skip_events", [])
+        if trial_skips:
+            print(f"  Frame skips detected ({len(trial_skips)}):")
+            for skip in trial_skips:
+                status = "recovered" if skip["recovered"] else "NOT recovered"
+                print(
+                    f"    Camera {skip['camera_serial']}: "
+                    f"frame {skip['frame_idx']}, gap={skip['gap_size']} ({status})"
+                )
+        return trial_skips
+
     def _add_diagnostic_metadata(json_data: dict, config_metadata: dict) -> None:
         json_data["diagnostics_version"] = 2
         if "camera_error_counters" in config_metadata:
@@ -432,6 +444,7 @@ def write_metadata_queue(
             "camera_temperature_end",
             "timespread_alerts",
             "sync_timeout_events",
+            "frame_skip_events",
         ]
         for key in v2_keys:
             if key in config_metadata:
@@ -495,12 +508,14 @@ def write_metadata_queue(
                 f.write("\n")
 
             max_timespread = calculate_timespread_drift(json_data["timestamps"])
+            trial_skips = _print_trial_skips(config_metadata)
 
             records_queue.put(
                 {
                     "filename": current_filename,
                     "timestamp_spread": max_timespread,
                     "recording_timestamp": local_times[0],
+                    "frame_skip_count": len(trial_skips),
                 }
             )
 
@@ -563,11 +578,14 @@ def write_metadata_queue(
 
     max_timespread = calculate_timespread_drift(json_data["timestamps"])
 
+    trial_skips = _print_trial_skips(config_metadata)
+
     records_queue.put(
         {
             "filename": current_filename,
             "timestamp_spread": max_timespread,
             "recording_timestamp": local_times[0],
+            "frame_skip_count": len(trial_skips),
         }
     )
 
@@ -1023,6 +1041,7 @@ class FlirRecorder:
         sync_timeout_s: float = 5.0,
         nic_interface: str | None = None,
         disk_device: str | None = None,
+        frame_skip_recovery: bool = True,
     ):
         self.set_status("Recording")
         self._diagnostics_level = diagnostics_level
@@ -1036,6 +1055,11 @@ class FlirRecorder:
         }
         self._sync_timeout_events: list[dict] = []
         self._system_monitor = None
+        self._frame_skip_recovery = frame_skip_recovery
+        self._frame_shape: dict[str, tuple] = {}
+        self._frame_dtype: dict[str, np.dtype] = {}
+        self._zero_frames: dict[str, np.ndarray] = {}
+        self._frame_skip_events: list[dict] = []
 
         self.preview_callback = preview_callback
         self.video_base_file = recording_path
@@ -1049,6 +1073,7 @@ class FlirRecorder:
             self.video_root = "_".join(self.video_base_name.split("_")[:-2])
 
         config_metadata = self._prepare_config_metadata(max_frames)
+        config_metadata["frame_skip_events"] = self._frame_skip_events
 
         # Set max_frames = self.video_segment_len. self.video_segment_len is either set to max_frames or
         # a value from the config file.
@@ -1238,7 +1263,72 @@ class FlirRecorder:
                         serial_msg, frame_count = self.process_serial_data(camera)
 
                     if frame_id != prev_frame_id + 1 and prev_frame_id != 0:
-                        error_counters["frame_id_gaps"] += 1
+                        gap = frame_id - prev_frame_id - 1
+                        error_counters["frame_id_gaps"] += abs(gap)
+
+                        self._frame_skip_events.append(
+                            {
+                                "frame_idx": frame_idx,
+                                "camera_serial": camera_serial,
+                                "expected_frame_id": prev_frame_id + 1,
+                                "actual_frame_id": frame_id,
+                                "gap_size": gap,
+                                "recovered": self._frame_skip_recovery and gap > 0,
+                            }
+                        )
+
+                        if self._frame_skip_recovery and gap > 0:
+                            for g in range(gap):
+                                missing_fid = prev_frame_id + 1 + g
+
+                                if (
+                                    current_filename is not None
+                                    and camera_serial in self._frame_shape
+                                ):
+                                    if camera_serial not in self._zero_frames:
+                                        self._zero_frames[camera_serial] = np.zeros(
+                                            self._frame_shape[camera_serial],
+                                            dtype=self._frame_dtype[camera_serial],
+                                        )
+                                    self.image_queue_dict[camera_serial].put(
+                                        {
+                                            "im": self._zero_frames[camera_serial],
+                                            "real_times": 0,
+                                            "timestamps": 0,
+                                            "base_filename": current_filename,
+                                        }
+                                    )
+
+                                placeholder = {
+                                    "image": None,
+                                    "timestamp": 0,
+                                    "frame_id": missing_fid,
+                                    "camera_serial": camera_serial,
+                                    "pixel_format": pixel_format,
+                                    "base_filename": current_filename,
+                                    "skipped": True,
+                                }
+                                if self.chunk_data:
+                                    placeholder["frame_id_abs"] = missing_fid
+                                if self.serial_enabled:
+                                    placeholder["serial_msg"] = []
+                                    placeholder["frame_count"] = -1
+
+                                self.acquisition_queue[camera_serial].put(placeholder)
+                                frame_idx += 1
+                                error_counters["total_acquired"] += 1
+
+                                if (
+                                    current_filename is not None
+                                    and frame_idx % self.video_segment_len == 0
+                                    and frame_idx != 0
+                                ):
+                                    current_filename = self.update_filename(
+                                        current_filename
+                                    )
+
+                                if frame_idx >= max_frames:
+                                    break
 
                     prev_frame_id = frame_id
 
@@ -1259,6 +1349,10 @@ class FlirRecorder:
 
                 try:
                     im = im_ref.GetNDArray()
+
+                    if camera_serial not in self._frame_shape:
+                        self._frame_shape[camera_serial] = im.shape
+                        self._frame_dtype[camera_serial] = im.dtype
 
                     if current_filename is not None:
                         self.image_queue_dict[camera_serial].put(
@@ -1402,7 +1496,7 @@ class FlirRecorder:
                             frame_data["serial_msg"]
                         )
 
-                    if self.preview_callback:
+                    if self.preview_callback and not frame_data.get("skipped"):
                         real_time_images.append(
                             (
                                 frame_data["image"],
@@ -1433,7 +1527,7 @@ class FlirRecorder:
                 last_empty_serials = []
 
                 if self._diagnostics_level >= 1:
-                    ts_array = self.frame_metadata["timestamps"]
+                    ts_array = [t for t in self.frame_metadata["timestamps"] if t != 0]
                     if len(ts_array) >= 2:
                         spread_ns = max(ts_array) - min(ts_array)
                         spread_ms = spread_ns / 1e6
