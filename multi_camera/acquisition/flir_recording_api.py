@@ -398,6 +398,7 @@ def write_metadata_queue(
     local_times = []
 
     chunk_data = config_metadata["chunk_data"]
+    serial_enabled = config_metadata.get("serial_enabled", False)
 
     json_data = {}
     json_data["real_times"] = []
@@ -410,6 +411,7 @@ def write_metadata_queue(
 
     if chunk_data:
         json_data["frame_id_abs"] = []
+    if serial_enabled:
         json_data["chunk_serial_data"] = []
         json_data["serial_msg"] = []
 
@@ -437,19 +439,6 @@ def write_metadata_queue(
 
     def _compact_json_data(json_data: dict) -> dict:
         """Remove per-frame arrays that contain only placeholder values to reduce JSON size."""
-        # chunk_serial_data: all -1 means no serial device connected
-        if "chunk_serial_data" in json_data:
-            if all(
-                all(v == -1 for v in frame) for frame in json_data["chunk_serial_data"]
-            ):
-                del json_data["chunk_serial_data"]
-        # serial_msg: all empty nested lists means no serial data
-        if "serial_msg" in json_data:
-            if all(
-                all(not cam_msgs for cam_msgs in frame)
-                for frame in json_data["serial_msg"]
-            ):
-                del json_data["serial_msg"]
         # frame_id_cross_delta: all-zero means perfect sync (no drift)
         if "frame_id_cross_delta" in json_data and json_data["frame_id_cross_delta"]:
             if all(
@@ -529,6 +518,7 @@ def write_metadata_queue(
 
             if chunk_data:
                 json_data["frame_id_abs"] = [frame["frame_id_abs"]]
+            if serial_enabled:
                 json_data["chunk_serial_data"] = [frame["chunk_serial_data"]]
                 json_data["serial_msg"] = [frame["serial_msg"]]
 
@@ -542,6 +532,7 @@ def write_metadata_queue(
 
             if chunk_data:
                 json_data["frame_id_abs"].append(frame["frame_id_abs"])
+            if serial_enabled:
                 json_data["chunk_serial_data"].append(frame["chunk_serial_data"])
                 json_data["serial_msg"].append(frame["serial_msg"])
 
@@ -769,6 +760,8 @@ class FlirRecorder:
             self.chunk_data = []
             self.camera_info = {}
 
+        self.serial_enabled = self.gpio_settings.get("line3") == "SerialOn"
+
         # Updating the binning needed to run at 60 Hz.
         # TODO: make this check more robust in the future
         if frame_rate == 60:
@@ -858,6 +851,7 @@ class FlirRecorder:
                 "video_segment_len": self.video_segment_len,
                 "system_info": self.get_system_info(),
                 "chunk_data": self.chunk_data,
+                "serial_enabled": self.serial_enabled,
             }
 
         self.acquisition_type = "max_frames"
@@ -873,6 +867,7 @@ class FlirRecorder:
             "video_segment_len": max_frames,
             "system_info": self.get_system_info(),
             "chunk_data": self.chunk_data,
+            "serial_enabled": self.serial_enabled,
         }
 
     def update_filename(self, current_filename):
@@ -929,6 +924,7 @@ class FlirRecorder:
 
         if self.chunk_data:
             frame_metadata["frame_id_abs"] = []
+        if self.serial_enabled:
             frame_metadata["chunk_serial_data"] = []
             frame_metadata["serial_msg"] = []
 
@@ -1398,6 +1394,7 @@ class FlirRecorder:
                         self.frame_metadata["frame_id_abs"].append(
                             frame_data["frame_id_abs"]
                         )
+                    if self.serial_enabled:
                         self.frame_metadata["chunk_serial_data"].append(
                             frame_data["frame_count"]
                         )
