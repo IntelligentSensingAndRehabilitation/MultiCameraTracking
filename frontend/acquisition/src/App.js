@@ -36,6 +36,19 @@ function App() {
         </Container>
       </Navbar>
 
+      {process.env.REACT_APP_TEST_MODE === 'true' && (
+        <div style={{
+          background: '#e74c3c',
+          color: 'white',
+          textAlign: 'center',
+          padding: '8px',
+          fontWeight: 'bold',
+          letterSpacing: '1px',
+        }}>
+          TEST MODE — Data is not being saved to the production database
+        </div>
+      )}
+
       <AcquisitionApi>
         <Routes>
           <Route path="/" element={<AcquisitionHome />} />
