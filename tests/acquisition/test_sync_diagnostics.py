@@ -15,6 +15,7 @@ from multi_camera.acquisition.diagnostics.json_parser import (
     create_camera_error_figure,
     create_queue_depth_figure,
     create_sync_wait_figure,
+    detect_timestamp_jumps,
     diagnose_sync_issues,
     load_session,
     load_trial,
@@ -45,6 +46,7 @@ def _make_json_data(
     timespread_alerts: dict | None = None,
     sync_timeout_events: list[dict] | None = None,
     frame_skip_events: list[dict] | None = None,
+    ptp_jump_events: list[dict] | None = None,
 ) -> dict:
     cams = camera_ids or CAMERA_IDS
     n_cams = len(cams)
@@ -112,6 +114,9 @@ def _make_json_data(
 
     if frame_skip_events is not None:
         data["frame_skip_events"] = frame_skip_events
+
+    if ptp_jump_events is not None:
+        data["ptp_jump_events"] = ptp_jump_events
 
     return data
 
@@ -790,6 +795,8 @@ class TestModuleConstants:
             QUEUE_DEPTH_SPIKE_THRESHOLD,
             REPEAT_OFFENDER_FRACTION,
             TEMPERATURE_RISE_THRESHOLD_C,
+            TIMESTAMP_JUMP_PAIR_TOLERANCE,
+            TIMESTAMP_JUMP_THRESHOLD_FACTOR,
         )
 
         assert FRAME_PERIOD_TOLERANCE == 0.15
@@ -800,3 +807,290 @@ class TestModuleConstants:
         assert QUEUE_DEPTH_SPIKE_THRESHOLD == 10
         assert PTP_DRIFT_THRESHOLD_US == 100
         assert TEMPERATURE_RISE_THRESHOLD_C == 5.0
+        assert TIMESTAMP_JUMP_THRESHOLD_FACTOR == 10
+        assert TIMESTAMP_JUMP_PAIR_TOLERANCE == 2.0
+
+
+def _make_jump_timestamps(
+    n_frames: int,
+    n_cams: int,
+    jump_camera_col: int,
+    jump_frame: int,
+    jump_ms: float,
+    correction_frame: int | None = None,
+    correction_ms: float | None = None,
+) -> list[list[int]]:
+    """Build timestamps where one camera has a PTP jump (and optional correction).
+
+    Camera 0 is the reference. delta_ms columns are computed as ts[:,1:] - ts[:,:1].
+    A jump in camera `jump_camera_col` means that camera's timestamps shift by jump_ms
+    starting at `jump_frame`, which shows up as a sudden change in delta_diff.
+    """
+    timestamps = []
+    offset = 0
+    for i in range(n_frames):
+        row = [
+            BASE_TIMESTAMP_NS + i * FRAME_PERIOD_NS + cam_idx * 100
+            for cam_idx in range(n_cams)
+        ]
+        if i >= jump_frame:
+            offset = int(jump_ms * 1e6)
+        if (
+            correction_frame is not None
+            and correction_ms is not None
+            and i >= correction_frame
+        ):
+            offset = int((jump_ms + correction_ms) * 1e6)
+        row[jump_camera_col] += offset
+        timestamps.append(row)
+    return timestamps
+
+
+class TestDetectTimestampJumps:
+    def test_single_jump_detected(self, tmp_path: Path) -> None:
+        """One camera +500ms shift, no correction → returns event with no pair."""
+        n = 50
+        timestamps = _make_jump_timestamps(
+            n_frames=n, n_cams=3, jump_camera_col=2, jump_frame=20, jump_ms=500.0
+        )
+        data = _make_json_data(n_frames=n)
+        data["timestamps"] = timestamps
+        _write_json(tmp_path, data)
+        trial = load_trial(tmp_path / "test_20250101_120000.json", trial_index=0)
+
+        jumps = detect_timestamp_jumps(trial, threshold_ms=trial.frame_period_ms * 10)
+        assert len(jumps) == 1
+        assert jumps[0]["camera"] == "CAM_C"
+        assert jumps[0]["direction"] == "forward"
+        assert jumps[0]["correction_frame"] is None
+
+    def test_paired_jump_detected(self, tmp_path: Path) -> None:
+        """+500ms then -490ms → paired event with residual and frames_affected."""
+        n = 100
+        timestamps = _make_jump_timestamps(
+            n_frames=n,
+            n_cams=3,
+            jump_camera_col=1,
+            jump_frame=30,
+            jump_ms=500.0,
+            correction_frame=60,
+            correction_ms=-490.0,
+        )
+        data = _make_json_data(n_frames=n)
+        data["timestamps"] = timestamps
+        _write_json(tmp_path, data)
+        trial = load_trial(tmp_path / "test_20250101_120000.json", trial_index=0)
+
+        jumps = detect_timestamp_jumps(trial, threshold_ms=trial.frame_period_ms * 10)
+        assert len(jumps) == 1
+        assert jumps[0]["camera"] == "CAM_B"
+        assert jumps[0]["direction"] == "forward"
+        assert jumps[0]["correction_frame"] == 60
+        assert jumps[0]["frames_affected"] == 30
+        assert abs(jumps[0]["residual_ms"] - 10.0) < 1.0
+
+    def test_frame_ids_aligned_check(self, tmp_path: Path) -> None:
+        """Paired jump with sequential frame IDs → frame_ids_aligned=True."""
+        n = 100
+        timestamps = _make_jump_timestamps(
+            n_frames=n,
+            n_cams=3,
+            jump_camera_col=1,
+            jump_frame=30,
+            jump_ms=500.0,
+            correction_frame=60,
+            correction_ms=-500.0,
+        )
+        data = _make_json_data(n_frames=n)
+        data["timestamps"] = timestamps
+        _write_json(tmp_path, data)
+        trial = load_trial(tmp_path / "test_20250101_120000.json", trial_index=0)
+
+        jumps = detect_timestamp_jumps(trial, threshold_ms=trial.frame_period_ms * 10)
+        assert len(jumps) == 1
+        assert jumps[0]["frame_ids_aligned"] is True
+
+    def test_no_jump_for_normal_data(self, tmp_path: Path) -> None:
+        """Clean data → empty list."""
+        data = _make_json_data(n_frames=50)
+        _write_json(tmp_path, data)
+        trial = load_trial(tmp_path / "test_20250101_120000.json", trial_index=0)
+
+        jumps = detect_timestamp_jumps(trial, threshold_ms=trial.frame_period_ms * 10)
+        assert jumps == []
+
+    def test_reference_camera_jump(self, tmp_path: Path) -> None:
+        """All delta cameras jump at same frame → identifies reference camera."""
+        n = 50
+        # Jump the reference camera (col 0) — shows up as all delta cameras shifting
+        timestamps = _make_jump_timestamps(
+            n_frames=n, n_cams=3, jump_camera_col=0, jump_frame=20, jump_ms=500.0
+        )
+        data = _make_json_data(n_frames=n)
+        data["timestamps"] = timestamps
+        _write_json(tmp_path, data)
+        trial = load_trial(tmp_path / "test_20250101_120000.json", trial_index=0)
+
+        jumps = detect_timestamp_jumps(trial, threshold_ms=trial.frame_period_ms * 10)
+        assert len(jumps) >= 1
+        assert jumps[0]["camera"] == "CAM_A"
+        assert jumps[0]["reference_camera_jump"] is True
+
+
+class TestPtpTimestampJumpInsight:
+    def test_paired_jump_usability(self, tmp_path: Path) -> None:
+        """Paired + aligned → 'frames usable' in insight."""
+        n = 100
+        timestamps = _make_jump_timestamps(
+            n_frames=n,
+            n_cams=3,
+            jump_camera_col=1,
+            jump_frame=30,
+            jump_ms=500.0,
+            correction_frame=60,
+            correction_ms=-500.0,
+        )
+        data = _make_json_data(n_frames=n)
+        data["timestamps"] = timestamps
+        _write_json(tmp_path, data)
+        report = load_session(tmp_path)
+        insights = diagnose_sync_issues(report)
+
+        jump_insights = [
+            i for i in insights if "PTP jump" in i or "timestamp jumped" in i
+        ]
+        assert len(jump_insights) >= 1
+        assert "frames usable" in jump_insights[0]
+
+    def test_unrecovered_jump_insight(self, tmp_path: Path) -> None:
+        """Single jump → 'not corrected' in insight."""
+        n = 50
+        timestamps = _make_jump_timestamps(
+            n_frames=n, n_cams=3, jump_camera_col=2, jump_frame=20, jump_ms=500.0
+        )
+        data = _make_json_data(n_frames=n)
+        data["timestamps"] = timestamps
+        _write_json(tmp_path, data)
+        report = load_session(tmp_path)
+        insights = diagnose_sync_issues(report)
+
+        jump_insights = [
+            i for i in insights if "PTP jump" in i or "timestamp jumped" in i
+        ]
+        assert len(jump_insights) >= 1
+        assert "not corrected" in jump_insights[0]
+
+
+class TestPtpJumpReportOutput:
+    def _make_session_with_jump(self, tmp_path: Path) -> None:
+        """Create a 2-trial session where trial 1 has a paired PTP jump."""
+        # Trial 0: clean
+        clean_data = _make_json_data(n_frames=50)
+        _write_json(tmp_path, clean_data, filename="test_20250101_120000.json")
+
+        # Trial 1: paired jump on CAM_B
+        n = 100
+        timestamps = _make_jump_timestamps(
+            n_frames=n,
+            n_cams=3,
+            jump_camera_col=1,
+            jump_frame=30,
+            jump_ms=500.0,
+            correction_frame=60,
+            correction_ms=-500.0,
+        )
+        jump_data = _make_json_data(n_frames=n)
+        jump_data["timestamps"] = timestamps
+        _write_json(tmp_path, jump_data, filename="test_20250101_120100.json")
+
+    def test_filtered_trial_stats(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Trial with jump shows filtered max/mean (not raw jump magnitude)."""
+        self._make_session_with_jump(tmp_path)
+        from multi_camera.acquisition.diagnostics.json_parser import print_report
+
+        report = load_session(tmp_path)
+        print_report(report)
+        output = capsys.readouterr().out
+
+        # Trial 1 line should have the asterisk marker for filtered values
+        lines = output.split("\n")
+        trial1_lines = [line for line in lines if "120100" in line]
+        assert len(trial1_lines) >= 1
+        assert "*" in trial1_lines[0]
+
+    def test_annotation_line(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Annotation line with Excl. appears for jump trial."""
+        self._make_session_with_jump(tmp_path)
+        from multi_camera.acquisition.diagnostics.json_parser import print_report
+
+        report = load_session(tmp_path)
+        print_report(report)
+        output = capsys.readouterr().out
+
+        assert "Excl." in output
+        assert "CAM_B" in output
+
+    def test_aggregate_excludes_jumps(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Aggregate stats line reflects clean values, not jump-corrupted."""
+        self._make_session_with_jump(tmp_path)
+        from multi_camera.acquisition.diagnostics.json_parser import print_report
+
+        report = load_session(tmp_path)
+        print_report(report)
+        output = capsys.readouterr().out
+
+        # The aggregate line should mention excluded frames
+        agg_lines = [
+            line
+            for line in output.split("\n")
+            if "Timestamp delta" in line and "max=" in line
+        ]
+        assert len(agg_lines) >= 1
+        assert "excluded" in agg_lines[0].lower()
+
+
+class TestPtpJumpEventsParsing:
+    def test_ptp_jump_events_parsed(self, tmp_path: Path) -> None:
+        events = [
+            {
+                "camera_serial": "CAM_B",
+                "frame_idx": 100,
+                "jump_ms": 500.0,
+                "direction": "forward",
+            },
+        ]
+        data = _make_json_data(
+            include_diagnostics=True,
+            diagnostics_version=2,
+            ptp_jump_events=events,
+        )
+        json_path = _write_json(tmp_path, data)
+        trial = load_trial(json_path, trial_index=0)
+
+        assert trial.ptp_jump_events is not None
+        assert len(trial.ptp_jump_events) == 1
+        assert trial.ptp_jump_events[0]["camera_serial"] == "CAM_B"
+
+    def test_no_ptp_jump_events_returns_none(self, tmp_path: Path) -> None:
+        data = _make_json_data(include_diagnostics=True, diagnostics_version=2)
+        json_path = _write_json(tmp_path, data)
+        trial = load_trial(json_path, trial_index=0)
+
+        assert trial.ptp_jump_events is None
+
+    def test_empty_ptp_jump_events_returns_none(self, tmp_path: Path) -> None:
+        data = _make_json_data(
+            include_diagnostics=True,
+            diagnostics_version=2,
+            ptp_jump_events=[],
+        )
+        json_path = _write_json(tmp_path, data)
+        trial = load_trial(json_path, trial_index=0)
+
+        assert trial.ptp_jump_events is None

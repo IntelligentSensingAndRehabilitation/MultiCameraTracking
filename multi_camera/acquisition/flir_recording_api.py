@@ -351,7 +351,7 @@ def write_image_queue(
     image_queue.task_done()
 
 
-def calculate_timespread_drift(timestamps):
+def calculate_timespread_drift(timestamps, camera_serials: list[str] | None = None):
     # Calculating metrics to determine drift
     ts = pd.DataFrame(timestamps)
 
@@ -365,19 +365,43 @@ def calculate_timespread_drift(timestamps):
     spread = dt.max(axis=1) - dt.min(axis=1)
 
     ts["std"] = ts.std(axis=1) / 1e6
+    max_spread_ms = np.max(spread) * 1000
+
     if np.all(spread < 1e-6):
         print("Timestamps well aligned and clean")
     else:
-        print(f"Timestamps showed a maximum spread of {np.max(spread) * 1000} ms")
+        print(f"Timestamps showed a maximum spread of {max_spread_ms} ms")
+        if camera_serials is not None and max_spread_ms > 5.0:
+            ts_raw = pd.DataFrame(timestamps).replace(0, np.nan)
+            ts_raw.interpolate(
+                method="linear", axis=0, limit=1, limit_direction="both", inplace=True
+            )
+            ref = ts_raw.iloc[:, 0]
+            for col_idx in range(ts_raw.shape[1]):
+                cam_delta = (ts_raw.iloc[:, col_idx] - ref).abs() / 1e6
+                cam_max = cam_delta.max()
+                if cam_max > max_spread_ms * 0.9:
+                    ts_excl = ts_raw.drop(columns=col_idx)
+                    dt_excl = (ts_excl - ts_excl.iloc[0, 0]) / 1e9
+                    spread_excl = dt_excl.max(axis=1) - dt_excl.min(axis=1)
+                    filtered_ms = np.max(spread_excl) * 1000
+                    serial = (
+                        camera_serials[col_idx]
+                        if col_idx < len(camera_serials)
+                        else f"col{col_idx}"
+                    )
+                    print(
+                        f"  \u21b3 Camera {serial} PTP jump detected. "
+                        f"Excl. outlier: max spread {filtered_ms:.3f} ms"
+                    )
+                    break
         print(f"Timestamp standard deviation {ts['std'].max() - ts['std'].min()} ms")
 
-    max = np.max(spread) * 1000
-
     # if max is nan or infinity, set to -1
-    if np.isnan(max) or np.isinf(max):
-        max = -1
+    if np.isnan(max_spread_ms) or np.isinf(max_spread_ms):
+        max_spread_ms = -1
 
-    return max
+    return max_spread_ms
 
 
 def write_metadata_queue(
@@ -417,6 +441,16 @@ def write_metadata_queue(
 
     bad_frame = 0
 
+    def _print_ptp_jump_summary(config_metadata: dict) -> None:
+        ptp_jumps = config_metadata.get("ptp_jump_events", [])
+        if ptp_jumps:
+            print(f"  PTP timestamp jumps detected ({len(ptp_jumps)}):")
+            for jump in ptp_jumps:
+                print(
+                    f"    Camera {jump['camera_serial']}: "
+                    f"frame {jump['frame_idx']}, {jump['direction']} {jump['jump_ms']:+.1f}ms"
+                )
+
     def _print_trial_skips(config_metadata: dict) -> list[dict]:
         trial_skips = config_metadata.get("frame_skip_events", [])
         if trial_skips:
@@ -436,7 +470,7 @@ def write_metadata_queue(
         if "camera_stream_stats" in config_metadata:
             json_data["camera_stream_stats"] = config_metadata["camera_stream_stats"]
 
-        v2_keys = [
+        diagnostic_metadata_keys = [
             "system_snapshots",
             "ptp_offset_start",
             "ptp_offset_end",
@@ -445,8 +479,9 @@ def write_metadata_queue(
             "timespread_alerts",
             "sync_timeout_events",
             "frame_skip_events",
+            "ptp_jump_events",
         ]
-        for key in v2_keys:
+        for key in diagnostic_metadata_keys:
             if key in config_metadata:
                 json_data[key] = config_metadata[key]
 
@@ -507,7 +542,10 @@ def write_metadata_queue(
                 json.dump(json_data, f)
                 f.write("\n")
 
-            max_timespread = calculate_timespread_drift(json_data["timestamps"])
+            max_timespread = calculate_timespread_drift(
+                json_data["timestamps"], camera_serials=json_data.get("serials")
+            )
+            _print_ptp_jump_summary(config_metadata)
             trial_skips = _print_trial_skips(config_metadata)
 
             records_queue.put(
@@ -576,8 +614,11 @@ def write_metadata_queue(
         json.dump(json_data, f)
         f.write("\n")
 
-    max_timespread = calculate_timespread_drift(json_data["timestamps"])
+    max_timespread = calculate_timespread_drift(
+        json_data["timestamps"], camera_serials=json_data.get("serials")
+    )
 
+    _print_ptp_jump_summary(config_metadata)
     trial_skips = _print_trial_skips(config_metadata)
 
     records_queue.put(
@@ -965,19 +1006,6 @@ class FlirRecorder:
 
         return serial_msg, frame_count
 
-    def monitor_frames(self, frame_idx, frame_id, timestamp, camera_serial):
-        curr_frame_diff = (frame_idx + 1) - frame_id
-        if curr_frame_diff != self.frame_diff[camera_serial] and curr_frame_diff != 0:
-            self.frame_diff[camera_serial] = (frame_idx + 1) - frame_id
-
-            if self.first_bad_frame[camera_serial] == -1:
-                self.first_bad_frame[camera_serial] = {
-                    "loop_frame_idx": frame_idx,
-                    "cam_frame_id": frame_id,
-                }
-
-                self.frame_metadata["first_bad_frame"] = self.first_bad_frame
-
     def _read_ptp_offsets(self) -> dict[str, int]:
         """Read GevIEEE1588OffsetFromMasterLatched for each camera."""
         offsets: dict[str, int] = {}
@@ -1060,6 +1088,7 @@ class FlirRecorder:
         self._frame_dtype: dict[str, np.dtype] = {}
         self._zero_frames: dict[str, np.ndarray] = {}
         self._frame_skip_events: list[dict] = []
+        self._ptp_jump_events: list[dict] = []
 
         self.preview_callback = preview_callback
         self.video_base_file = recording_path
@@ -1074,6 +1103,7 @@ class FlirRecorder:
 
         config_metadata = self._prepare_config_metadata(max_frames)
         config_metadata["frame_skip_events"] = self._frame_skip_events
+        config_metadata["ptp_jump_events"] = self._ptp_jump_events
 
         # Set max_frames = self.video_segment_len. self.video_segment_len is either set to max_frames or
         # a value from the config file.
@@ -1510,14 +1540,24 @@ class FlirRecorder:
                     if frame_idx == 0:
                         self.initial_timestamp[camera_serial] = frame_data["timestamp"]
 
-                    # self.monitor_frames(
-                    #     frame_idx,
-                    #     frame_data["frame_id"],
-                    #     frame_data["timestamp"],
-                    #     camera_serial,
-                    # )
-
-                    self.prev_timestamp[camera_serial] = frame_data["timestamp"]
+                    prev_ts = self.prev_timestamp[camera_serial]
+                    cur_ts = frame_data["timestamp"]
+                    if frame_idx > 0 and prev_ts > 0 and cur_ts > 0:
+                        interval_ms = (cur_ts - prev_ts) / 1e6
+                        expected_ms = 1000.0 / self.acquisition_frame_rate
+                        if abs(interval_ms - expected_ms) > expected_ms * 10:
+                            jump_ms = interval_ms - expected_ms
+                            self._ptp_jump_events.append(
+                                {
+                                    "camera_serial": camera_serial,
+                                    "frame_idx": frame_idx,
+                                    "jump_ms": round(jump_ms, 3),
+                                    "direction": "forward"
+                                    if jump_ms > 0
+                                    else "backward",
+                                }
+                            )
+                    self.prev_timestamp[camera_serial] = cur_ts
 
                 self.frame_metadata["sync_wait_cycles"] = sync_wait_cycles
                 self.frame_metadata["sync_bottleneck_cameras"] = last_empty_serials

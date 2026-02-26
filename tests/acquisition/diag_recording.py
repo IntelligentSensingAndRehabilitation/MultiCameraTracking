@@ -3,19 +3,18 @@
 import argparse
 import asyncio
 import datetime
-import os
 import sys
+from pathlib import Path
 
 from multi_camera.acquisition.flir_recording_api import FlirRecorder
 
-CONFIG_PATH = "/configs/"
+CONFIG_DIR = Path("/configs")
 
 
 def list_available_configs() -> list[str]:
-    try:
-        return [f for f in os.listdir(CONFIG_PATH) if f.endswith(".yaml")]
-    except FileNotFoundError:
+    if not CONFIG_DIR.exists():
         return []
+    return [f.name for f in CONFIG_DIR.iterdir() if f.suffix == ".yaml"]
 
 
 async def main():
@@ -31,13 +30,14 @@ async def main():
     )
     args = parser.parse_args()
 
-    if not os.path.exists(args.config):
-        print(f"Config file not found: {args.config}")
+    config_path = Path(args.config)
+    if not config_path.exists():
+        print(f"Config file not found: {config_path}")
         configs = list_available_configs()
         if configs:
-            print(f"\nAvailable configs in {CONFIG_PATH}:")
+            print(f"\nAvailable configs in {CONFIG_DIR}:")
             for c in configs:
-                print(f"  {CONFIG_PATH}{c}")
+                print(f"  {CONFIG_DIR / c}")
         sys.exit(1)
 
     recorder = FlirRecorder()
@@ -45,11 +45,12 @@ async def main():
     print(f"Configuring cameras from {args.config}")
     await recorder.configure_cameras(config_file=args.config)
 
-    date_str = datetime.datetime.now().strftime("%Y%m%d")
-    time_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    diag_dir = f"{args.output_dir}/diagnostics/{date_str}"
-    os.makedirs(diag_dir, exist_ok=True)
-    recording_path = f"{diag_dir}/diag_test_{time_str}"
+    now = datetime.datetime.now()
+    date_str = now.strftime("%Y%m%d")
+    time_str = now.strftime("%Y%m%d_%H%M%S")
+    diag_dir = Path(args.output_dir) / "diagnostics" / date_str
+    diag_dir.mkdir(parents=True, exist_ok=True)
+    recording_path = str(diag_dir / f"diag_test_{time_str}")
 
     print(f"Recording {args.frames} frames with diagnostics_level=1")
     print(f"Output: {recording_path}")
@@ -67,4 +68,5 @@ async def main():
     print(f"\nAnalyze with: make diag-analyze DATA={diag_dir}")
 
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())

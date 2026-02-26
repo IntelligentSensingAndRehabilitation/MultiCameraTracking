@@ -26,6 +26,8 @@ BOTTLENECK_MIN_FRACTION = 0.3
 QUEUE_DEPTH_SPIKE_THRESHOLD = 10
 PTP_DRIFT_THRESHOLD_US = 100
 TEMPERATURE_RISE_THRESHOLD_C = 5.0
+TIMESTAMP_JUMP_THRESHOLD_FACTOR = 10
+TIMESTAMP_JUMP_PAIR_TOLERANCE = 2.0
 
 
 @dataclass(frozen=True)
@@ -56,6 +58,7 @@ class TrialSyncMetrics:
     timespread_alerts: dict | None = None
     sync_timeout_events: list[dict] | None = None
     frame_skip_events: list[dict] | None = None
+    ptp_jump_events: list[dict] | None = None
 
     @property
     def reference_camera(self) -> str:
@@ -116,9 +119,6 @@ class SessionSyncReport:
         if not self.trials:
             return 0.0
         return max(t.max_timestamp_spread_ms for t in self.trials)
-
-
-# --- Loading ---
 
 
 def extract_recording_timestamp(json_path: Path) -> str:
@@ -195,6 +195,7 @@ def load_trial(json_path: Path, trial_index: int) -> TrialSyncMetrics:
     sync_timeout_events: list[dict] | None = data.get("sync_timeout_events")
     # Coerce empty list to None so callers can use truthiness checks consistently
     frame_skip_events: list[dict] | None = data.get("frame_skip_events") or None
+    ptp_jump_events: list[dict] | None = data.get("ptp_jump_events") or None
 
     return TrialSyncMetrics(
         file_path=json_path,
@@ -221,6 +222,7 @@ def load_trial(json_path: Path, trial_index: int) -> TrialSyncMetrics:
         timespread_alerts=timespread_alerts,
         sync_timeout_events=sync_timeout_events,
         frame_skip_events=frame_skip_events,
+        ptp_jump_events=ptp_jump_events,
     )
 
 
@@ -258,9 +260,6 @@ def load_session(data_dir: Path) -> SessionSyncReport:
     )
 
 
-# --- Terminal Report ---
-
-
 def print_report(report: SessionSyncReport) -> None:
     """Print structured sync diagnostics to stdout."""
     width = 80
@@ -281,6 +280,17 @@ def print_report(report: SessionSyncReport) -> None:
                 seen.add(key)
                 print(f"    Trial {t.trial_index}: {t.camera_ids}")
 
+    frame_period = _estimate_session_frame_period_ms(report)
+    threshold_ms = (
+        frame_period * TIMESTAMP_JUMP_THRESHOLD_FACTOR if frame_period > 0 else 0.0
+    )
+    trial_jumps: dict[int, list[dict]] = {}
+    for t in report.trials:
+        if threshold_ms > 0:
+            jumps = detect_timestamp_jumps(t, threshold_ms=threshold_ms)
+            if jumps:
+                trial_jumps[t.trial_index] = jumps
+
     print()
     print("Per-Trial Summary")
     print("-" * width)
@@ -288,6 +298,7 @@ def print_report(report: SessionSyncReport) -> None:
         f"  {'Trial':>5}  {'Timestamp':<17}  {'Frames':>6}  {'Max dT (ms)':>11}  {'Mean |dT| (ms)':>14}  Frame ID Drift"
     )
 
+    total_jump_frames_excluded = 0
     for t in report.trials:
         drift_cameras = []
         if t.has_frame_id_drift:
@@ -299,14 +310,52 @@ def print_report(report: SessionSyncReport) -> None:
                     drift_cameras.append(f"cam {cam_id}: {drift_str}")
         drift_text = "; ".join(drift_cameras) if drift_cameras else "none"
 
-        print(
-            f"  {t.trial_index:>5}  {t.recording_timestamp:<17}  {t.n_frames:>6}"
-            f"  {t.max_timestamp_spread_ms:>11.3f}  {t.mean_timestamp_spread_ms:>14.3f}  {drift_text}"
-        )
+        jumps = trial_jumps.get(t.trial_index)
+        if jumps:
+            clean = _get_clean_delta_ms(t, jumps)
+            clean_abs = np.abs(clean)
+            max_dt = float(np.max(clean_abs)) if clean.size > 0 else 0.0
+            mean_dt = float(np.mean(clean_abs)) if clean.size > 0 else 0.0
+            excluded = t.n_frames - clean.shape[0]
+            total_jump_frames_excluded += excluded
+            print(
+                f"  {t.trial_index:>5}  {t.recording_timestamp:<17}  {t.n_frames:>6}"
+                f"  {max_dt:>10.3f}*  {mean_dt:>13.3f}*  {drift_text}"
+            )
+            for j in jumps:
+                cam = j["camera"]
+                mag = j["magnitude_ms"]
+                if j["correction_frame"] is not None:
+                    n_aff = j["frames_affected"]
+                    print(
+                        f"         \u21b3 Excl. {n_aff} frames: Camera {cam} PTP jump "
+                        f"({mag:+.0f}ms, self-corrected)"
+                    )
+                else:
+                    remaining = t.n_frames - j["frame"]
+                    print(
+                        f"         \u21b3 Excl. {remaining} frames: Camera {cam} PTP jump "
+                        f"({mag:+.0f}ms, not corrected)"
+                    )
+        else:
+            print(
+                f"  {t.trial_index:>5}  {t.recording_timestamp:<17}  {t.n_frames:>6}"
+                f"  {t.max_timestamp_spread_ms:>11.3f}  {t.mean_timestamp_spread_ms:>14.3f}  {drift_text}"
+            )
 
-    all_ts_deltas = np.concatenate(
-        [t.timestamp_delta_ms.ravel() for t in report.trials]
-    )
+    if trial_jumps:
+        clean_parts = []
+        for t in report.trials:
+            jumps = trial_jumps.get(t.trial_index)
+            if jumps:
+                clean_parts.append(_get_clean_delta_ms(t, jumps).ravel())
+            else:
+                clean_parts.append(t.timestamp_delta_ms.ravel())
+        all_ts_deltas = np.concatenate(clean_parts)
+    else:
+        all_ts_deltas = np.concatenate(
+            [t.timestamp_delta_ms.ravel() for t in report.trials]
+        )
     abs_deltas = np.abs(all_ts_deltas)
     drift_trials = sum(1 for t in report.trials if t.has_frame_id_drift)
     serial_trials = sum(
@@ -319,8 +368,12 @@ def print_report(report: SessionSyncReport) -> None:
     print()
     print("Aggregate Statistics")
     print("-" * width)
+    excluded_note = ""
+    if total_jump_frames_excluded > 0:
+        excluded_note = f"  ({total_jump_frames_excluded} PTP jump frames excluded)"
     print(
-        f"  Timestamp delta (ms):  max={np.max(abs_deltas):.3f}  mean={np.mean(abs_deltas):.3f}  std={np.std(abs_deltas):.3f}"
+        f"  Timestamp delta (ms):  max={np.max(abs_deltas):.3f}  mean={np.mean(abs_deltas):.3f}"
+        f"  std={np.std(abs_deltas):.3f}{excluded_note}"
     )
     print(
         f"  Frame ID drift:        {drift_trials} / {report.n_trials} trials affected"
@@ -330,7 +383,6 @@ def print_report(report: SessionSyncReport) -> None:
             f"  Serial data drift:     {serial_trials} / {report.n_trials} trials affected"
         )
 
-    frame_period = _estimate_session_frame_period_ms(report)
     if frame_period > 0:
         print(
             f"  Est. frame period:     {frame_period:.2f} ms ({1000.0 / frame_period:.1f} fps)"
@@ -414,11 +466,11 @@ def _print_acquisition_diagnostics(report: SessionSyncReport, width: int) -> Non
             if parts:
                 print(f"    {cam}: {', '.join(parts)}")
 
-    v2_trials = [t for t in diag_trials if (t.diagnostics_version or 0) >= 2]
-    if v2_trials:
+    monitor_trials = [t for t in diag_trials if (t.diagnostics_version or 0) >= 2]
+    if monitor_trials:
         print()
-        print("  System Monitor & Camera Health (v2):")
-        for t in v2_trials:
+        print("  System Monitor & Camera Health:")
+        for t in monitor_trials:
             if t.ptp_offset_start:
                 print(
                     f"    Trial {t.trial_index} PTP offsets (start): {t.ptp_offset_start}"
@@ -456,15 +508,167 @@ def _print_acquisition_diagnostics(report: SessionSyncReport, width: int) -> Non
                 )
 
 
-# --- Diagnostics ---
-
-
 def _estimate_session_frame_period_ms(report: SessionSyncReport) -> float:
     """Median frame period across all trials from reference camera timestamps."""
     periods = [t.frame_period_ms for t in report.trials if t.frame_period_ms > 0]
     if not periods:
         return 0.0
     return float(np.median(periods))
+
+
+def detect_timestamp_jumps(trial: TrialSyncMetrics, threshold_ms: float) -> list[dict]:
+    """Detect PTP timestamp jumps in per-camera delta timeseries.
+
+    Looks for sudden shifts in timestamp_delta_ms that exceed threshold_ms,
+    pairs forward+backward jumps on the same camera, and checks frame ID alignment.
+    """
+    delta = trial.timestamp_delta_ms
+    if delta.shape[0] < 3:
+        return []
+
+    delta_diff = np.diff(delta, axis=0)
+
+    raw_events: list[dict] = []
+    for col_idx, cam_id in enumerate(trial.delta_camera_ids):
+        col_diff = delta_diff[:, col_idx]
+        jump_indices = np.where(np.abs(col_diff) > threshold_ms)[0]
+        for idx in jump_indices:
+            magnitude_ms = float(col_diff[idx])
+            raw_events.append(
+                {
+                    "camera": cam_id,
+                    "frame": int(idx + 1),
+                    "magnitude_ms": magnitude_ms,
+                    "direction": "forward" if magnitude_ms > 0 else "backward",
+                    "col_idx": col_idx,
+                    "reference_camera_jump": False,
+                }
+            )
+
+    # Check if all delta cameras jumped at the same frame → reference camera jump
+    if raw_events:
+        frame_groups: dict[int, list[dict]] = {}
+        for evt in raw_events:
+            frame_groups.setdefault(evt["frame"], []).append(evt)
+
+        ref_jump_frames: set[int] = set()
+        for frame, evts in frame_groups.items():
+            cols_present = {e["col_idx"] for e in evts}
+            if len(cols_present) == delta.shape[1]:
+                directions = {e["direction"] for e in evts}
+                if len(directions) == 1:
+                    ref_jump_frames.add(frame)
+
+        if ref_jump_frames:
+            non_ref_events = [
+                e for e in raw_events if e["frame"] not in ref_jump_frames
+            ]
+            for frame in sorted(ref_jump_frames):
+                evts = frame_groups[frame]
+                avg_magnitude = float(np.mean([e["magnitude_ms"] for e in evts]))
+                ref_direction = (
+                    "backward" if evts[0]["direction"] == "forward" else "forward"
+                )
+                non_ref_events.append(
+                    {
+                        "camera": trial.reference_camera,
+                        "frame": frame,
+                        "magnitude_ms": -avg_magnitude,
+                        "direction": ref_direction,
+                        "col_idx": -1,
+                        "reference_camera_jump": True,
+                    }
+                )
+            raw_events = non_ref_events
+
+    # Pair forward+backward jumps on same camera
+    results: list[dict] = []
+    used: set[int] = set()
+    forward_events = [
+        (i, e) for i, e in enumerate(raw_events) if e["direction"] == "forward"
+    ]
+    backward_events = [
+        (i, e) for i, e in enumerate(raw_events) if e["direction"] == "backward"
+    ]
+
+    for fi, fwd in forward_events:
+        if fi in used:
+            continue
+        best_match: tuple[int, dict] | None = None
+        for bi, bwd in backward_events:
+            if bi in used or bwd["camera"] != fwd["camera"]:
+                continue
+            if bwd["frame"] <= fwd["frame"]:
+                continue
+            ratio = abs(bwd["magnitude_ms"]) / abs(fwd["magnitude_ms"])
+            if (
+                1 / TIMESTAMP_JUMP_PAIR_TOLERANCE
+                <= ratio
+                <= TIMESTAMP_JUMP_PAIR_TOLERANCE
+            ):
+                if best_match is None or bwd["frame"] < best_match[1]["frame"]:
+                    best_match = (bi, bwd)
+        if best_match is not None:
+            bi, bwd = best_match
+            used.add(fi)
+            used.add(bi)
+            frames_affected = bwd["frame"] - fwd["frame"]
+            residual_ms = fwd["magnitude_ms"] + bwd["magnitude_ms"]
+            frame_ids_aligned = True
+            if not fwd["reference_camera_jump"] and fwd["col_idx"] >= 0:
+                affected_fid = trial.frame_id_delta[
+                    fwd["frame"] : bwd["frame"], fwd["col_idx"]
+                ]
+                if np.any(affected_fid != affected_fid[0]):
+                    frame_ids_aligned = False
+            results.append(
+                {
+                    "camera": fwd["camera"],
+                    "frame": fwd["frame"],
+                    "magnitude_ms": fwd["magnitude_ms"],
+                    "direction": fwd["direction"],
+                    "correction_frame": bwd["frame"],
+                    "correction_ms": bwd["magnitude_ms"],
+                    "frames_affected": frames_affected,
+                    "residual_ms": residual_ms,
+                    "frame_ids_aligned": frame_ids_aligned,
+                    "reference_camera_jump": fwd["reference_camera_jump"],
+                }
+            )
+
+    # Add unpaired events
+    for i, evt in enumerate(raw_events):
+        if i not in used:
+            results.append(
+                {
+                    "camera": evt["camera"],
+                    "frame": evt["frame"],
+                    "magnitude_ms": evt["magnitude_ms"],
+                    "direction": evt["direction"],
+                    "correction_frame": None,
+                    "correction_ms": None,
+                    "frames_affected": None,
+                    "residual_ms": None,
+                    "frame_ids_aligned": None,
+                    "reference_camera_jump": evt["reference_camera_jump"],
+                }
+            )
+
+    results.sort(key=lambda e: e["frame"])
+    return results
+
+
+def _get_clean_delta_ms(
+    trial: TrialSyncMetrics, jump_events: list[dict]
+) -> NDArray[np.float64]:
+    """Return timestamp_delta_ms with jump-affected frame ranges masked out."""
+    delta = trial.timestamp_delta_ms.copy()
+    mask = np.ones(delta.shape[0], dtype=bool)
+    for evt in jump_events:
+        start = evt["frame"]
+        end = evt.get("correction_frame") or delta.shape[0]
+        mask[start:end] = False
+    return delta[mask]
 
 
 def diagnose_sync_issues(report: SessionSyncReport) -> list[str]:
@@ -763,10 +967,34 @@ def diagnose_sync_issues(report: SessionSyncReport) -> list[str]:
                 f"at frame {frame_idx} — {action}"
             )
 
+    # 17. PTP timestamp jumps: per-camera clock discontinuities
+    for t in report.trials:
+        threshold_ms = frame_period * TIMESTAMP_JUMP_THRESHOLD_FACTOR
+        jumps = detect_timestamp_jumps(t, threshold_ms=threshold_ms)
+        for j in jumps:
+            cam = j["camera"]
+            frame = j["frame"]
+            if j["correction_frame"] is not None:
+                frames_affected = j["frames_affected"]
+                residual = j["residual_ms"]
+                if j["frame_ids_aligned"]:
+                    usability = "Frame IDs aligned — frames usable, timestamps unreliable in affected range"
+                else:
+                    usability = "Frame ID drift during jump — manual review recommended"
+                insights.append(
+                    f"Trial {t.trial_index}: Camera {cam} timestamp jumped "
+                    f"{j['magnitude_ms']:+.0f}ms at frame {frame}, "
+                    f"corrected {j['correction_ms']:+.0f}ms at frame {j['correction_frame']} "
+                    f"({frames_affected} frames, residual {residual:+.0f}ms). {usability}"
+                )
+            else:
+                insights.append(
+                    f"Trial {t.trial_index}: Camera {cam} PTP jump "
+                    f"{j['magnitude_ms']:+.0f}ms at frame {frame} — "
+                    f"not corrected within trial. Timestamps unreliable from frame {frame} onward"
+                )
+
     return insights
-
-
-# --- Plotly Figures ---
 
 
 def _build_trial_boundary_shapes(
@@ -1073,9 +1301,6 @@ def save_figures(
         saved.append(path)
 
     return saved
-
-
-# --- CLI ---
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:

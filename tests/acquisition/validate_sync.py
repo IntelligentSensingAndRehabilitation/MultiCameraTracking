@@ -3,19 +3,18 @@
 import argparse
 import asyncio
 import json
-import os
 import sys
+from pathlib import Path
 
 from multi_camera.acquisition.flir_recording_api import FlirRecorder
 
-CONFIG_PATH = "/configs/"
+CONFIG_DIR = Path("/configs")
 
 
 def list_available_configs() -> list[str]:
-    try:
-        return [f for f in os.listdir(CONFIG_PATH) if f.endswith(".yaml")]
-    except FileNotFoundError:
+    if not CONFIG_DIR.exists():
         return []
+    return [f.name for f in CONFIG_DIR.iterdir() if f.suffix == ".yaml"]
 
 
 async def main():
@@ -26,13 +25,14 @@ async def main():
     )
     args = parser.parse_args()
 
-    if not os.path.exists(args.config):
-        print(f"Config file not found: {args.config}")
+    config_path = Path(args.config)
+    if not config_path.exists():
+        print(f"Config file not found: {config_path}")
         configs = list_available_configs()
         if configs:
-            print(f"\nAvailable configs in {CONFIG_PATH}:")
+            print(f"\nAvailable configs in {CONFIG_DIR}:")
             for c in configs:
-                print(f"  {CONFIG_PATH}{c}")
+                print(f"  {CONFIG_DIR / c}")
         sys.exit(1)
 
     recorder = FlirRecorder()
@@ -55,4 +55,5 @@ async def main():
         print(f"  Max timespread: {result['max_timespread_ms']:.3f} ms")
 
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())
