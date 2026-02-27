@@ -32,7 +32,7 @@ run-mocap-test:
 test:
 	docker compose run --rm test
 
-# Camera test matrix only (cameras required, slow)
+# Camera test matrix only (cameras required, long)
 test-matrix:
 	docker compose run --rm --entrypoint pytest test \
 		-s tests/acquisition/test_acquisition.py
@@ -48,9 +48,9 @@ reset:
 annotate:
 	docker compose run --rm annotate
 
-# --- Diagnostics targets (require cameras + rebuilt image: make build-mocap) ---
+# --- Diagnostics targets (cameras required unless noted) ---
 
-# Validate sync before recording. Usage:
+# Validate sync before recording (cameras required). Usage:
 #   make validate-sync CONFIG=/configs/your_config.yaml
 validate-sync:
 	@test -n "$(CONFIG)" || { echo "CONFIG is required. Usage: make validate-sync CONFIG=/configs/your_config.yaml"; exit 1; }
@@ -58,7 +58,7 @@ validate-sync:
 		/Mocap/tests/acquisition/validate_sync.py \
 		--config $(CONFIG)
 
-# Short recording with full diagnostics. Usage:
+# Short recording with full diagnostics (cameras required). Usage:
 #   make diag-recording CONFIG=/configs/your_config.yaml
 #   make diag-recording CONFIG=/configs/your_config.yaml FRAMES=300
 diag-recording:
@@ -69,7 +69,7 @@ diag-recording:
 		$(if $(DATA),--output-dir $(DATA)) \
 		$(if $(FRAMES),--frames $(FRAMES))
 
-# Analyze recording JSON output. Usage:
+# Analyze recording JSON output (no cameras needed). Usage:
 #   make diag-analyze DATA=/data
 diag-analyze:
 	docker compose run --rm --entrypoint python3 test \
