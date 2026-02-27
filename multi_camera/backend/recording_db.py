@@ -73,6 +73,29 @@ class Photo(Base):
     session = relationship("Session", back_populates="photos")
 
 
+def _get_or_create_session(db: Session, participant_name: str, session_date, session_path: str):
+    """Find or create a participant and session, returning the Session object."""
+    if isinstance(session_date, str):
+        from datetime import datetime
+        session_date = datetime.strptime(session_date, "%Y-%m-%d").date()
+
+    participant = db.query(Participant).filter(Participant.name == participant_name).first()
+    if not participant:
+        participant = Participant(name=participant_name)
+        db.add(participant)
+        db.flush()
+
+    session = (
+        db.query(Session).filter(Session.participant_id == participant.id, Session.session_date == session_date).first()
+    )
+    if not session:
+        session = Session(participant_id=participant.id, session_path=session_path, session_date=session_date)
+        db.add(session)
+        db.flush()
+
+    return session
+
+
 def add_recording(
     db: Session,
     participant_name: str,
@@ -98,29 +121,8 @@ def add_recording(
         timestamp_spread,
     )
 
-    # if date is a string, convert to a python date type
-    if isinstance(session_date, str):
-        from datetime import datetime
+    session = _get_or_create_session(db, participant_name, session_date, session_path)
 
-        session_date = datetime.strptime(session_date, "%Y-%m-%d").date()
-
-    # Create or update the participant
-    participant = db.query(Participant).filter(Participant.name == participant_name).first()
-    if not participant:
-        participant = Participant(name=participant_name)
-        db.add(participant)
-        db.flush()
-
-    # Create or update the session
-    session = (
-        db.query(Session).filter(Session.participant_id == participant.id, Session.session_date == session_date).first()
-    )
-    if not session:
-        session = Session(participant_id=participant.id, session_path=session_path, session_date=session_date)
-        db.add(session)
-        db.flush()
-
-    # Create the recording
     new_recording = Recording(
         session_id=session.id,
         filename=filename,
@@ -148,29 +150,8 @@ def add_photo(
     upload_timestamp: DateTime,
     description: Optional[str] = None,
 ):
-    # if date is a string, convert to a python date type
-    if isinstance(session_date, str):
-        from datetime import datetime
+    session = _get_or_create_session(db, participant_name, session_date, session_path)
 
-        session_date = datetime.strptime(session_date, "%Y-%m-%d").date()
-
-    # Create or update the participant
-    participant = db.query(Participant).filter(Participant.name == participant_name).first()
-    if not participant:
-        participant = Participant(name=participant_name)
-        db.add(participant)
-        db.flush()
-
-    # Create or update the session
-    session = (
-        db.query(Session).filter(Session.participant_id == participant.id, Session.session_date == session_date).first()
-    )
-    if not session:
-        session = Session(participant_id=participant.id, session_path=session_path, session_date=session_date)
-        db.add(session)
-        db.flush()
-
-    # Create the photo entry
     new_photo = Photo(
         session_id=session.id,
         filename=filename,

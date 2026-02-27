@@ -170,20 +170,6 @@ def get_disk_space_info(path: str) -> Dict:
         }
 
 
-def sanitize_filename(filename: str) -> str:
-    """Sanitize filename to prevent path traversal and ensure filesystem compatibility."""
-    filename = os.path.basename(filename)
-    filename = re.sub(r'[^a-zA-Z0-9._-]', '_', filename)
-    if filename.startswith('.'):
-        filename = 'image' + filename
-    if not filename or filename == '.':
-        filename = 'uploaded_image.jpg'
-    if len(filename) > 200:
-        name, ext = os.path.splitext(filename)
-        filename = name[:200 - len(ext)] + ext
-    return filename
-
-
 
 print(CONFIG_PATH)
 config_files = os.listdir(CONFIG_PATH)
@@ -412,7 +398,10 @@ async def upload_image(
 
     timestamp = datetime.datetime.now()
     time_str = timestamp.strftime("%Y%m%d_%H%M%S")
-    safe_filename = sanitize_filename(file.filename or "uploaded_image.jpg")
+    original_filename = file.filename or "uploaded_image.jpg"
+    safe_filename = re.sub(r'[^a-zA-Z0-9._-]', '_', os.path.basename(original_filename))
+    if not safe_filename or safe_filename.startswith('.'):
+        safe_filename = "uploaded_image.jpg"
     saved_filename = f"{time_str}_{safe_filename}"
     saved_path = os.path.join(images_dir, saved_filename)
 
@@ -425,7 +414,7 @@ async def upload_image(
         session_date=current_session.session_date,
         session_path=current_session.recording_path,
         filename=saved_filename,
-        original_filename=file.filename or "unknown",
+        original_filename=original_filename,
         saved_path=saved_path,
         file_size_mb=round(file_size_mb, 3),
         upload_timestamp=timestamp,
@@ -446,7 +435,7 @@ async def upload_image(
 
     return ImageUploadResponse(
         saved_path=saved_path,
-        original_filename=file.filename or "unknown",
+        original_filename=original_filename,
         saved_filename=saved_filename,
         file_size_mb=round(file_size_mb, 3),
         description=description,
