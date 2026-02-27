@@ -26,9 +26,17 @@ make build-mocap                    # build acquisition container
 make build-annotate                 # build annotation container
 make run                            # start acquisition with system validation
 make run-no-checks                  # skip validation
-make test                           # run tests in Docker
+make test                           # run all acquisition tests in Docker
+make test-matrix                    # camera test matrix only (cameras required)
+make test-diagnostics               # diagnostics unit tests only (no cameras)
 make reset                          # hardware-reset all FLIR cameras
 make annotate                       # start annotation container
+
+# Diagnostics (require cameras + rebuilt image)
+make validate-sync CONFIG=/configs/your_config.yaml           # pre-recording sync check
+make diag-recording CONFIG=/configs/your_config.yaml          # short recording with diagnostics
+make diag-recording CONFIG=/configs/your_config.yaml FRAMES=300  # custom frame count
+make diag-analyze DATA=/data                                  # analyze recording JSON output
 ```
 
 ## Architecture
@@ -89,7 +97,7 @@ Defaults: top-down method `"Bridging_bml_movi_87"`, reconstruction method `"Robu
 - **`multi_camera/analysis/`**: Core algorithms. `camera.py` (JAX-based camera math using jaxlie SO3/SE3), `reconstruction.py` (3D triangulation via aniposelib with einops), `calibration.py` (camera calibration with ChArUco/checkerboard boards, Dash/Plotly visualization), `optimize_reconstruction.py` (implicit function optimization with Flax `KeypointTrajectory` module + Optax).
 - **`multi_camera/analysis/biomechanics/`**: OpenSim fitting (`opensim_fitting.py` is the largest module at 34KB), bilevel optimization, OpenCap augmenter.
 - **`multi_camera/datajoint/`**: All DataJoint table definitions and populate logic. Depends on `pose_pipeline` package for upstream tables (`Video`, `VideoInfo`, `TopDownPerson`, `BottomUpPeople`).
-- **`multi_camera/acquisition/`**: FLIR camera recording (`flir_recording_api.py` — `FlirRecorder` class), diagnostics tools. Each camera gets its own writer thread with a Queue; outputs `{serial}.mp4` files with `mp4v` codec plus a `.json` metadata sidecar.
+- **`multi_camera/acquisition/`**: FLIR camera recording (`flir_recording_api.py` — `FlirRecorder` class), sync diagnostics (`diagnostics/json_parser.py` for post-hoc analysis, `diagnostics/system_monitor.py` for live NIC/CPU/disk sampling). Each camera gets its own writer thread with a Queue; outputs `{serial}.mp4` files with `mp4v` codec plus a `.json` metadata sidecar.
 - **`multi_camera/backend/`**: Two FastAPI apps (see above), SQLite recording database, Jinja2 templates.
 - **`multi_camera/utils/standard_pipelines.py`**: Reconstruction pipeline composition helpers wrapping PosePipeline utilities.
 - **`multi_camera/experimental/`**: WIP code (`mvmhat.py`, `gaitrite_mtc.py`) — not part of the main pipeline.
@@ -115,6 +123,16 @@ The default tracking config for `mvmp_association_and_tracking()` in `analysis/e
 ### Participant ID Normalization
 
 `normalize_participant_id()` in `recording_db.py` strips a leading `p` or `t` when followed by digits (legacy: `p123` → `123`). Newer alphanumeric IDs (like `TF47`) are handled via a hardcoded mapping in `sessions.py`.
+
+### Acquisition Diagnostics
+
+The acquisition system includes two layers of sync diagnostics:
+
+**During recording** (`flir_recording_api.py`): Controlled by `diagnostics_level` (default 1). Per-frame instrumentation tracks sync wait cycles, queue depths, frame ID cross-camera deltas, and sync bottleneck cameras. Level 1 adds PTP offset sampling, camera temperature monitoring, system monitor (NIC/CPU/disk via `system_monitor.py`), timespread alerts, sync timeout detection, and PTP timestamp jump detection. Frame skip recovery inserts black placeholder frames when a camera drops frames, maintaining sync alignment.
+
+**Post-hoc analysis** (`diagnostics/json_parser.py`): Parses JSON metadata files into `TrialSyncMetrics` / `SessionSyncReport` dataclasses. Runs 17 diagnostic detectors (`diagnose_sync_issues()`) covering frame-period spikes, repeat offender cameras, burst patterns, reference camera jumps, bottleneck analysis, queue depth spikes, frame ID misalignment persistence, per-camera error rates, stream stats, PTP offset drift, temperature rise, sync timeouts, timespread alerts, NIC rx_dropped, frame skip events, and PTP timestamp jumps. Generates interactive Plotly HTML figures. CLI: `python -m multi_camera.acquisition.diagnostics.json_parser <data_dir>`.
+
+Key data flow: `FlirRecorder.start_acquisition()` → per-frame metadata dicts → `write_metadata_queue()` → JSON files → `json_parser.load_session()` → `print_report()` / `save_figures()`.
 
 ## Key External Dependencies
 

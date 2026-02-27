@@ -1,6 +1,90 @@
 # Acquisition Diagnostics
 
-The acquisition diagnostics script is a comprehensive troubleshooting tool that collects system information, validates configuration, and identifies issues with the acquisition system.
+This page covers two diagnostic systems:
+
+1. **System diagnostics** (`acquisition_diagnostics.sh`) — pre-recording system validation (network, DHCP, cameras, hardware)
+2. **Sync diagnostics** (`json_parser.py` + `flir_recording_api.py` instrumentation) — per-frame sync quality analysis during and after recording
+
+## Sync Diagnostics
+
+Sync diagnostics analyze timestamp synchronization, frame ID alignment, and camera health across multi-camera recordings.
+
+### Pre-Recording Validation
+
+Run a short acquisition burst to check sync quality before a real recording:
+
+```bash
+make validate-sync CONFIG=/configs/your_config.yaml
+```
+
+This acquires 100 frames (no video/JSON written) and reports whether any frames exceeded the timespread threshold.
+
+### Diagnostic Recording
+
+Record with full instrumentation enabled:
+
+```bash
+make diag-recording CONFIG=/configs/your_config.yaml
+make diag-recording CONFIG=/configs/your_config.yaml FRAMES=300
+```
+
+Output goes to `/data/diagnostics/YYYYMMDD/`. JSON metadata includes per-frame sync wait cycles, queue depths, frame ID cross-camera deltas, bottleneck cameras, PTP offsets, camera temperatures, and system monitor snapshots.
+
+### Post-Hoc Analysis
+
+Analyze JSON metadata from any recording (diagnostic or normal with `diagnostics_level >= 1`):
+
+```bash
+make diag-analyze DATA=/data/diagnostics/20260226
+# Or directly:
+python -m multi_camera.acquisition.diagnostics.json_parser /path/to/json/dir
+```
+
+This produces:
+- **Terminal report**: per-trial summary, aggregate statistics, acquisition diagnostics, and diagnostic insights
+- **Interactive HTML plots** (unless `--no-plots`): timestamp deltas, frame ID deltas, sync wait cycles, queue depths, camera errors
+
+### What It Detects
+
+The `diagnose_sync_issues()` function runs 17 detectors:
+
+| Detector | What it catches |
+|----------|----------------|
+| Frame-period spikes | Max dT ≈ 1 frame period → alignment error, not clock drift |
+| Repeat offender cameras | Same camera drifting across multiple trials |
+| Burst patterns | 3+ consecutive trials with frame ID drift |
+| Reference camera jumps | All delta cameras shift simultaneously → reference camera skipped |
+| Sync bottleneck | One camera disproportionately slow at sync barrier |
+| Queue depth spikes | Metadata thread falling behind acquisition |
+| Frame ID misalignment | Persistent cross-camera frame ID disagreement |
+| Per-camera error rates | Incomplete frames, exceptions, frame ID gaps |
+| Stream stats | Dropped frames and queue overflows at device/network level |
+| PTP offset drift | Significant PTP offset change during recording |
+| Temperature rise | Camera temperature increase > 5°C during recording |
+| Sync timeouts | Frames where sync barrier waited > threshold |
+| Timespread alerts | Frames exceeding timespread threshold |
+| NIC rx_dropped | Network interface packet drops during recording |
+| Frame skip events | Camera frame ID gaps with placeholder recovery status |
+| PTP timestamp jumps | Per-camera clock discontinuities with pair detection and usability assessment |
+
+### Frame Skip Recovery
+
+When a camera drops frames (frame ID gap), the acquisition system inserts black placeholder frames into both the video and metadata queues to maintain sync alignment. This is controlled by `frame_skip_recovery` (default: on). Skip events are logged in JSON metadata and surfaced in the post-hoc report.
+
+### Diagnostics Level
+
+The `diagnostics_level` parameter (default 1) controls instrumentation depth:
+
+- **Level 0**: Per-frame sync wait cycles, queue depths, frame ID cross-deltas, bottleneck cameras, camera error counters, stream stats
+- **Level 1**: All of level 0, plus PTP offset sampling, camera temperature monitoring, system monitor (NIC/CPU/disk), timespread alerts, sync timeout detection
+
+Set via the FastAPI `/new_trial` endpoint or `FlirRecorder.start_acquisition(diagnostics_level=...)`.
+
+---
+
+## System Diagnostics
+
+The system diagnostics script is a comprehensive troubleshooting tool that collects system information, validates configuration, and identifies issues with the acquisition system.
 
 ## Usage
 

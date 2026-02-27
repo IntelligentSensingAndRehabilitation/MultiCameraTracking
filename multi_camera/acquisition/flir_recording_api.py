@@ -69,7 +69,9 @@ def select_interface(interface, cameras):
                 invalid_ids = [c for c in cameras if str(c) not in camera_id_list]
 
                 if invalid_ids:
-                    print(f"The following camera ID(s) from are missing: {invalid_ids} but continuing")
+                    print(
+                        f"The following camera ID(s) from are missing: {invalid_ids} but continuing"
+                    )
 
                 retval = camera_id_list
 
@@ -78,13 +80,15 @@ def select_interface(interface, cameras):
         if isinstance(cameras, int):
             # if num_cams is larger than the # cameras on current interface,
             # raise an error
-            assert (
-                cameras <= num_interface_cams
-            ), f"num_cams={cameras} but the current interface only has {num_interface_cams} cameras."
+            assert cameras <= num_interface_cams, (
+                f"num_cams={cameras} but the current interface only has {num_interface_cams} cameras."
+            )
 
             # Otherwise, set num_cams to the # of available cameras
             num_cams = cameras
-            print(f"No config file passed. Selecting the first {num_cams} cameras in the list.")
+            print(
+                f"No config file passed. Selecting the first {num_cams} cameras in the list."
+            )
 
             retval = num_cams
 
@@ -174,16 +178,16 @@ def init_camera(
     # c.DeviceLinkThroughputLimit = throughput_limit #94371840 # 106954752 #
     c.GevSCPD = 25000
 
-    line0 = gpio_settings['line0']
-    #line1 = gpio_settings['line1'] line1 currently unused
-    line2 = gpio_settings['line2']
-    line3 = gpio_settings['line3']
+    line0 = gpio_settings["line0"]
+    # line1 = gpio_settings['line1'] line1 currently unused
+    line2 = gpio_settings["line2"]
+    line3 = gpio_settings["line3"]
 
-    if line2 == '3V3_Enable':
-        c.LineSelector = 'Line2'
-        c.LineMode = 'Output'
+    if line2 == "3V3_Enable":
+        c.LineSelector = "Line2"
+        c.LineMode = "Output"
     else:
-        if line2 != 'Off':
+        if line2 != "Off":
             print(f"{line2} is not valid for line2. Setting to 'Off'")
 
     if chunk_data:
@@ -199,7 +203,7 @@ def init_camera(
         c.ActionGroupMask = 1
 
         # Check the gpio settings
-        if line0 == 'ArduinoTrigger':
+        if line0 == "ArduinoTrigger":
             c.TriggerMode = "Off"
             c.TriggerSelector = "FrameStart"
             c.TriggerSource = "Line0"
@@ -207,14 +211,14 @@ def init_camera(
             c.TriggerOverlap = "ReadOut"
             c.TriggerMode = "On"
         else:
-            if line0 != 'Off':
+            if line0 != "Off":
                 print(f"{line0} is not valid for line0. Setting to 'Off'")
             c.TriggerMode = "Off"
             c.TriggerSelector = "AcquisitionStart"  # Need to select AcquisitionStart for real time clock
             c.TriggerSource = "Action0"
             c.TriggerMode = "On"
 
-        if line3 == 'SerialOn':
+        if line3 == "SerialOn":
             c.SerialPortSelector = "SerialPort0"
             c.SerialPortSource = "Line3"
             c.SerialPortBaudRate = "Baud115200"
@@ -222,11 +226,18 @@ def init_camera(
             c.SerialPortStopBits = "Bits1"
             c.SerialPortParity = "None"
         else:
-            if line3 != 'Off':
+            if line3 != "Off":
                 print(f"{line3} is not valid for line3. Setting to 'Off'")
 
+
 def write_image_queue(
-    vid_file: str, image_queue: Queue, serial, pixel_format: str, acquisition_fps: float, acquisition_type: str, video_segment_len: int
+    vid_file: str,
+    image_queue: Queue,
+    serial,
+    pixel_format: str,
+    acquisition_fps: float,
+    acquisition_type: str,
+    video_segment_len: int,
 ):
     """
     Write images from the queue to a video file
@@ -278,13 +289,20 @@ def write_image_queue(
             fourcc = cv2.VideoWriter_fourcc(*"mp4v")
 
             if pixel_format == "Mono8":
-                out_video = cv2.VideoWriter(vid_file, fourcc, acquisition_fps, (im.shape[1], im.shape[0]), isColor=False)
+                out_video = cv2.VideoWriter(
+                    vid_file,
+                    fourcc,
+                    acquisition_fps,
+                    (im.shape[1], im.shape[0]),
+                    isColor=False,
+                )
             else:
-                out_video = cv2.VideoWriter(vid_file, fourcc, acquisition_fps, (im.shape[1], im.shape[0]))
+                out_video = cv2.VideoWriter(
+                    vid_file, fourcc, acquisition_fps, (im.shape[1], im.shape[0])
+                )
             out_video.write(last_im)
 
         else:
-
             # Check if the base_filename passed is the same as the previous one
             # This means we are still writing to the same video file
             if frame["base_filename"] != base_filename:
@@ -304,9 +322,17 @@ def write_image_queue(
                 fourcc = cv2.VideoWriter_fourcc(*"mp4v")
 
                 if pixel_format == "Mono8":
-                    out_video = cv2.VideoWriter(vid_file, fourcc, acquisition_fps, (im.shape[1], im.shape[0]), isColor=False)
+                    out_video = cv2.VideoWriter(
+                        vid_file,
+                        fourcc,
+                        acquisition_fps,
+                        (im.shape[1], im.shape[0]),
+                        isColor=False,
+                    )
                 else:
-                    out_video = cv2.VideoWriter(vid_file, fourcc, acquisition_fps, (im.shape[1], im.shape[0]))
+                    out_video = cv2.VideoWriter(
+                        vid_file, fourcc, acquisition_fps, (im.shape[1], im.shape[0])
+                    )
 
             out_video.write(im)
 
@@ -324,33 +350,63 @@ def write_image_queue(
     # indicate the last None event is handled
     image_queue.task_done()
 
-def calculate_timespread_drift(timestamps):
+
+def calculate_timespread_drift(timestamps, camera_serials: list[str] | None = None):
     # Calculating metrics to determine drift
     ts = pd.DataFrame(timestamps)
 
     # interpolating any timestamps that are 0s
     ts.replace(0, np.nan, inplace=True)
-    ts.interpolate(method='linear', axis=0, limit=1, limit_direction='both', inplace=True)
-    initial_ts = ts.iloc[0,0]
+    ts.interpolate(
+        method="linear", axis=0, limit=1, limit_direction="both", inplace=True
+    )
+    initial_ts = ts.iloc[0, 0]
     dt = (ts - initial_ts) / 1e9
     spread = dt.max(axis=1) - dt.min(axis=1)
 
-    ts['std'] = ts.std(axis=1) / 1e6
+    ts["std"] = ts.std(axis=1) / 1e6
+    max_spread_ms = np.max(spread) * 1000
+
     if np.all(spread < 1e-6):
         print("Timestamps well aligned and clean")
     else:
-        print(f"Timestamps showed a maximum spread of {np.max(spread) * 1000} ms")
-        print(f"Timestamp standard deviation {ts['std'].max() -  ts['std'].min()} ms")
-
-    max = np.max(spread) * 1000
+        print(f"Timestamps showed a maximum spread of {max_spread_ms} ms")
+        if camera_serials is not None and max_spread_ms > 5.0:
+            ts_raw = pd.DataFrame(timestamps).replace(0, np.nan)
+            ts_raw.interpolate(
+                method="linear", axis=0, limit=1, limit_direction="both", inplace=True
+            )
+            ref = ts_raw.iloc[:, 0]
+            for col_idx in range(ts_raw.shape[1]):
+                cam_delta = (ts_raw.iloc[:, col_idx] - ref).abs() / 1e6
+                cam_max = cam_delta.max()
+                if cam_max > max_spread_ms * 0.9:
+                    ts_excl = ts_raw.drop(columns=col_idx)
+                    dt_excl = (ts_excl - ts_excl.iloc[0, 0]) / 1e9
+                    spread_excl = dt_excl.max(axis=1) - dt_excl.min(axis=1)
+                    filtered_ms = np.max(spread_excl) * 1000
+                    serial = (
+                        camera_serials[col_idx]
+                        if col_idx < len(camera_serials)
+                        else f"col{col_idx}"
+                    )
+                    print(
+                        f"  \u21b3 Camera {serial} PTP jump detected. "
+                        f"Excl. outlier: max spread {filtered_ms:.3f} ms"
+                    )
+                    break
+        print(f"Timestamp standard deviation {ts['std'].max() - ts['std'].min()} ms")
 
     # if max is nan or infinity, set to -1
-    if np.isnan(max) or np.isinf(max):
-        max = -1
+    if np.isnan(max_spread_ms) or np.isinf(max_spread_ms):
+        max_spread_ms = -1
 
-    return max
+    return max_spread_ms
 
-def write_metadata_queue(json_queue: Queue, records_queue: Queue, json_file: str, config_metadata: dict):
+
+def write_metadata_queue(
+    json_queue: Queue, records_queue: Queue, json_file: str, config_metadata: dict
+):
     """
     Write metadata from the queue to a json file
 
@@ -366,38 +422,112 @@ def write_metadata_queue(json_queue: Queue, records_queue: Queue, json_file: str
     local_times = []
 
     chunk_data = config_metadata["chunk_data"]
+    serial_enabled = config_metadata.get("serial_enabled", False)
 
     json_data = {}
     json_data["real_times"] = []
     json_data["timestamps"] = []
     json_data["frame_id"] = []
+    json_data["sync_wait_cycles"] = []
+    json_data["queue_depths"] = []
+    json_data["frame_id_cross_delta"] = []
+    json_data["sync_bottleneck_cameras"] = []
 
     if chunk_data:
         json_data["frame_id_abs"] = []
+    if serial_enabled:
         json_data["chunk_serial_data"] = []
         json_data["serial_msg"] = []
 
     bad_frame = 0
 
+    def _print_ptp_jump_summary(config_metadata: dict) -> None:
+        ptp_jumps = config_metadata.get("ptp_jump_events", [])
+        if ptp_jumps:
+            print(f"  PTP timestamp jumps detected ({len(ptp_jumps)}):")
+            for jump in ptp_jumps:
+                print(
+                    f"    Camera {jump['camera_serial']}: "
+                    f"frame {jump['frame_idx']}, {jump['direction']} {jump['jump_ms']:+.1f}ms"
+                )
+
+    def _print_trial_skips(config_metadata: dict) -> list[dict]:
+        trial_skips = config_metadata.get("frame_skip_events", [])
+        if trial_skips:
+            print(f"  Frame skips detected ({len(trial_skips)}):")
+            for skip in trial_skips:
+                status = "recovered" if skip["recovered"] else "NOT recovered"
+                print(
+                    f"    Camera {skip['camera_serial']}: "
+                    f"frame {skip['frame_idx']}, gap={skip['gap_size']} ({status})"
+                )
+        return trial_skips
+
+    def _add_diagnostic_metadata(json_data: dict, config_metadata: dict) -> None:
+        json_data["diagnostics_version"] = 2
+        if "camera_error_counters" in config_metadata:
+            json_data["camera_error_summary"] = config_metadata["camera_error_counters"]
+        if "camera_stream_stats" in config_metadata:
+            json_data["camera_stream_stats"] = config_metadata["camera_stream_stats"]
+
+        diagnostic_metadata_keys = [
+            "system_snapshots",
+            "ptp_offset_start",
+            "ptp_offset_end",
+            "camera_temperature_start",
+            "camera_temperature_end",
+            "timespread_alerts",
+            "sync_timeout_events",
+            "frame_skip_events",
+            "ptp_jump_events",
+        ]
+        for key in diagnostic_metadata_keys:
+            if key in config_metadata:
+                json_data[key] = config_metadata[key]
+
+    def _compact_json_data(json_data: dict) -> dict:
+        """Remove per-frame arrays that contain only placeholder values to reduce JSON size."""
+        # frame_id_cross_delta: all-zero means perfect sync (no drift)
+        if "frame_id_cross_delta" in json_data and json_data["frame_id_cross_delta"]:
+            if all(
+                all(v == 0 for v in fd.values())
+                for fd in json_data["frame_id_cross_delta"]
+            ):
+                del json_data["frame_id_cross_delta"]
+        # sync_bottleneck_cameras: omit if all empty (no waits occurred)
+        if "sync_bottleneck_cameras" in json_data:
+            if all(not cams for cams in json_data["sync_bottleneck_cameras"]):
+                del json_data["sync_bottleneck_cameras"]
+        # sync_wait_cycles: omit if all zero
+        if "sync_wait_cycles" in json_data:
+            if all(w == 0 for w in json_data["sync_wait_cycles"]):
+                del json_data["sync_wait_cycles"]
+        return json_data
+
+    def _append_diagnostics(json_data: dict, frame: dict) -> None:
+        if "sync_wait_cycles" in frame:
+            json_data["sync_wait_cycles"].append(frame["sync_wait_cycles"])
+            json_data["queue_depths"].append(frame["queue_depths"])
+            json_data["frame_id_cross_delta"].append(frame["frame_id_cross_delta"])
+            json_data["sync_bottleneck_cameras"].append(
+                frame["sync_bottleneck_cameras"]
+            )
+
     for frame_num, frame in enumerate(iter(json_queue.get, None)):
         if frame is None:
             break
 
-        if 'first_bad_frame' in frame:
+        if "first_bad_frame" in frame:
             bad_frame = frame["first_bad_frame"]
 
         if current_filename != frame["base_filename"]:
-
-            # This means a new file should be started
             json_file = current_filename + ".json"
 
-            # Get the camera serial IDs
             json_data["serials"] = frame["camera_serials"]
             json_data["camera_config_hash"] = config_metadata["camera_config_hash"]
             json_data["camera_info"] = config_metadata["camera_info"]
             json_data["meta_info"] = config_metadata["meta_info"]
             json_data["system_info"] = config_metadata["system_info"]
-            # Get the current camera settings for each camera before writing
             json_data["exposure_times"] = frame["exposure_times"]
             json_data["frame_rates_requested"] = frame["frame_rates_requested"]
             json_data["frame_rates_binning"] = frame["frame_rates_binning"]
@@ -405,31 +535,49 @@ def write_metadata_queue(json_queue: Queue, records_queue: Queue, json_file: str
             if bad_frame != 0:
                 json_data["first_bad_frame"] = bad_frame
 
+            _add_diagnostic_metadata(json_data, config_metadata)
+            _compact_json_data(json_data)
+
             with open(json_file, "w") as f:
                 json.dump(json_data, f)
                 f.write("\n")
 
-            max_timespread = calculate_timespread_drift(json_data["timestamps"])
+            max_timespread = calculate_timespread_drift(
+                json_data["timestamps"], camera_serials=json_data.get("serials")
+            )
+            _print_ptp_jump_summary(config_metadata)
+            trial_skips = _print_trial_skips(config_metadata)
 
-            # add the current filename, max timespread, first of the local_times to the records queue
-            records_queue.put({"filename": current_filename, "timestamp_spread": max_timespread, "recording_timestamp": local_times[0]})
+            records_queue.put(
+                {
+                    "filename": current_filename,
+                    "timestamp_spread": max_timespread,
+                    "recording_timestamp": local_times[0],
+                    "frame_skip_count": len(trial_skips),
+                }
+            )
 
             current_filename = frame["base_filename"]
 
-            # reset the json_lists
             json_data = {}
             json_data["real_times"] = [frame["real_times"]]
             local_times = [frame["local_times"]]
             json_data["timestamps"] = [frame["timestamps"]]
             json_data["frame_id"] = [frame["frame_id"]]
+            json_data["sync_wait_cycles"] = []
+            json_data["queue_depths"] = []
+            json_data["frame_id_cross_delta"] = []
+            json_data["sync_bottleneck_cameras"] = []
 
             if chunk_data:
                 json_data["frame_id_abs"] = [frame["frame_id_abs"]]
+            if serial_enabled:
                 json_data["chunk_serial_data"] = [frame["chunk_serial_data"]]
                 json_data["serial_msg"] = [frame["serial_msg"]]
 
+            _append_diagnostics(json_data, frame)
+
         else:
-            # This means we are still writing to the same json file
             json_data["real_times"].append(frame["real_times"])
             local_times.append(frame["local_times"])
             json_data["timestamps"].append(frame["timestamps"])
@@ -437,21 +585,21 @@ def write_metadata_queue(json_queue: Queue, records_queue: Queue, json_file: str
 
             if chunk_data:
                 json_data["frame_id_abs"].append(frame["frame_id_abs"])
+            if serial_enabled:
                 json_data["chunk_serial_data"].append(frame["chunk_serial_data"])
                 json_data["serial_msg"].append(frame["serial_msg"])
 
+            _append_diagnostics(json_data, frame)
+
         json_queue.task_done()
 
-    # write the last json file with the remaining data
     json_file = current_filename + ".json"
 
-    # Get the information from the config file
     json_data["serials"] = frame["camera_serials"]
     json_data["camera_config_hash"] = config_metadata["camera_config_hash"]
     json_data["camera_info"] = config_metadata["camera_info"]
     json_data["meta_info"] = config_metadata["meta_info"]
     json_data["system_info"] = config_metadata["system_info"]
-    # Get the current camera settings for each camera before writing
     json_data["exposure_times"] = frame["exposure_times"]
     json_data["frame_rates_requested"] = frame["frame_rates_requested"]
     json_data["frame_rates_binning"] = frame["frame_rates_binning"]
@@ -459,16 +607,30 @@ def write_metadata_queue(json_queue: Queue, records_queue: Queue, json_file: str
     if bad_frame != 0:
         json_data["first_bad_frame"] = bad_frame
 
+    _add_diagnostic_metadata(json_data, config_metadata)
+    _compact_json_data(json_data)
+
     with open(json_file, "w") as f:
         json.dump(json_data, f)
         f.write("\n")
 
-    max_timespread = calculate_timespread_drift(json_data["timestamps"])
+    max_timespread = calculate_timespread_drift(
+        json_data["timestamps"], camera_serials=json_data.get("serials")
+    )
 
-    records_queue.put({"filename": current_filename, "timestamp_spread": max_timespread, "recording_timestamp": local_times[0]})
+    _print_ptp_jump_summary(config_metadata)
+    trial_skips = _print_trial_skips(config_metadata)
+
+    records_queue.put(
+        {
+            "filename": current_filename,
+            "timestamp_spread": max_timespread,
+            "recording_timestamp": local_times[0],
+            "frame_skip_count": len(trial_skips),
+        }
+    )
 
     json_queue.task_done()
-
 
 
 class FlirRecorder:
@@ -494,15 +656,16 @@ class FlirRecorder:
         self.status_callback = status_callback
         self.set_status("Uninitialized")
 
-        self.pixel_format_conversion = {'BayerRG8': cv2.COLOR_BAYER_RG2RGB,
-                                        'BayerBG8': cv2.COLOR_BAYER_BG2RGB,
-                                        'Mono8': cv2.COLOR_GRAY2RGB}
+        self.pixel_format_conversion = {
+            "BayerRG8": cv2.COLOR_BAYER_RG2RGB,
+            "BayerBG8": cv2.COLOR_BAYER_BG2RGB,
+            "Mono8": cv2.COLOR_GRAY2RGB,
+        }
 
-    def get_config_hash(self,yaml_content,hash_len=10):
-
+    def get_config_hash(self, yaml_content, hash_len=10):
         # Sorting keys to ensure consistent hashing
-        file_str = json.dumps(yaml_content,sort_keys=True)
-        encoded_config = file_str.encode('utf-8')
+        file_str = json.dumps(yaml_content, sort_keys=True)
+        encoded_config = file_str.encode("utf-8")
 
         # Create hash of encoded config file and return
         return hashlib.sha256(encoded_config).hexdigest()[:hash_len]
@@ -591,7 +754,9 @@ class FlirRecorder:
             # with the camera IDs passed
             requested_cameras = list(self.camera_config["camera-info"].keys())
         else:
-            assert num_cams is not None, "Must provide number of cameras if no config file is provided"
+            assert num_cams is not None, (
+                "Must provide number of cameras if no config file is provided"
+            )
             requested_cameras = num_cams
             self.camera_config = {}
 
@@ -608,7 +773,9 @@ class FlirRecorder:
                 # Break out of the loop after finding the interface and cameras
                 break
 
-        print(f"Using interface {i} with {selected_cams} cameras. In use: {current_iface.IsCameraInUse()}")
+        print(
+            f"Using interface {i} with {selected_cams} cameras. In use: {current_iface.IsCameraInUse()}"
+        )
 
         iface_list.Clear()
 
@@ -640,15 +807,19 @@ class FlirRecorder:
             self.camera_info = self.camera_config["camera-info"]
 
             if self.chunk_data:
-                print(f"Extracting the following variables from chunk data: {self.chunk_data}")
+                print(
+                    f"Extracting the following variables from chunk data: {self.chunk_data}"
+                )
 
         else:
             # If no config file is passed, use default values
             exposure_time = 15000
             frame_rate = 30
-            self.gpio_settings = {'line0': 'Off', 'line2': 'Off', 'line3': 'Off'}
+            self.gpio_settings = {"line0": "Off", "line2": "Off", "line3": "Off"}
             self.chunk_data = []
             self.camera_info = {}
+
+        self.serial_enabled = self.gpio_settings.get("line3") == "SerialOn"
 
         # Updating the binning needed to run at 60 Hz.
         # TODO: make this check more robust in the future
@@ -666,10 +837,11 @@ class FlirRecorder:
             "gpio_settings": self.gpio_settings,
             "chunk_data": self.chunk_data,
             "camera_info": self.camera_info,
-
         }
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=len(self.cams)) as executor:
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=len(self.cams)
+        ) as executor:
             list(executor.map(lambda c: init_camera(c, **config_params), self.cams))
 
         await self.synchronize_cameras()
@@ -679,9 +851,11 @@ class FlirRecorder:
         # Get the pixel format for each camera
         pixel_formats = [c.PixelFormat for c in self.cams]
 
-        unrecognized = [pf for pf in pixel_formats if pf not in self.pixel_format_conversion]
+        unrecognized = [
+            pf for pf in pixel_formats if pf not in self.pixel_format_conversion
+        ]
         # Ensure the pixel format is present in pixel_format_conversion
-        assert not unrecognized, f"Unrecognized pixel format(s): {pixel_format}"
+        assert not unrecognized, f"Unrecognized pixel format(s): {unrecognized}"
 
         self.set_status("Idle")
 
@@ -722,7 +896,9 @@ class FlirRecorder:
             self.acquisition_type = self.camera_config["acquisition-type"]
 
             if self.acquisition_type == "continuous":
-                self.video_segment_len = self.camera_config["acquisition-settings"]["video_segment_len"]
+                self.video_segment_len = self.camera_config["acquisition-settings"][
+                    "video_segment_len"
+                ]
             else:
                 self.video_segment_len = max_frames
 
@@ -733,7 +909,8 @@ class FlirRecorder:
                 "acquisition_type": self.acquisition_type,
                 "video_segment_len": self.video_segment_len,
                 "system_info": self.get_system_info(),
-                "chunk_data": self.chunk_data
+                "chunk_data": self.chunk_data,
+                "serial_enabled": self.serial_enabled,
             }
 
         self.acquisition_type = "max_frames"
@@ -748,11 +925,11 @@ class FlirRecorder:
             "acquisition_type": "max_frames",
             "video_segment_len": max_frames,
             "system_info": self.get_system_info(),
-            "chunk_data": self.chunk_data
+            "chunk_data": self.chunk_data,
+            "serial_enabled": self.serial_enabled,
         }
 
     def update_filename(self, current_filename):
-
         base_name = current_filename.split("/")[-1]
 
         # First get the YYYYMMDD_HHMMSS from base_name (which is formatted as {self.video_root}_{YYYYMMDD}_{HHMMSS})
@@ -763,7 +940,9 @@ class FlirRecorder:
         # Get the current datetime object
         time_datetime = datetime.datetime.strptime(time_str, "%Y%m%d_%H%M%S")
         # Calculate the time delta
-        time_delta = datetime.timedelta(seconds=round(self.video_segment_len / self.acquisition_frame_rate))
+        time_delta = datetime.timedelta(
+            seconds=round(self.video_segment_len / self.acquisition_frame_rate)
+        )
 
         # Add the time delta to the current datetime object
         new_time_datetime = time_datetime + time_delta
@@ -789,7 +968,6 @@ class FlirRecorder:
         return frame_idx
 
     def initialize_frame_metadata(self):
-
         # Get the current real time
         real_time = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
         local_time = datetime.datetime.now()
@@ -805,6 +983,7 @@ class FlirRecorder:
 
         if self.chunk_data:
             frame_metadata["frame_id_abs"] = []
+        if self.serial_enabled:
             frame_metadata["chunk_serial_data"] = []
             frame_metadata["serial_msg"] = []
 
@@ -813,7 +992,7 @@ class FlirRecorder:
     def process_serial_data(self, c):
         serial_msg = []
         frame_count = -1
-        if self.gpio_settings['line3'] == 'SerialOn':
+        if self.gpio_settings["line3"] == "SerialOn":
             # We expect only 5 bytes to be sent
             if c.ChunkSerialDataLength == 5:
                 chunk_serial_data = c.ChunkSerialData
@@ -827,28 +1006,41 @@ class FlirRecorder:
 
         return serial_msg, frame_count
 
-    def monitor_frames(self, frame_idx, frame_id, timestamp, camera_serial):
-        curr_frame_diff = (frame_idx+1) - frame_id
-        if curr_frame_diff != self.frame_diff[camera_serial] and curr_frame_diff != 0:
-            print(f"{camera_serial}: Frame ID mismatch | loop: {frame_idx + 1} | cam: {frame_id}")
-            print("checking image queue sizes")
-            # self.check_queue_sizes(self.image_queue_dict)
-            print("checking acquisition queue sizes")
-            # self.check_queue_sizes(self.acquisition_queue)
-            self.frame_diff[camera_serial] = (frame_idx+1) - frame_id
+    def _read_ptp_offsets(self) -> dict[str, int]:
+        """Read GevIEEE1588OffsetFromMasterLatched for each camera."""
+        offsets: dict[str, int] = {}
+        for c in self.cams:
+            serial = c.DeviceSerialNumber
+            try:
+                c.GevIEEE1588DataSetLatch()
+                offsets[serial] = c.GevIEEE1588OffsetFromMasterLatched
+            except (AttributeError, PySpin.SpinnakerException):
+                pass
+        return offsets
 
-            if timestamp != 0 and self.prev_timestamp[camera_serial] != 0:
-                cur_timestamp_diff = timestamp - self.prev_timestamp[camera_serial]
+    def _read_camera_temperatures(self) -> dict[str, float]:
+        """Read DeviceTemperature for each camera."""
+        temps: dict[str, float] = {}
+        for c in self.cams:
+            serial = c.DeviceSerialNumber
+            try:
+                temps[serial] = float(c.DeviceTemperature)
+            except (AttributeError, PySpin.SpinnakerException):
+                pass
+        return temps
 
-                print(f"{camera_serial}: timestamp diff {cur_timestamp_diff * 1e-6}")
-
-            print(f"{camera_serial}: frame_idx based on timestamps {int((timestamp - self.initial_timestamp[camera_serial]) * 1e-9 * 29.08)}")
-
-            if self.first_bad_frame[camera_serial] == -1:
-                self.first_bad_frame[camera_serial] = {'loop_frame_idx': frame_idx, 'cam_frame_id': frame_id}
-
-                self.frame_metadata["first_bad_frame"] = self.first_bad_frame
-            # timestamp_diff[c.DeviceSerialNumber] = cur_timestamp_diff
+    def _read_camera_stats(self) -> dict[str, dict[str, int]]:
+        stats: dict[str, dict[str, int]] = {}
+        for c in self.cams:
+            serial = c.DeviceSerialNumber
+            cam_stats: dict[str, int] = {}
+            for attr in ["StreamDroppedFrameCount", "TransferQueueOverflowCount"]:
+                try:
+                    cam_stats[attr] = getattr(c, attr)
+                except (AttributeError, PySpin.SpinnakerException):
+                    pass
+            stats[serial] = cam_stats
+        return stats
 
     def increment_frame_counter(self):
         with self.frame_counter_lock:
@@ -863,8 +1055,40 @@ class FlirRecorder:
         self.stop_frame_set.set()
         print("stop_frame", self.stop_frame)
 
-    def start_acquisition(self, recording_path=None, preview_callback: callable = None, max_frames: int = 1000):
+    def get_timespread_alerts(self) -> dict:
+        """Return current timespread alert state. Safe to call from any thread."""
+        return dict(self._timespread_alerts)
+
+    def start_acquisition(
+        self,
+        recording_path=None,
+        preview_callback: callable = None,
+        max_frames: int = 1000,
+        diagnostics_level: int = 0,
+        timespread_alert_threshold_ms: float = 5.0,
+        sync_timeout_s: float = 5.0,
+        nic_interface: str | None = None,
+        disk_device: str | None = None,
+        frame_skip_recovery: bool = True,
+    ):
         self.set_status("Recording")
+        self._diagnostics_level = diagnostics_level
+        self._timespread_alert_threshold_ms = timespread_alert_threshold_ms
+        self._sync_timeout_s = sync_timeout_s
+        self._timespread_alerts: dict = {
+            "count": 0,
+            "first_frame": -1,
+            "last_frame": -1,
+            "max_spread_ms": 0.0,
+        }
+        self._sync_timeout_events: list[dict] = []
+        self._system_monitor = None
+        self._frame_skip_recovery = frame_skip_recovery
+        self._frame_shape: dict[str, tuple] = {}
+        self._frame_dtype: dict[str, np.dtype] = {}
+        self._zero_frames: dict[str, np.ndarray] = {}
+        self._frame_skip_events: list[dict] = []
+        self._ptp_jump_events: list[dict] = []
 
         self.preview_callback = preview_callback
         self.video_base_file = recording_path
@@ -878,16 +1102,22 @@ class FlirRecorder:
             self.video_root = "_".join(self.video_base_name.split("_")[:-2])
 
         config_metadata = self._prepare_config_metadata(max_frames)
+        config_metadata["frame_skip_events"] = self._frame_skip_events
+        config_metadata["ptp_jump_events"] = self._ptp_jump_events
 
         # Set max_frames = self.video_segment_len. self.video_segment_len is either set to max_frames or
         # a value from the config file.
         max_frames = self.video_segment_len
 
         # Initializing an image queue for each camera
-        self.image_queue_dict = {c.DeviceSerialNumber: Queue(max_frames) for c in self.cams}
+        self.image_queue_dict = {
+            c.DeviceSerialNumber: Queue(max_frames) for c in self.cams
+        }
 
         # Initialize intermediate queues for the reading threads
-        self.acquisition_queue = {c.DeviceSerialNumber: Queue(max_frames) for c in self.cams}
+        self.acquisition_queue = {
+            c.DeviceSerialNumber: Queue(max_frames) for c in self.cams
+        }
 
         # Initializing a json queue for each camera
         self.json_queue = Queue(max_frames)
@@ -896,7 +1126,6 @@ class FlirRecorder:
 
         # Set up video writing threads if recording is enabled
         if self.video_base_file is not None:
-
             # Start a writing thread for each camera
             for c in self.cams:
                 serial = c.DeviceSerialNumber
@@ -916,7 +1145,7 @@ class FlirRecorder:
 
             # Start a writing thread for the json queue
             threading.Thread(
-                name=f"write_metadata",
+                name="write_metadata",
                 target=write_metadata_queue,
                 kwargs={
                     "json_file": self.video_base_file,
@@ -926,12 +1155,13 @@ class FlirRecorder:
                 },
             ).start()
 
-
         def start_cam(i):
             # this won't truly start them until command is send below
             self.cams[i].start()
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=len(self.cams)) as executor:
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=len(self.cams)
+        ) as executor:
             l = list(executor.map(start_cam, range(len(self.cams))))
 
         self.frame_diff = {}
@@ -945,15 +1175,17 @@ class FlirRecorder:
         print("Acquisition, Resulting, Exposure, DeviceLinkThroughputLimit:")
         for c in self.cams:
             self.acquisition_frame_rate = c.AcquisitionFrameRate
-            print(f"{c.DeviceSerialNumber}: {self.acquisition_frame_rate}, {c.AcquisitionResultingFrameRate}, {c.ExposureTime}, {c.DeviceLinkThroughputLimit} ")
+            print(
+                f"{c.DeviceSerialNumber}: {self.acquisition_frame_rate}, {c.AcquisitionResultingFrameRate}, {c.ExposureTime}, {c.DeviceLinkThroughputLimit} "
+            )
             print(f"Frame Size: {c.Width} {c.Height}")
             print(f"{c.GevSCPSPacketSize}, {c.GevSCPD}")
 
-            if self.gpio_settings['line2'] == '3V3_Enable':
-                c.LineSelector = 'Line2'
-                c.LineMode = 'Input'
+            if self.gpio_settings["line2"] == "3V3_Enable":
+                c.LineSelector = "Line2"
+                c.LineMode = "Input"
                 c.V3_3Enable = True
-            if self.gpio_settings['line3'] == 'SerialOn':
+            if self.gpio_settings["line3"] == "SerialOn":
                 print(c.SerialReceiveQueueCurrentCharacterCount)
                 print(c.SerialReceiveQueueMaxCharacterCount)
                 c.SerialReceiveQueueClear()
@@ -967,54 +1199,88 @@ class FlirRecorder:
 
             self.cam_serials.append(c.DeviceSerialNumber)
 
+        self.camera_error_counters: dict[str, dict[str, int]] = {
+            serial: {
+                "incomplete_frames": 0,
+                "exceptions": 0,
+                "total_acquired": 0,
+                "frame_id_gaps": 0,
+            }
+            for serial in self.cam_serials
+        }
+        config_metadata["camera_error_counters"] = self.camera_error_counters
+
         # schedule a command to start in 250 ms in the future
         self.cams[0].TimestampLatch()
         value = self.cams[0].TimestampLatchValue
         latchValue = int(value + 0.250 * 1e9)
         self.iface.TLInterface.GevActionTime.SetValue(latchValue)
-        self.iface.TLInterface.GevActionGroupKey.SetValue(1)  # these group/mask/device numbers should match above
+        self.iface.TLInterface.GevActionGroupKey.SetValue(
+            1
+        )  # these group/mask/device numbers should match above
         self.iface.TLInterface.GevActionGroupMask.SetValue(1)
         self.iface.TLInterface.GevActionDeviceKey.SetValue(0)
         self.iface.TLInterface.ActionCommand()
 
+        camera_stats_baseline = self._read_camera_stats()
+
+        if self._diagnostics_level >= 1:
+            config_metadata["ptp_offset_start"] = self._read_ptp_offsets()
+            config_metadata["camera_temperature_start"] = (
+                self._read_camera_temperatures()
+            )
+
+            from multi_camera.acquisition.diagnostics.system_monitor import (
+                SystemMonitor,
+                detect_network_interface,
+            )
+
+            iface = nic_interface or detect_network_interface()
+            if iface:
+                self._system_monitor = SystemMonitor(
+                    interface=iface, disk_device=disk_device, interval_s=10.0
+                )
+                self._system_monitor.start()
+
         # Function to get image from a single camera
         def get_camera_image(camera):
-
             camera_serial = camera.DeviceSerialNumber
             pixel_format = camera.PixelFormat
-            max_block_count = camera.TransferQueueMaxBlockCount
+            error_counters = self.camera_error_counters[camera_serial]
 
             frame_idx = 0
-
-            prev_count = 0
-            prev_overflow = 0
             prev_frame_id = 0
-            processed_frames = 0
 
             current_filename = self.video_base_file
 
             while self.acquisition_type == "continuous" or frame_idx < max_frames:
-
                 if self.stop_frame_set.is_set():
-                    # Check if the camera frame count is equal to the stop_frame
                     if frame_idx >= self.stop_frame:
-
-                        print(f"Stopping {camera_serial} recording: {frame_idx},{self.stop_frame}")
+                        print(
+                            f"Stopping {camera_serial} recording: {frame_idx},{self.stop_frame}"
+                        )
                         self.acquisition_queue[camera_serial].put(None)
                         break
 
-                # Check if a new video segment should be started
-                if current_filename is not None and frame_idx % self.video_segment_len == 0 and frame_idx != 0:
+                if (
+                    current_filename is not None
+                    and frame_idx % self.video_segment_len == 0
+                    and frame_idx != 0
+                ):
                     current_filename = self.update_filename(current_filename)
-                    print(f"{frame_idx} {camera_serial}: Starting new video segment: {current_filename}")
+                    print(
+                        f"{frame_idx} {camera_serial}: Starting new video segment: {current_filename}"
+                    )
 
                 try:
                     im_ref = camera.get_image()
 
                     if im_ref.IsIncomplete():
-
                         im_stat = im_ref.GetImageStatus()
-                        print(f"{camera_serial}: Image incomplete\n{PySpin.Image.GetImageStatusDescription(im_stat)}")
+                        print(
+                            f"{camera_serial}: Image incomplete\n{PySpin.Image.GetImageStatusDescription(im_stat)}"
+                        )
+                        error_counters["incomplete_frames"] += 1
                         im_ref.Release()
                         continue
 
@@ -1026,48 +1292,121 @@ class FlirRecorder:
                         frame_id_abs = chunk_data.GetFrameID()
                         serial_msg, frame_count = self.process_serial_data(camera)
 
-                    # Check if the frame_id has incremented by 1
-                    if frame_id != prev_frame_id + 1:
-                        # If it has not, print the frame id, previous frame id, and buffer count
-                        print(f"{camera_serial}: Frame ID mismatch, current frame id: {frame_id}, previous frame id: {prev_frame_id}")
+                    if frame_id != prev_frame_id + 1 and prev_frame_id != 0:
+                        gap = frame_id - prev_frame_id - 1
+                        error_counters["frame_id_gaps"] += abs(gap)
+
+                        self._frame_skip_events.append(
+                            {
+                                "frame_idx": frame_idx,
+                                "camera_serial": camera_serial,
+                                "expected_frame_id": prev_frame_id + 1,
+                                "actual_frame_id": frame_id,
+                                "gap_size": gap,
+                                "recovered": self._frame_skip_recovery and gap > 0,
+                            }
+                        )
+
+                        if self._frame_skip_recovery and gap > 0:
+                            for g in range(gap):
+                                missing_fid = prev_frame_id + 1 + g
+
+                                if (
+                                    current_filename is not None
+                                    and camera_serial in self._frame_shape
+                                ):
+                                    if camera_serial not in self._zero_frames:
+                                        self._zero_frames[camera_serial] = np.zeros(
+                                            self._frame_shape[camera_serial],
+                                            dtype=self._frame_dtype[camera_serial],
+                                        )
+                                    self.image_queue_dict[camera_serial].put(
+                                        {
+                                            "im": self._zero_frames[camera_serial],
+                                            "real_times": 0,
+                                            "timestamps": 0,
+                                            "base_filename": current_filename,
+                                        }
+                                    )
+
+                                placeholder = {
+                                    "image": None,
+                                    "timestamp": 0,
+                                    "frame_id": missing_fid,
+                                    "camera_serial": camera_serial,
+                                    "pixel_format": pixel_format,
+                                    "base_filename": current_filename,
+                                    "skipped": True,
+                                }
+                                if self.chunk_data:
+                                    placeholder["frame_id_abs"] = missing_fid
+                                if self.serial_enabled:
+                                    placeholder["serial_msg"] = []
+                                    placeholder["frame_count"] = -1
+
+                                self.acquisition_queue[camera_serial].put(placeholder)
+                                frame_idx += 1
+                                error_counters["total_acquired"] += 1
+
+                                if (
+                                    current_filename is not None
+                                    and frame_idx % self.video_segment_len == 0
+                                    and frame_idx != 0
+                                ):
+                                    current_filename = self.update_filename(
+                                        current_filename
+                                    )
+
+                                if frame_idx >= max_frames:
+                                    break
 
                     prev_frame_id = frame_id
-                    processed_frames += 1
 
                 except Exception as e:
-                    print(f"{e}*************{camera_serial}***************************** FAILED TO GET IMAGE ******************************************")
+                    print(
+                        f"{e}*************{camera_serial}***************************** FAILED TO GET IMAGE ******************************************"
+                    )
+                    error_counters["exceptions"] += 1
                     time.sleep(0.1)
                     continue
 
                 # Check if the frame is none
                 if im_ref is None:
-                    print("############################################### IMAGE IS NONE ******************************************")
+                    print(
+                        "############################################### IMAGE IS NONE ******************************************"
+                    )
                     continue
 
                 try:
                     im = im_ref.GetNDArray()
 
+                    if camera_serial not in self._frame_shape:
+                        self._frame_shape[camera_serial] = im.shape
+                        self._frame_dtype[camera_serial] = im.dtype
+
                     if current_filename is not None:
-                        self.image_queue_dict[camera_serial].put({
-                            "im": im,
-                            "real_times": 0,
-                            "timestamps": timestamp,
-                            "base_filename": current_filename
-                        })
+                        self.image_queue_dict[camera_serial].put(
+                            {
+                                "im": im,
+                                "real_times": 0,
+                                "timestamps": timestamp,
+                                "base_filename": current_filename,
+                            }
+                        )
 
                     frame_data = {
-                        'image': im,
-                        'timestamp': timestamp,
-                        'frame_id': frame_id,
-                        'camera_serial': camera_serial,
-                        'pixel_format': pixel_format,
-                        'base_filename': current_filename,
+                        "image": im,
+                        "timestamp": timestamp,
+                        "frame_id": frame_id,
+                        "camera_serial": camera_serial,
+                        "pixel_format": pixel_format,
+                        "base_filename": current_filename,
                     }
 
                     if self.chunk_data:
-                        frame_data['frame_id_abs'] = frame_id_abs
-                        frame_data['serial_msg'] = serial_msg
-                        frame_data['frame_count'] = frame_count
+                        frame_data["frame_id_abs"] = frame_id_abs
+                        frame_data["serial_msg"] = serial_msg
+                        frame_data["frame_count"] = frame_count
 
                     # put the frame data into the acquisition queue
                     self.acquisition_queue[camera_serial].put(frame_data)
@@ -1086,40 +1425,78 @@ class FlirRecorder:
                     frame_data = None
 
                 frame_idx += 1
+                error_counters["total_acquired"] += 1
 
         def process_synchronized_metadata():
             frame_idx = 0
             self.frame_counter = 0
             cleanup_frames = 10
+            sync_wait_cycles = 0
+            last_empty_serials: list[str] = []
+            wait_start: float | None = None
 
             while self.acquisition_type == "continuous" or frame_idx < max_frames:
-
                 if self.stop_recording.is_set():
-
-                    # Set the current stop_frame
                     if not self.stop_frame_set.is_set():
                         print("setting stop frame")
                         self.set_stop_frame(cleanup_frames)
                     else:
                         print("cleaning_up", frame_idx, self.stop_frame, max_frames)
 
-                        # break out if frame_idx == stop_frame
                         if frame_idx == self.stop_frame:
                             print("exiting metadata loop")
                             break
 
-                empty_queues = [self.acquisition_queue[c].empty() for c in self.cam_serials]
-                # Check if all acquisition queues have at least one item
+                empty_queues = [
+                    self.acquisition_queue[c].empty() for c in self.cam_serials
+                ]
                 if any(empty_queues):
+                    last_empty_serials = [
+                        c for c in self.cam_serials if self.acquisition_queue[c].empty()
+                    ]
+                    sync_wait_cycles += 1
+
+                    if wait_start is None:
+                        wait_start = time.monotonic()
+                    elif self._diagnostics_level >= 1:
+                        elapsed = time.monotonic() - wait_start
+                        if elapsed > self._sync_timeout_s:
+                            timeout_event: dict = {
+                                "frame_idx": frame_idx,
+                                "elapsed_s": round(elapsed, 2),
+                                "empty_cameras": list(last_empty_serials),
+                                "queue_depths": {
+                                    c: self.acquisition_queue[c].qsize()
+                                    for c in self.cam_serials
+                                },
+                            }
+                            if self._system_monitor is not None:
+                                latest = self._system_monitor.get_latest_snapshot()
+                                if latest is not None:
+                                    timeout_event["system_snapshot"] = latest
+                            self._sync_timeout_events.append(timeout_event)
+                            wait_start = time.monotonic()
+
                     time.sleep(0.1)
                     continue
 
-                # Wait until all queues have at least one item
-                # acquisition_frames = [self.acquisition_queue[c].get() for c in self.cam_serials]
+                wait_start = None
+
+                queue_depths = {
+                    c: self.acquisition_queue[c].qsize() for c in self.cam_serials
+                }
+
                 acquisition_frames = []
                 for c in self.cam_serials:
                     acquisition_frames.append(self.acquisition_queue[c].get())
                     self.acquisition_queue[c].task_done()
+
+                all_frame_ids = [fd["frame_id"] for fd in acquisition_frames]
+                min_fid = min(all_frame_ids)
+                frame_id_cross_delta = {
+                    fd["camera_serial"]: fd["frame_id"] - min_fid
+                    for fd in acquisition_frames
+                }
 
                 frame_idx = self.update_progress(frame_idx, max_frames)
                 self.increment_frame_counter()
@@ -1128,53 +1505,101 @@ class FlirRecorder:
                 self.frame_metadata = self.initialize_frame_metadata()
 
                 for frame_data in acquisition_frames:
+                    camera_serial = frame_data["camera_serial"]
 
-                    camera_serial = frame_data['camera_serial']
-
-                    self.frame_metadata['timestamps'].append(frame_data['timestamp'])
-                    self.frame_metadata['frame_id'].append(frame_data['frame_id'])
-                    self.frame_metadata['camera_serials'].append(camera_serial)
-                    self.frame_metadata['exposure_times'].append(15000)
-                    self.frame_metadata['frame_rates_binning'].append(30)
-                    self.frame_metadata['frame_rates_requested'].append(30)
+                    self.frame_metadata["timestamps"].append(frame_data["timestamp"])
+                    self.frame_metadata["frame_id"].append(frame_data["frame_id"])
+                    self.frame_metadata["camera_serials"].append(camera_serial)
+                    self.frame_metadata["exposure_times"].append(15000)
+                    self.frame_metadata["frame_rates_binning"].append(30)
+                    self.frame_metadata["frame_rates_requested"].append(30)
 
                     if self.chunk_data:
-                        self.frame_metadata['frame_id_abs'].append(frame_data['frame_id_abs'])
-                        self.frame_metadata['chunk_serial_data'].append(frame_data['frame_count'])
-                        self.frame_metadata['serial_msg'].append(frame_data['serial_msg'])
+                        self.frame_metadata["frame_id_abs"].append(
+                            frame_data["frame_id_abs"]
+                        )
+                    if self.serial_enabled:
+                        self.frame_metadata["chunk_serial_data"].append(
+                            frame_data["frame_count"]
+                        )
+                        self.frame_metadata["serial_msg"].append(
+                            frame_data["serial_msg"]
+                        )
 
-                    if self.preview_callback:
-                        real_time_images.append((frame_data['image'], self.pixel_format_conversion[frame_data['pixel_format']], camera_serial))
+                    if self.preview_callback and not frame_data.get("skipped"):
+                        real_time_images.append(
+                            (
+                                frame_data["image"],
+                                self.pixel_format_conversion[
+                                    frame_data["pixel_format"]
+                                ],
+                                camera_serial,
+                            )
+                        )
 
                     if frame_idx == 0:
-                        self.initial_timestamp[camera_serial] = frame_data['timestamp']
+                        self.initial_timestamp[camera_serial] = frame_data["timestamp"]
 
-                    # self.monitor_frames(
-                    #     frame_idx,
-                    #     frame_data['frame_id'],
-                    #     frame_data['timestamp'],
-                    #     camera_serial
-                    # )
+                    prev_ts = self.prev_timestamp[camera_serial]
+                    cur_ts = frame_data["timestamp"]
+                    if frame_idx > 0 and prev_ts > 0 and cur_ts > 0:
+                        interval_ms = (cur_ts - prev_ts) / 1e6
+                        expected_ms = 1000.0 / self.acquisition_frame_rate
+                        if abs(interval_ms - expected_ms) > expected_ms * 10:
+                            jump_ms = interval_ms - expected_ms
+                            self._ptp_jump_events.append(
+                                {
+                                    "camera_serial": camera_serial,
+                                    "frame_idx": frame_idx,
+                                    "jump_ms": round(jump_ms, 3),
+                                    "direction": "forward"
+                                    if jump_ms > 0
+                                    else "backward",
+                                }
+                            )
+                    self.prev_timestamp[camera_serial] = cur_ts
 
-                    self.prev_timestamp[camera_serial] = frame_data['timestamp']
+                self.frame_metadata["sync_wait_cycles"] = sync_wait_cycles
+                self.frame_metadata["sync_bottleneck_cameras"] = last_empty_serials
+                self.frame_metadata["queue_depths"] = queue_depths
+                self.frame_metadata["frame_id_cross_delta"] = frame_id_cross_delta
+                sync_wait_cycles = 0
+                last_empty_serials = []
 
-                # Put the frame metadata into the json queue
+                if self._diagnostics_level >= 1:
+                    ts_array = [t for t in self.frame_metadata["timestamps"] if t != 0]
+                    if len(ts_array) >= 2:
+                        spread_ns = max(ts_array) - min(ts_array)
+                        spread_ms = spread_ns / 1e6
+                        if spread_ms > self._timespread_alert_threshold_ms:
+                            alerts = self._timespread_alerts
+                            alerts["count"] += 1
+                            if alerts["first_frame"] == -1:
+                                alerts["first_frame"] = frame_idx
+                            alerts["last_frame"] = frame_idx
+                            if spread_ms > alerts["max_spread_ms"]:
+                                alerts["max_spread_ms"] = round(spread_ms, 3)
+
                 if self.video_base_file is not None:
-                    self.frame_metadata['base_filename'] = frame_data['base_filename']
+                    self.frame_metadata["base_filename"] = frame_data["base_filename"]
                     self.json_queue.put(self.frame_metadata)
 
-                # Handle preview callback
                 if self.preview_callback:
                     self.preview_callback(real_time_images)
 
                 frame_idx += 1
 
         # Start threads for acquisition
-        with concurrent.futures.ThreadPoolExecutor(max_workers=len(self.cams)) as camera_executor, \
-            concurrent.futures.ThreadPoolExecutor(max_workers=1) as metadata_executor:
-
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=len(self.cams)
+        ) as camera_executor, concurrent.futures.ThreadPoolExecutor(
+            max_workers=1
+        ) as metadata_executor:
             # Start all camera captures in parallel
-            future_to_camera = {camera_executor.submit(get_camera_image, camera): camera for camera in self.cams}
+            future_to_camera = {
+                camera_executor.submit(get_camera_image, camera): camera
+                for camera in self.cams
+            }
 
             # Start metadata processing in parallel
             metadata_future = metadata_executor.submit(process_synchronized_metadata)
@@ -1185,6 +1610,34 @@ class FlirRecorder:
         self.stop_frame_set.clear()
         self.stop_recording.clear()
         print("Finished recording")
+
+        camera_stats_end = self._read_camera_stats()
+        camera_stream_stats: dict[str, dict[str, int]] = {}
+        for serial in self.cam_serials:
+            delta: dict[str, int] = {}
+            for attr in camera_stats_end.get(serial, {}):
+                end_val = camera_stats_end[serial][attr]
+                start_val = camera_stats_baseline.get(serial, {}).get(attr, 0)
+                delta[attr] = end_val - start_val
+            camera_stream_stats[serial] = delta
+        config_metadata["camera_stream_stats"] = camera_stream_stats
+
+        if self._diagnostics_level >= 1:
+            config_metadata["ptp_offset_end"] = self._read_ptp_offsets()
+            config_metadata["camera_temperature_end"] = self._read_camera_temperatures()
+
+            if self._system_monitor is not None:
+                self._system_monitor.stop()
+                config_metadata["system_snapshots"] = (
+                    self._system_monitor.get_snapshots()
+                )
+                self._system_monitor = None
+
+            if self._timespread_alerts["count"] > 0:
+                config_metadata["timespread_alerts"] = self._timespread_alerts
+
+            if self._sync_timeout_events:
+                config_metadata["sync_timeout_events"] = self._sync_timeout_events
 
         exposure_times = []
         frame_rates = []
@@ -1197,10 +1650,10 @@ class FlirRecorder:
 
             camera_ids.append(c.DeviceSerialNumber)
 
-            if self.gpio_settings['line2'] == '3V3_Enable':
-                c.LineSelector = 'Line2'
+            if self.gpio_settings["line2"] == "3V3_Enable":
+                c.LineSelector = "Line2"
                 c.V3_3Enable = False
-                c.LineMode = 'Output'
+                c.LineMode = "Output"
             c.stop()
 
         records = []
@@ -1226,6 +1679,39 @@ class FlirRecorder:
         self.set_status("Idle")
 
         return records
+
+    def validate_sync(
+        self,
+        n_frames: int = 100,
+        timespread_threshold_ms: float = 5.0,
+    ) -> dict:
+        """Run a short acquisition burst to validate sync quality before a real recording.
+
+        No video or JSON files are written. Returns a dict with validation results.
+        Cameras must already be configured via configure_cameras().
+        """
+        ptp_offsets = self._read_ptp_offsets()
+        camera_temperatures = self._read_camera_temperatures()
+
+        self.start_acquisition(
+            recording_path=None,
+            preview_callback=None,
+            max_frames=n_frames,
+            diagnostics_level=1,
+            timespread_alert_threshold_ms=timespread_threshold_ms,
+        )
+
+        alerts = self.get_timespread_alerts()
+        passed = alerts["count"] == 0
+
+        return {
+            "passed": passed,
+            "n_frames": n_frames,
+            "max_timespread_ms": alerts["max_spread_ms"],
+            "timespread_alert_count": alerts["count"],
+            "ptp_offsets": ptp_offsets,
+            "camera_temperatures": camera_temperatures,
+        }
 
     def stop_acquisition(self):
         self.stop_recording.set()
@@ -1259,7 +1745,9 @@ class FlirRecorder:
             c.DeInit()
             del c  # force release of the handle
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=len(serials)) as executor:
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=len(serials)
+        ) as executor:
             executor.map(reset_cam, serials)
 
         cams.Clear()
@@ -1287,7 +1775,9 @@ class FlirRecorder:
                 c.close()
                 del c
 
-            with concurrent.futures.ThreadPoolExecutor(max_workers=len(self.cams)) as executor:
+            with concurrent.futures.ThreadPoolExecutor(
+                max_workers=len(self.cams)
+            ) as executor:
                 executor.map(close_cam, self.cams)
 
         self.cams = []
@@ -1317,11 +1807,21 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Record video from GigE FLIR cameras")
     parser.add_argument("vid_file", help="Video file to write")
-    parser.add_argument("-m", "--max_frames", type=int, default=1000, help="Maximum frames to record")
-    parser.add_argument("-n", "--num_cams", type=int, default=4, help="Number of input cameras")
-    parser.add_argument("-r", "--reset", default=False, action="store_true", help="Reset cameras first")
     parser.add_argument(
-        "-p", "--preview", default=False, action="store_true", help="Allow real-time visualization of video"
+        "-m", "--max_frames", type=int, default=1000, help="Maximum frames to record"
+    )
+    parser.add_argument(
+        "-n", "--num_cams", type=int, default=4, help="Number of input cameras"
+    )
+    parser.add_argument(
+        "-r", "--reset", default=False, action="store_true", help="Reset cameras first"
+    )
+    parser.add_argument(
+        "-p",
+        "--preview",
+        default=False,
+        action="store_true",
+        help="Allow real-time visualization of video",
     )
     parser.add_argument(
         "-s",
@@ -1330,12 +1830,16 @@ if __name__ == "__main__":
         default=0.5,
         help="Ratio to use for scaling the real-time visualization output (should be a float between 0 and 1)",
     )
-    parser.add_argument("-c", "--config", default="", type=str, help="Path to a config.yaml file")
+    parser.add_argument(
+        "-c", "--config", default="", type=str, help="Path to a config.yaml file"
+    )
     args = parser.parse_args()
 
     print(args.config)
     acquisition = FlirRecorder()
-    asyncio.run(acquisition.configure_cameras(config_file=args.config, num_cams=args.num_cams))
+    asyncio.run(
+        acquisition.configure_cameras(config_file=args.config, num_cams=args.num_cams)
+    )
 
     print(asyncio.run(acquisition.get_camera_status()))
 
