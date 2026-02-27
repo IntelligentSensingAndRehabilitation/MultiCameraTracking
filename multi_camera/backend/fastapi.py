@@ -7,6 +7,9 @@ from fastapi import (
     WebSocketDisconnect,
     HTTPException,
     Query,
+    UploadFile,
+    File,
+    Form,
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
@@ -17,7 +20,7 @@ from websockets.exceptions import ConnectionClosedOK
 from datetime import date
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
-from typing import List, Dict
+from typing import List, Dict, Optional
 from dataclasses import dataclass, field
 import numpy as np
 import logging
@@ -27,11 +30,13 @@ import cv2
 import os
 import asyncio
 import shutil
+import re
 
 from multi_camera.acquisition.flir_recording_api import FlirRecorder, CameraStatus
 from multi_camera.backend.recording_db import (
     get_db,
     add_recording,
+    add_photo,
     get_recordings,
     modify_recording_entry,
     synchronize_to_datajoint,
@@ -165,6 +170,7 @@ def get_disk_space_info(path: str) -> Dict:
         }
 
 
+
 print(CONFIG_PATH)
 config_files = os.listdir(CONFIG_PATH)
 print(config_files)
@@ -288,6 +294,19 @@ class PriorRecordings(BaseModel):
     timestamp_spread: float
 
 
+class ImageUploadResponse(BaseModel):
+    saved_path: str
+    original_filename: str
+    saved_filename: str
+    file_size_mb: float
+    description: Optional[str] = None
+    timestamp: datetime.datetime
+    disk_space_gb_remaining: float
+    disk_space_percent_remaining: float
+    disk_space_warning: bool
+    disk_space_total_gb: float
+
+
 @api_router.get("/camera_status", response_model=List[CameraStatus])
 async def get_camera_status() -> List[CameraStatus]:
     state = get_global_state()
@@ -332,6 +351,97 @@ async def get_session() -> Session:
     if state.current_session is None:
         raise HTTPException(status_code=404, detail="No current session")
     return state.current_session
+
+
+ALLOWED_IMAGE_TYPES = {'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/bmp', 'image/webp'}
+MAX_UPLOAD_SIZE_MB = 25
+
+
+@api_router.post("/upload_image", response_model=ImageUploadResponse)
+async def upload_image(
+    file: UploadFile = File(...),
+    description: Optional[str] = Form(None),
+    db=Depends(db_dependency),
+) -> ImageUploadResponse:
+    """
+    Upload a patient identification image for the current session.
+
+    Images are stored in the session's images/ subdirectory.
+
+    Args:
+        file: The image file to upload (multipart/form-data)
+        description: Optional label for the image (e.g., "front view")
+    """
+    state: GlobalState = get_global_state()
+    if state.current_session is None:
+        raise HTTPException(status_code=404, detail="No active session. Create a session before uploading images.")
+
+    current_session = state.current_session
+
+    if file.content_type not in ALLOWED_IMAGE_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid file type: {file.content_type}. Allowed types: JPEG, PNG, GIF, BMP, WebP",
+        )
+
+    file_content = await file.read()
+    file_size_mb = len(file_content) / (1024 * 1024)
+
+    if file_size_mb > MAX_UPLOAD_SIZE_MB:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File too large: {file_size_mb:.1f}MB. Maximum size: {MAX_UPLOAD_SIZE_MB}MB",
+        )
+
+    images_dir = os.path.join(current_session.recording_path, "images")
+    os.makedirs(images_dir, exist_ok=True)
+
+    timestamp = datetime.datetime.now()
+    time_str = timestamp.strftime("%Y%m%d_%H%M%S")
+    original_filename = file.filename or "uploaded_image.jpg"
+    safe_filename = re.sub(r'[^a-zA-Z0-9._-]', '_', os.path.basename(original_filename))
+    if not safe_filename or safe_filename.startswith('.'):
+        safe_filename = "uploaded_image.jpg"
+    saved_filename = f"{time_str}_{safe_filename}"
+    saved_path = os.path.join(images_dir, saved_filename)
+
+    with open(saved_path, "wb") as f:
+        f.write(file_content)
+
+    add_photo(
+        db,
+        participant_name=current_session.participant_name,
+        session_date=current_session.session_date,
+        session_path=current_session.recording_path,
+        filename=saved_filename,
+        original_filename=original_filename,
+        saved_path=saved_path,
+        file_size_mb=round(file_size_mb, 3),
+        upload_timestamp=timestamp,
+        description=description,
+    )
+
+    acquisition_logger.info(
+        f"Image saved: {saved_filename} ({file_size_mb:.2f}MB) "
+        f"for session {current_session.participant_name}/{current_session.session_date}"
+    )
+
+    disk_info = get_disk_space_info(DATA_VOLUME)
+    if disk_info["disk_space_warning"]:
+        acquisition_logger.warning(
+            f"Low disk space after image upload: {disk_info['disk_space_percent_remaining']}% remaining "
+            f"({disk_info['disk_space_gb_remaining']} GB)"
+        )
+
+    return ImageUploadResponse(
+        saved_path=saved_path,
+        original_filename=original_filename,
+        saved_filename=saved_filename,
+        file_size_mb=round(file_size_mb, 3),
+        description=description,
+        timestamp=timestamp,
+        **disk_info,
+    )
 
 
 @api_router.get("/status")
@@ -748,11 +858,12 @@ async def receive_frames(frames):
 
 # @api_router.get("/video")
 async def video_endpoint():
+    state: GlobalState = get_global_state()
     async def generate_frames():
         while True:
             # Wait for the next frame to become available
             try:
-                frame = await asyncio.wait_for(preview_queue.get(), timeout=2.5)
+                frame = await asyncio.wait_for(state.preview_queue.get(), timeout=2.5)
                 print("Received JPEG")
             except asyncio.TimeoutError:
                 # TODO: if uvicorn lifecycle let us check a flag knowing that shutdown was in process then
