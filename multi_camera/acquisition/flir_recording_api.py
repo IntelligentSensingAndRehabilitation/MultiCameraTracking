@@ -855,7 +855,7 @@ class FlirRecorder:
             pf for pf in pixel_formats if pf not in self.pixel_format_conversion
         ]
         # Ensure the pixel format is present in pixel_format_conversion
-        assert not unrecognized, f"Unrecognized pixel format(s): {pixel_format}"
+        assert not unrecognized, f"Unrecognized pixel format(s): {unrecognized}"
 
         self.set_status("Idle")
 
