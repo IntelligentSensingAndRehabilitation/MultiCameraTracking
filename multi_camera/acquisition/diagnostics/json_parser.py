@@ -148,7 +148,7 @@ def load_trial(json_path: Path, trial_index: int) -> TrialSyncMetrics:
     serial_data_delta: NDArray[np.int64] | None = None
     if "chunk_serial_data" in data and data["chunk_serial_data"]:
         raw = np.array(data["chunk_serial_data"], dtype=np.int64)
-        if raw.size > 0:
+        if raw.size > 0 and raw.shape[1] == len(camera_ids):
             serial_data_delta = raw[:, 1:] - raw[:, :1]
 
     recording_timestamp = extract_recording_timestamp(json_path)
@@ -190,9 +190,8 @@ def load_trial(json_path: Path, trial_index: int) -> TrialSyncMetrics:
         "camera_temperature_start"
     )
     camera_temperature_end: dict[str, float] | None = data.get("camera_temperature_end")
-    timespread_alerts: dict | None = data.get("timespread_alerts")
-    sync_timeout_events: list[dict] | None = data.get("sync_timeout_events")
-    # Coerce empty list to None so callers can use truthiness checks consistently
+    timespread_alerts: dict | None = data.get("timespread_alerts") or None
+    sync_timeout_events: list[dict] | None = data.get("sync_timeout_events") or None
     frame_skip_events: list[dict] | None = data.get("frame_skip_events") or None
     ptp_jump_events: list[dict] | None = data.get("ptp_jump_events") or None
 
@@ -785,7 +784,7 @@ def diagnose_sync_issues(report: SessionSyncReport) -> list[str]:
                     f"Trial {t.trial_index}: Camera {cam} was sync bottleneck on {count}/{n_waited} waited frames"
                 )
 
-    # 7. Queue depth spikes: any camera queue exceeding depth 10
+    # 6. Queue depth spikes: any camera queue exceeding depth 10
     for t in report.trials:
         if not t.has_diagnostics or t.queue_depths is None:
             continue
@@ -806,7 +805,7 @@ def diagnose_sync_issues(report: SessionSyncReport) -> list[str]:
                 f"→ metadata thread falling behind acquisition"
             )
 
-    # 8. Frame-ID misalignment persistence: consecutive nonzero cross-delta
+    # 7. Frame-ID misalignment persistence: consecutive nonzero cross-delta
     for t in report.trials:
         if not t.has_diagnostics or t.frame_id_cross_delta is None:
             continue
@@ -839,7 +838,7 @@ def diagnose_sync_issues(report: SessionSyncReport) -> list[str]:
             f"longest consecutive run of {longest_run} frames starting at frame {longest_run_start}"
         )
 
-    # 9. Per-camera error rates
+    # 8. Per-camera error rates
     for t in report.trials:
         if not t.has_diagnostics or t.camera_error_summary is None:
             continue
@@ -869,7 +868,7 @@ def diagnose_sync_issues(report: SessionSyncReport) -> list[str]:
                     f"{', '.join(parts)} ({rate:.1f}% error rate)"
                 )
 
-    # 10. Camera stream stats: dropped frames at device/network level
+    # 9. Camera stream stats: dropped frames at device/network level
     for t in report.trials:
         if not t.has_diagnostics or t.camera_stream_stats is None:
             continue
@@ -886,7 +885,7 @@ def diagnose_sync_issues(report: SessionSyncReport) -> list[str]:
                     f"Trial {t.trial_index}: Camera {cam} {', '.join(parts)} at device/network level"
                 )
 
-    # 11. PTP offset drift: significant change between recording start and end
+    # 10. PTP offset drift: significant change between recording start and end
     for t in report.trials:
         if t.ptp_offset_start is None or t.ptp_offset_end is None:
             continue
@@ -902,7 +901,7 @@ def diagnose_sync_issues(report: SessionSyncReport) -> list[str]:
                     f"(start={start_ns} ns, end={end_ns} ns)"
                 )
 
-    # 12. Camera temperature increase: flag if temperature rose >5°C
+    # 11. Camera temperature increase: flag if temperature rose >5°C
     for t in report.trials:
         if t.camera_temperature_start is None or t.camera_temperature_end is None:
             continue
@@ -918,7 +917,7 @@ def diagnose_sync_issues(report: SessionSyncReport) -> list[str]:
                     f"({start_temp:.1f}→{end_temp:.1f}°C)"
                 )
 
-    # 13. Sync timeout events
+    # 12. Sync timeout events
     for t in report.trials:
         if not t.sync_timeout_events:
             continue
@@ -931,7 +930,7 @@ def diagnose_sync_issues(report: SessionSyncReport) -> list[str]:
             f"stalled cameras: {', '.join(sorted(cameras_involved))}"
         )
 
-    # 14. Timespread alerts summary
+    # 13. Timespread alerts summary
     for t in report.trials:
         if t.timespread_alerts is None or t.timespread_alerts.get("count", 0) == 0:
             continue
@@ -942,7 +941,7 @@ def diagnose_sync_issues(report: SessionSyncReport) -> list[str]:
             f"frames {alerts['first_frame']}-{alerts['last_frame']}"
         )
 
-    # 15. NIC rx_dropped increase during recording
+    # 14. NIC rx_dropped increase during recording
     for t in report.trials:
         if not t.system_snapshots or len(t.system_snapshots) < 2:
             continue
@@ -956,7 +955,7 @@ def diagnose_sync_issues(report: SessionSyncReport) -> list[str]:
                 f"Trial {t.trial_index}: NIC rx_dropped increased by {delta_dropped} during recording"
             )
 
-    # 16. Frame skip events: placeholder insertion or unrecovered skips
+    # 15. Frame skip events: placeholder insertion or unrecovered skips
     for t in report.trials:
         if not t.frame_skip_events:
             continue
@@ -974,7 +973,7 @@ def diagnose_sync_issues(report: SessionSyncReport) -> list[str]:
                 f"at frame {frame_idx} — {action}"
             )
 
-    # 17. PTP timestamp jumps: per-camera clock discontinuities
+    # 16. PTP timestamp jumps: per-camera clock discontinuities
     for t in report.trials:
         threshold_ms = frame_period * TIMESTAMP_JUMP_THRESHOLD_FACTOR
         jumps = detect_timestamp_jumps(t, threshold_ms=threshold_ms)

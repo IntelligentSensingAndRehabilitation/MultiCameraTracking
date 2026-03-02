@@ -1064,7 +1064,7 @@ class FlirRecorder:
         recording_path=None,
         preview_callback: callable = None,
         max_frames: int = 1000,
-        diagnostics_level: int = 0,
+        diagnostics_level: int = 1,
         timespread_alert_threshold_ms: float = 5.0,
         sync_timeout_s: float = 5.0,
         nic_interface: str | None = None,
@@ -1321,26 +1321,34 @@ class FlirRecorder:
                         )
 
                         if self._frame_skip_recovery and gap > 0:
+                            if gap > 10:
+                                tqdm.write(
+                                    f"WARNING: {camera_serial} frame skip gap={gap} "
+                                    f"(frame_id {prev_frame_id}→{frame_id}), "
+                                    f"inserting {gap} placeholders"
+                                )
                             for g in range(gap):
                                 missing_fid = prev_frame_id + 1 + g
 
                                 if (
-                                    current_filename is not None
-                                    and camera_serial in self._frame_shape
+                                    current_filename is None
+                                    or camera_serial not in self._frame_shape
                                 ):
-                                    if camera_serial not in self._zero_frames:
-                                        self._zero_frames[camera_serial] = np.zeros(
-                                            self._frame_shape[camera_serial],
-                                            dtype=self._frame_dtype[camera_serial],
-                                        )
-                                    self.image_queue_dict[camera_serial].put(
-                                        {
-                                            "im": self._zero_frames[camera_serial],
-                                            "real_times": 0,
-                                            "timestamps": 0,
-                                            "base_filename": current_filename,
-                                        }
+                                    continue
+
+                                if camera_serial not in self._zero_frames:
+                                    self._zero_frames[camera_serial] = np.zeros(
+                                        self._frame_shape[camera_serial],
+                                        dtype=self._frame_dtype[camera_serial],
                                     )
+                                self.image_queue_dict[camera_serial].put(
+                                    {
+                                        "im": self._zero_frames[camera_serial],
+                                        "real_times": 0,
+                                        "timestamps": 0,
+                                        "base_filename": current_filename,
+                                    }
+                                )
 
                                 placeholder = {
                                     "image": None,
@@ -1362,8 +1370,7 @@ class FlirRecorder:
                                 error_counters["total_acquired"] += 1
 
                                 if (
-                                    current_filename is not None
-                                    and frame_idx % self.video_segment_len == 0
+                                    frame_idx % self.video_segment_len == 0
                                     and frame_idx != 0
                                 ):
                                     current_filename = self.update_filename(

@@ -46,7 +46,7 @@ This produces:
 
 ### What It Detects
 
-The `diagnose_sync_issues()` function runs 17 detectors:
+The `diagnose_sync_issues()` function runs 16 detectors:
 
 | Detector | What it catches |
 |----------|----------------|
