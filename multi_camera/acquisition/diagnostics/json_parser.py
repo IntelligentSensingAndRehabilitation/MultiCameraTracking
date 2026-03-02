@@ -428,7 +428,8 @@ def _print_acquisition_diagnostics(report: SessionSyncReport, width: int) -> Non
         print()
         print("  Per-Camera Error Summary:")
         print(
-            f"    {'Camera':<20} {'Total':>8} {'Incomplete':>12} {'Exceptions':>12} {'Gaps':>8}"
+            f"    {'Camera':<20} {'Total':>8} {'Incomplete':>12} {'Exceptions':>12}"
+            f" {'ImgNone':>8} {'BadFrame':>9} {'Gaps':>8}"
         )
         all_cameras: set[str] = set()
         for es in error_summaries:
@@ -438,6 +439,8 @@ def _print_acquisition_diagnostics(report: SessionSyncReport, width: int) -> Non
                 "total_acquired": 0,
                 "incomplete_frames": 0,
                 "exceptions": 0,
+                "image_none": 0,
+                "bad_frames": 0,
                 "frame_id_gaps": 0,
             }
             for es in error_summaries:
@@ -446,7 +449,8 @@ def _print_acquisition_diagnostics(report: SessionSyncReport, width: int) -> Non
                         totals[k] += es[cam].get(k, 0)
             print(
                 f"    {cam:<20} {totals['total_acquired']:>8} "
-                f"{totals['incomplete_frames']:>12} {totals['exceptions']:>12} {totals['frame_id_gaps']:>8}"
+                f"{totals['incomplete_frames']:>12} {totals['exceptions']:>12}"
+                f" {totals['image_none']:>8} {totals['bad_frames']:>9} {totals['frame_id_gaps']:>8}"
             )
 
     stream_stats = [t.camera_stream_stats for t in diag_trials if t.camera_stream_stats]
@@ -853,13 +857,26 @@ def diagnose_sync_issues(report: SessionSyncReport) -> list[str]:
             total = counters.get("total_acquired", 0)
             incomplete = counters.get("incomplete_frames", 0)
             exceptions = counters.get("exceptions", 0)
+            image_none = counters.get("image_none", 0)
+            bad_frames = counters.get("bad_frames", 0)
             gaps = counters.get("frame_id_gaps", 0)
-            errors = incomplete + exceptions + gaps
+            errors = incomplete + exceptions + image_none + bad_frames + gaps
             if errors > 0:
                 rate = (errors / total * 100) if total > 0 else 0.0
+                parts = []
+                if incomplete:
+                    parts.append(f"{incomplete} incomplete")
+                if exceptions:
+                    parts.append(f"{exceptions} exceptions")
+                if image_none:
+                    parts.append(f"{image_none} image_none")
+                if bad_frames:
+                    parts.append(f"{bad_frames} bad_frames")
+                if gaps:
+                    parts.append(f"{gaps} gaps")
                 insights.append(
                     f"Trial {t.trial_index}: Camera {cam}: "
-                    f"{incomplete} incomplete, {exceptions} exceptions, {gaps} gaps ({rate:.1f}% error rate)"
+                    f"{', '.join(parts)} ({rate:.1f}% error rate)"
                 )
 
     # 10. Camera stream stats: dropped frames at device/network level
@@ -1248,14 +1265,22 @@ def create_camera_error_figure(report: SessionSyncReport) -> go.Figure | None:
                 aggregated[cam] = {
                     "incomplete_frames": 0,
                     "exceptions": 0,
+                    "image_none": 0,
+                    "bad_frames": 0,
                     "frame_id_gaps": 0,
                 }
             for k in aggregated[cam]:
                 aggregated[cam][k] += counters.get(k, 0)
 
     cameras = sorted(aggregated.keys())
-    error_types = ["incomplete_frames", "exceptions", "frame_id_gaps"]
-    labels = ["Incomplete", "Exceptions", "Frame ID Gaps"]
+    error_types = [
+        "incomplete_frames",
+        "exceptions",
+        "image_none",
+        "bad_frames",
+        "frame_id_gaps",
+    ]
+    labels = ["Incomplete", "Exceptions", "Image None", "Bad Frames", "Frame ID Gaps"]
 
     fig = go.Figure()
     for error_type, label in zip(error_types, labels):

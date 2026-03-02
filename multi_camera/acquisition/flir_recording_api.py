@@ -1203,6 +1203,8 @@ class FlirRecorder:
             serial: {
                 "incomplete_frames": 0,
                 "exceptions": 0,
+                "image_none": 0,
+                "bad_frames": 0,
                 "total_acquired": 0,
                 "frame_id_gaps": 0,
             }
@@ -1250,6 +1252,16 @@ class FlirRecorder:
 
             frame_idx = 0
             prev_frame_id = 0
+            last_error_print: dict[str, float] = {}
+            error_print_interval = 5.0
+
+            def throttled_print(error_type: str, msg: str) -> None:
+                now = time.monotonic()
+                if now - last_error_print.get(error_type, 0.0) >= error_print_interval:
+                    count = error_counters.get(error_type, 0)
+                    suffix = f" (x{count} total)" if count > 1 else ""
+                    tqdm.write(f"{msg}{suffix}")
+                    last_error_print[error_type] = now
 
             current_filename = self.video_base_file
 
@@ -1277,10 +1289,11 @@ class FlirRecorder:
 
                     if im_ref.IsIncomplete():
                         im_stat = im_ref.GetImageStatus()
-                        print(
-                            f"{camera_serial}: Image incomplete\n{PySpin.Image.GetImageStatusDescription(im_stat)}"
-                        )
                         error_counters["incomplete_frames"] += 1
+                        throttled_print(
+                            "incomplete_frames",
+                            f"{camera_serial}: Image incomplete — {PySpin.Image.GetImageStatusDescription(im_stat)}",
+                        )
                         im_ref.Release()
                         continue
 
@@ -1363,18 +1376,16 @@ class FlirRecorder:
                     prev_frame_id = frame_id
 
                 except Exception as e:
-                    print(
-                        f"{e}*************{camera_serial}***************************** FAILED TO GET IMAGE ******************************************"
-                    )
                     error_counters["exceptions"] += 1
+                    throttled_print(
+                        "exceptions", f"{camera_serial}: Failed to get image — {e}"
+                    )
                     time.sleep(0.1)
                     continue
 
-                # Check if the frame is none
                 if im_ref is None:
-                    print(
-                        "############################################### IMAGE IS NONE ******************************************"
-                    )
+                    error_counters["image_none"] += 1
+                    throttled_print("image_none", f"{camera_serial}: Image is None")
                     continue
 
                 try:
@@ -1412,8 +1423,8 @@ class FlirRecorder:
                     self.acquisition_queue[camera_serial].put(frame_data)
 
                 except Exception as e:
-                    print(e)
-                    tqdm.write("Bad frame")
+                    error_counters["bad_frames"] += 1
+                    throttled_print("bad_frames", f"{camera_serial}: Bad frame — {e}")
                     continue
                 finally:
                     # always be sure to release the image reference
