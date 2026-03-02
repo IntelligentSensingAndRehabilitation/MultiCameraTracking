@@ -910,6 +910,31 @@ class TestDetectTimestampJumps:
         assert len(jumps) == 1
         assert jumps[0]["frame_ids_aligned"] is True
 
+    def test_backward_then_forward_paired(self, tmp_path: Path) -> None:
+        """-500ms then +490ms (backward-first) → paired event."""
+        n = 100
+        timestamps = _make_jump_timestamps(
+            n_frames=n,
+            n_cams=3,
+            jump_camera_col=1,
+            jump_frame=30,
+            jump_ms=-500.0,
+            correction_frame=60,
+            correction_ms=490.0,
+        )
+        data = _make_json_data(n_frames=n)
+        data["timestamps"] = timestamps
+        _write_json(tmp_path, data)
+        trial = load_trial(tmp_path / "test_20250101_120000.json", trial_index=0)
+
+        jumps = detect_timestamp_jumps(trial, threshold_ms=trial.frame_period_ms * 10)
+        assert len(jumps) == 1
+        assert jumps[0]["camera"] == "CAM_B"
+        assert jumps[0]["direction"] == "backward"
+        assert jumps[0]["correction_frame"] == 60
+        assert jumps[0]["frames_affected"] == 30
+        assert abs(jumps[0]["residual_ms"] - (-10.0)) < 1.0
+
     def test_no_jump_for_normal_data(self, tmp_path: Path) -> None:
         """Clean data → empty list."""
         data = _make_json_data(n_frames=50)

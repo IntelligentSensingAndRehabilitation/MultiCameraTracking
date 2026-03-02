@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -226,17 +225,9 @@ def load_trial(json_path: Path, trial_index: int) -> TrialSyncMetrics:
     )
 
 
-def _sort_key_for_json(json_path: Path) -> tuple[str, float]:
-    """Return (timestamp_str, mtime) so we sort by timestamp first, mtime as fallback."""
-    try:
-        ts = extract_recording_timestamp(json_path)
-        return (ts, 0.0)
-    except ValueError:
-        print(
-            f"  Warning: cannot parse timestamp from {json_path.name}, falling back to mtime",
-            file=sys.stderr,
-        )
-        return ("", json_path.stat().st_mtime)
+def _sort_key_for_json(json_path: Path) -> str:
+    """Return timestamp string for sorting. Raises if filename doesn't match convention."""
+    return extract_recording_timestamp(json_path)
 
 
 def load_session(data_dir: Path) -> SessionSyncReport:
@@ -461,12 +452,12 @@ def _print_acquisition_diagnostics(report: SessionSyncReport, width: int) -> Non
         for ss in stream_stats:
             all_cameras_ss.update(ss.keys())
         for cam in sorted(all_cameras_ss):
-            parts = []
+            totals: dict[str, int] = {}
             for ss in stream_stats:
                 if cam in ss:
                     for attr, val in ss[cam].items():
-                        if val > 0:
-                            parts.append(f"{attr}={val}")
+                        totals[attr] = totals.get(attr, 0) + val
+            parts = [f"{attr}={val}" for attr, val in totals.items() if val > 0]
             if parts:
                 print(f"    {cam}: {', '.join(parts)}")
 
@@ -585,58 +576,57 @@ def detect_timestamp_jumps(trial: TrialSyncMetrics, threshold_ms: float) -> list
                 )
             raw_events = non_ref_events
 
-    # Pair forward+backward jumps on same camera
+    # Pair opposite-direction jumps on same camera (direction-agnostic: handles
+    # forward-then-backward and backward-then-forward equally).
+    raw_events.sort(key=lambda e: (e["camera"], e["frame"]))
     results: list[dict] = []
     used: set[int] = set()
-    forward_events = [
-        (i, e) for i, e in enumerate(raw_events) if e["direction"] == "forward"
-    ]
-    backward_events = [
-        (i, e) for i, e in enumerate(raw_events) if e["direction"] == "backward"
-    ]
 
-    for fi, fwd in forward_events:
-        if fi in used:
+    for i, evt in enumerate(raw_events):
+        if i in used:
             continue
         best_match: tuple[int, dict] | None = None
-        for bi, bwd in backward_events:
-            if bi in used or bwd["camera"] != fwd["camera"]:
+        for j in range(i + 1, len(raw_events)):
+            if j in used:
                 continue
-            if bwd["frame"] <= fwd["frame"]:
+            candidate = raw_events[j]
+            if candidate["camera"] != evt["camera"]:
+                break
+            if candidate["direction"] == evt["direction"]:
                 continue
-            ratio = abs(bwd["magnitude_ms"]) / abs(fwd["magnitude_ms"])
+            ratio = abs(candidate["magnitude_ms"]) / abs(evt["magnitude_ms"])
             if (
                 1 / TIMESTAMP_JUMP_PAIR_TOLERANCE
                 <= ratio
                 <= TIMESTAMP_JUMP_PAIR_TOLERANCE
             ):
-                if best_match is None or bwd["frame"] < best_match[1]["frame"]:
-                    best_match = (bi, bwd)
+                if best_match is None or candidate["frame"] < best_match[1]["frame"]:
+                    best_match = (j, candidate)
         if best_match is not None:
-            bi, bwd = best_match
-            used.add(fi)
-            used.add(bi)
-            frames_affected = bwd["frame"] - fwd["frame"]
-            residual_ms = fwd["magnitude_ms"] + bwd["magnitude_ms"]
+            j, correction = best_match
+            used.add(i)
+            used.add(j)
+            frames_affected = correction["frame"] - evt["frame"]
+            residual_ms = evt["magnitude_ms"] + correction["magnitude_ms"]
             frame_ids_aligned = True
-            if not fwd["reference_camera_jump"] and fwd["col_idx"] >= 0:
+            if not evt["reference_camera_jump"] and evt["col_idx"] >= 0:
                 affected_fid = trial.frame_id_delta[
-                    fwd["frame"] : bwd["frame"], fwd["col_idx"]
+                    evt["frame"] : correction["frame"], evt["col_idx"]
                 ]
                 if np.any(affected_fid != affected_fid[0]):
                     frame_ids_aligned = False
             results.append(
                 {
-                    "camera": fwd["camera"],
-                    "frame": fwd["frame"],
-                    "magnitude_ms": fwd["magnitude_ms"],
-                    "direction": fwd["direction"],
-                    "correction_frame": bwd["frame"],
-                    "correction_ms": bwd["magnitude_ms"],
+                    "camera": evt["camera"],
+                    "frame": evt["frame"],
+                    "magnitude_ms": evt["magnitude_ms"],
+                    "direction": evt["direction"],
+                    "correction_frame": correction["frame"],
+                    "correction_ms": correction["magnitude_ms"],
                     "frames_affected": frames_affected,
                     "residual_ms": residual_ms,
                     "frame_ids_aligned": frame_ids_aligned,
-                    "reference_camera_jump": fwd["reference_camera_jump"],
+                    "reference_camera_jump": evt["reference_camera_jump"],
                 }
             )
 

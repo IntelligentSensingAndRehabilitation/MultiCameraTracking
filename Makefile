@@ -35,12 +35,12 @@ test:
 # Camera test matrix only (cameras required, long)
 test-matrix:
 	docker compose run --rm --entrypoint pytest test \
-		-s tests/acquisition/test_acquisition.py
+		-s /Mocap/tests/acquisition/test_acquisition.py
 
 # Diagnostics unit tests only (no cameras needed)
 test-diagnostics:
 	docker compose run --rm --entrypoint pytest test \
-		-s tests/acquisition/test_sync_diagnostics.py tests/acquisition/test_system_monitor.py
+		-s /Mocap/tests/acquisition/test_sync_diagnostics.py /Mocap/tests/acquisition/test_system_monitor.py
 
 reset:
 	docker compose run --rm reset
