@@ -78,7 +78,7 @@ When a camera drops frames (frame ID gap), the acquisition system inserts black 
 | `make validate-sync` | Quick pre-recording check | Yes | Pass/fail + timespread stats |
 | `make diag-recording` | Full instrumented test recording | Yes | JSON metadata + video files |
 | `make diag-analyze` | Post-hoc analysis of any recording | No | Terminal report + HTML plots + `sync_report.txt` |
-| `make test-matrix` | Camera connectivity verification | Yes | Camera detection matrix |
+| `make test-matrix` | Stress-test acquisition across camera counts and frame counts | Yes | Pass/fail matrix per configuration |
 
 ### Diagnostics Level
 
