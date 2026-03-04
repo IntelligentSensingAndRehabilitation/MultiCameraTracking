@@ -1055,10 +1055,6 @@ class FlirRecorder:
         self.stop_frame_set.set()
         print("stop_frame", self.stop_frame)
 
-    def get_timespread_alerts(self) -> dict:
-        """Return current timespread alert state. Safe to call from any thread."""
-        return dict(self._timespread_alerts)
-
     def start_acquisition(
         self,
         recording_path=None,
@@ -1719,7 +1715,7 @@ class FlirRecorder:
             timespread_alert_threshold_ms=timespread_threshold_ms,
         )
 
-        alerts = self.get_timespread_alerts()
+        alerts = dict(self._timespread_alerts)
         passed = alerts["count"] == 0
 
         return {

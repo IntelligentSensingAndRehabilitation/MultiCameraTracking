@@ -71,14 +71,26 @@ The `diagnose_sync_issues()` function runs 16 detectors:
 
 When a camera drops frames (frame ID gap), the acquisition system inserts black placeholder frames into both the video and metadata queues to maintain sync alignment. This is controlled by `frame_skip_recovery` (default: on). Skip events are logged in JSON metadata and surfaced in the post-hoc report.
 
+### Choosing the Right Diagnostic Tool
+
+| Tool | When to use | Cameras required | Output |
+|------|------------|-----------------|--------|
+| `make validate-sync` | Quick pre-recording check | Yes | Pass/fail + timespread stats |
+| `make diag-recording` | Full instrumented test recording | Yes | JSON metadata + video files |
+| `make diag-analyze` | Post-hoc analysis of any recording | No | Terminal report + HTML plots + `sync_report.txt` |
+| `make test-matrix` | Camera connectivity verification | Yes | Camera detection matrix |
+
 ### Diagnostics Level
 
-The `diagnostics_level` parameter (default 1) controls instrumentation depth:
+The `diagnostics_level` parameter (default 1) controls instrumentation depth during recording. It is a **per-recording runtime parameter** — not a config file setting.
 
 - **Level 0**: Per-frame sync wait cycles, queue depths, frame ID cross-deltas, bottleneck cameras, camera error counters, stream stats
 - **Level 1**: All of level 0, plus PTP offset sampling, camera temperature monitoring, system monitor (NIC/CPU/disk), timespread alerts, sync timeout detection
 
-Set via the FastAPI `/new_trial` endpoint or `FlirRecorder.start_acquisition(diagnostics_level=...)`.
+How to set it:
+- **FastAPI**: Pass `diagnostics_level` in the `/new_trial` request body
+- **Python**: `FlirRecorder.start_acquisition(diagnostics_level=...)`
+- **React frontend**: Select from the diagnostics level dropdown before starting a recording
 
 ---
 

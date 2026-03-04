@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from dataclasses import dataclass
 from datetime import datetime
+from io import TextIOBase
 from pathlib import Path
 
 import numpy as np
@@ -224,14 +226,9 @@ def load_trial(json_path: Path, trial_index: int) -> TrialSyncMetrics:
     )
 
 
-def _sort_key_for_json(json_path: Path) -> str:
-    """Return timestamp string for sorting. Raises if filename doesn't match convention."""
-    return extract_recording_timestamp(json_path)
-
-
 def load_session(data_dir: Path) -> SessionSyncReport:
     """Load all JSON metadata files in a directory and build a session report."""
-    json_files = sorted(data_dir.glob("*.json"), key=_sort_key_for_json)
+    json_files = sorted(data_dir.glob("*.json"), key=extract_recording_timestamp)
     if not json_files:
         raise FileNotFoundError(f"No JSON files found in {data_dir}")
 
@@ -250,17 +247,23 @@ def load_session(data_dir: Path) -> SessionSyncReport:
     )
 
 
-def print_report(report: SessionSyncReport) -> None:
-    """Print structured sync diagnostics to stdout."""
+def print_report(report: SessionSyncReport, file: TextIOBase | None = None) -> None:
+    """Print structured sync diagnostics. Defaults to stdout when *file* is None."""
+    out = file or sys.stdout
     width = 80
-    print(f"\nSession Sync Diagnostics: {report.data_dir}")
-    print("=" * width)
-    print()
-    print(f"  Trials:    {report.n_trials} files, sorted by recording timestamp")
-    print(f"  Cameras:   {len(report.camera_ids)} (reference: {report.camera_ids[0]})")
-    print(f"  Frames:    {report.total_frames:,} total")
+    print(f"\nSession Sync Diagnostics: {report.data_dir}", file=out)
+    print("=" * width, file=out)
+    print(file=out)
+    print(
+        f"  Trials:    {report.n_trials} files, sorted by recording timestamp", file=out
+    )
+    print(
+        f"  Cameras:   {len(report.camera_ids)} (reference: {report.camera_ids[0]})",
+        file=out,
+    )
+    print(f"  Frames:    {report.total_frames:,} total", file=out)
     consistent_str = "YES" if report.camera_set_consistent else "NO"
-    print(f"  Camera set consistent: {consistent_str}")
+    print(f"  Camera set consistent: {consistent_str}", file=out)
 
     if not report.camera_set_consistent:
         seen: set[tuple[str, ...]] = set()
@@ -268,7 +271,7 @@ def print_report(report: SessionSyncReport) -> None:
             key = tuple(t.camera_ids)
             if key not in seen:
                 seen.add(key)
-                print(f"    Trial {t.trial_index}: {t.camera_ids}")
+                print(f"    Trial {t.trial_index}: {t.camera_ids}", file=out)
 
     frame_period = _estimate_session_frame_period_ms(report)
     threshold_ms = (
@@ -281,11 +284,12 @@ def print_report(report: SessionSyncReport) -> None:
             if jumps:
                 trial_jumps[t.trial_index] = jumps
 
-    print()
-    print("Per-Trial Summary")
-    print("-" * width)
+    print(file=out)
+    print("Per-Trial Summary", file=out)
+    print("-" * width, file=out)
     print(
-        f"  {'Trial':>5}  {'Timestamp':<17}  {'Frames':>6}  {'Max dT (ms)':>11}  {'Mean |dT| (ms)':>14}  Frame ID Drift"
+        f"  {'Trial':>5}  {'Timestamp':<17}  {'Frames':>6}  {'Max dT (ms)':>11}  {'Mean |dT| (ms)':>14}  Frame ID Drift",
+        file=out,
     )
 
     total_jump_frames_excluded = 0
@@ -310,7 +314,8 @@ def print_report(report: SessionSyncReport) -> None:
             total_jump_frames_excluded += excluded
             print(
                 f"  {t.trial_index:>5}  {t.recording_timestamp:<17}  {t.n_frames:>6}"
-                f"  {max_dt:>10.3f}*  {mean_dt:>13.3f}*  {drift_text}"
+                f"  {max_dt:>10.3f}*  {mean_dt:>13.3f}*  {drift_text}",
+                file=out,
             )
             for j in jumps:
                 cam = j["camera"]
@@ -319,18 +324,21 @@ def print_report(report: SessionSyncReport) -> None:
                     n_aff = j["frames_affected"]
                     print(
                         f"         \u21b3 Excl. {n_aff} frames: Camera {cam} PTP jump "
-                        f"({mag:+.0f}ms, self-corrected)"
+                        f"({mag:+.0f}ms, self-corrected)",
+                        file=out,
                     )
                 else:
                     remaining = t.n_frames - j["frame"]
                     print(
                         f"         \u21b3 Excl. {remaining} frames: Camera {cam} PTP jump "
-                        f"({mag:+.0f}ms, not corrected)"
+                        f"({mag:+.0f}ms, not corrected)",
+                        file=out,
                     )
         else:
             print(
                 f"  {t.trial_index:>5}  {t.recording_timestamp:<17}  {t.n_frames:>6}"
-                f"  {t.max_timestamp_spread_ms:>11.3f}  {t.mean_timestamp_spread_ms:>14.3f}  {drift_text}"
+                f"  {t.max_timestamp_spread_ms:>11.3f}  {t.mean_timestamp_spread_ms:>14.3f}  {drift_text}",
+                file=out,
             )
 
     if trial_jumps:
@@ -355,51 +363,68 @@ def print_report(report: SessionSyncReport) -> None:
     )
     has_serial = any(t.serial_data_delta is not None for t in report.trials)
 
-    print()
-    print("Aggregate Statistics")
-    print("-" * width)
+    print(file=out)
+    print("Aggregate Statistics", file=out)
+    print("-" * width, file=out)
     excluded_note = ""
     if total_jump_frames_excluded > 0:
         excluded_note = f"  ({total_jump_frames_excluded} PTP jump frames excluded)"
     print(
         f"  Timestamp delta (ms):  max={np.max(abs_deltas):.3f}  mean={np.mean(abs_deltas):.3f}"
-        f"  std={np.std(abs_deltas):.3f}{excluded_note}"
+        f"  std={np.std(abs_deltas):.3f}{excluded_note}",
+        file=out,
     )
     print(
-        f"  Frame ID drift:        {drift_trials} / {report.n_trials} trials affected"
+        f"  Frame ID drift:        {drift_trials} / {report.n_trials} trials affected",
+        file=out,
     )
     if has_serial:
         print(
-            f"  Serial data drift:     {serial_trials} / {report.n_trials} trials affected"
+            f"  Serial data drift:     {serial_trials} / {report.n_trials} trials affected",
+            file=out,
         )
 
     if frame_period > 0:
         print(
-            f"  Est. frame period:     {frame_period:.2f} ms ({1000.0 / frame_period:.1f} fps)"
+            f"  Est. frame period:     {frame_period:.2f} ms ({1000.0 / frame_period:.1f} fps)",
+            file=out,
         )
 
-    _print_acquisition_diagnostics(report, width)
+    _print_acquisition_diagnostics(report, width, file=out)
 
     insights = diagnose_sync_issues(report)
     if insights:
-        print()
-        print("Diagnostic Insights")
-        print("-" * width)
+        print(file=out)
+        print("Diagnostic Insights", file=out)
+        print("-" * width, file=out)
         for insight in insights:
             for line in insight.split("\n"):
-                print(f"  {line}")
-    print()
+                print(f"  {line}", file=out)
+    print(file=out)
 
 
-def _print_acquisition_diagnostics(report: SessionSyncReport, width: int) -> None:
+def save_report(report: SessionSyncReport, output_dir: Path | None = None) -> Path:
+    """Write the text report to a file and return its path."""
+    dest_dir = output_dir or report.data_dir / "diagnostics"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    report_path = dest_dir / "sync_report.txt"
+    with open(report_path, "w") as f:
+        print_report(report, file=f)
+    return report_path
+
+
+def _print_acquisition_diagnostics(
+    report: SessionSyncReport, width: int, file: TextIOBase | None = None
+) -> None:
     """Print acquisition diagnostics section if any trials have diagnostic data."""
+    out = file or sys.stdout
     diag_trials = [t for t in report.trials if t.has_diagnostics]
     if not diag_trials:
         return
 
-    print()
-    print("Acquisition Diagnostics")
-    print("-" * width)
+    print(file=out)
+    print("Acquisition Diagnostics", file=out)
+    print("-" * width, file=out)
 
     for t in diag_trials:
         waited_frames = (
@@ -408,18 +433,20 @@ def _print_acquisition_diagnostics(report: SessionSyncReport, width: int) -> Non
         print(
             f"  Trial {t.trial_index}: waited frames={waited_frames}, "
             f"max wait cycles={t.max_sync_wait_cycles}, "
-            f"mean wait cycles={t.mean_sync_wait_cycles:.1f}"
+            f"mean wait cycles={t.mean_sync_wait_cycles:.1f}",
+            file=out,
         )
 
     error_summaries = [
         t.camera_error_summary for t in diag_trials if t.camera_error_summary
     ]
     if error_summaries:
-        print()
-        print("  Per-Camera Error Summary:")
+        print(file=out)
+        print("  Per-Camera Error Summary:", file=out)
         print(
             f"    {'Camera':<20} {'Total':>8} {'Incomplete':>12} {'Exceptions':>12}"
-            f" {'ImgNone':>8} {'BadFrame':>9} {'Gaps':>8}"
+            f" {'ImgNone':>8} {'BadFrame':>9} {'Gaps':>8}",
+            file=out,
         )
         all_cameras: set[str] = set()
         for es in error_summaries:
@@ -440,13 +467,14 @@ def _print_acquisition_diagnostics(report: SessionSyncReport, width: int) -> Non
             print(
                 f"    {cam:<20} {totals['total_acquired']:>8} "
                 f"{totals['incomplete_frames']:>12} {totals['exceptions']:>12}"
-                f" {totals['image_none']:>8} {totals['bad_frames']:>9} {totals['frame_id_gaps']:>8}"
+                f" {totals['image_none']:>8} {totals['bad_frames']:>9} {totals['frame_id_gaps']:>8}",
+                file=out,
             )
 
     stream_stats = [t.camera_stream_stats for t in diag_trials if t.camera_stream_stats]
     if stream_stats:
-        print()
-        print("  Camera Stream Stats:")
+        print(file=out)
+        print("  Camera Stream Stats:", file=out)
         all_cameras_ss: set[str] = set()
         for ss in stream_stats:
             all_cameras_ss.update(ss.keys())
@@ -458,47 +486,57 @@ def _print_acquisition_diagnostics(report: SessionSyncReport, width: int) -> Non
                         totals[attr] = totals.get(attr, 0) + val
             parts = [f"{attr}={val}" for attr, val in totals.items() if val > 0]
             if parts:
-                print(f"    {cam}: {', '.join(parts)}")
+                print(f"    {cam}: {', '.join(parts)}", file=out)
 
     monitor_trials = [t for t in diag_trials if (t.diagnostics_version or 0) >= 2]
     if monitor_trials:
-        print()
-        print("  System Monitor & Camera Health:")
+        print(file=out)
+        print("  System Monitor & Camera Health:", file=out)
         for t in monitor_trials:
             if t.ptp_offset_start:
                 print(
-                    f"    Trial {t.trial_index} PTP offsets (start): {t.ptp_offset_start}"
+                    f"    Trial {t.trial_index} PTP offsets (start): {t.ptp_offset_start}",
+                    file=out,
                 )
             if t.ptp_offset_end:
                 print(
-                    f"    Trial {t.trial_index} PTP offsets (end):   {t.ptp_offset_end}"
+                    f"    Trial {t.trial_index} PTP offsets (end):   {t.ptp_offset_end}",
+                    file=out,
                 )
             if t.camera_temperature_start:
                 temps = {c: f"{v:.1f}°C" for c, v in t.camera_temperature_start.items()}
-                print(f"    Trial {t.trial_index} temperatures (start): {temps}")
+                print(
+                    f"    Trial {t.trial_index} temperatures (start): {temps}", file=out
+                )
             if t.camera_temperature_end:
                 temps = {c: f"{v:.1f}°C" for c, v in t.camera_temperature_end.items()}
-                print(f"    Trial {t.trial_index} temperatures (end):   {temps}")
+                print(
+                    f"    Trial {t.trial_index} temperatures (end):   {temps}", file=out
+                )
             if t.system_snapshots:
                 print(
-                    f"    Trial {t.trial_index}: {len(t.system_snapshots)} system snapshots recorded"
+                    f"    Trial {t.trial_index}: {len(t.system_snapshots)} system snapshots recorded",
+                    file=out,
                 )
             if t.sync_timeout_events:
                 print(
-                    f"    Trial {t.trial_index}: {len(t.sync_timeout_events)} sync timeout event(s)"
+                    f"    Trial {t.trial_index}: {len(t.sync_timeout_events)} sync timeout event(s)",
+                    file=out,
                 )
             if t.timespread_alerts and t.timespread_alerts.get("count", 0) > 0:
                 a = t.timespread_alerts
                 print(
                     f"    Trial {t.trial_index}: {a['count']} timespread alert(s), "
-                    f"max {a['max_spread_ms']:.3f} ms"
+                    f"max {a['max_spread_ms']:.3f} ms",
+                    file=out,
                 )
             if t.frame_skip_events:
                 n_recovered = sum(1 for e in t.frame_skip_events if e["recovered"])
                 n_total = len(t.frame_skip_events)
                 print(
                     f"    Trial {t.trial_index}: {n_total} frame skip event(s), "
-                    f"{n_recovered} recovered"
+                    f"{n_recovered} recovered",
+                    file=out,
                 )
 
 
@@ -1349,6 +1387,9 @@ def main(argv: list[str] | None = None) -> SessionSyncReport:
 
     report = load_session(data_dir)
     print_report(report)
+
+    report_path = save_report(report, output_dir=args.output_dir)
+    print(f"  Saved: {report_path}")
 
     if not args.no_plots:
         saved = save_figures(

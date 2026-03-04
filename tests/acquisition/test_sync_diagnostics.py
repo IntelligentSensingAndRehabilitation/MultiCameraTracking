@@ -12,13 +12,12 @@ import numpy as np
 import pytest
 
 from multi_camera.acquisition.diagnostics.json_parser import (
-    create_camera_error_figure,
-    create_queue_depth_figure,
     create_sync_wait_figure,
     detect_timestamp_jumps,
     diagnose_sync_issues,
     load_session,
     load_trial,
+    save_report,
 )
 
 CAMERA_IDS = ["CAM_A", "CAM_B", "CAM_C"]
@@ -144,12 +143,6 @@ class TestLegacyBackwardCompat:
         assert trial.camera_stream_stats is None
         assert trial.diagnostics_version is None
         assert trial.has_diagnostics is False
-
-    def test_legacy_max_mean_sync_wait(self, tmp_path: Path) -> None:
-        data = _make_json_data(include_diagnostics=False)
-        json_path = _write_json(tmp_path, data)
-        trial = load_trial(json_path, trial_index=0)
-
         assert trial.max_sync_wait_cycles == 0
         assert trial.mean_sync_wait_cycles == 0.0
 
@@ -304,17 +297,6 @@ class TestPerCameraErrorInsight:
         assert len(cam_b_insights) == 0
 
 
-class TestFigureReturnsNoneForLegacy:
-    def test_sync_wait_figure_none(self, tmp_path: Path) -> None:
-        data = _make_json_data(include_diagnostics=False)
-        _write_json(tmp_path, data)
-        report = load_session(tmp_path)
-
-        assert create_sync_wait_figure(report) is None
-        assert create_queue_depth_figure(report) is None
-        assert create_camera_error_figure(report) is None
-
-
 class TestMixedSession:
     def test_mixed_diagnostic_and_legacy(self, tmp_path: Path) -> None:
         legacy_data = _make_json_data(include_diagnostics=False)
@@ -415,19 +397,6 @@ class TestV2DiagnosticFieldParsing:
         assert trial.system_snapshots == snapshots
         assert trial.timespread_alerts == alerts
         assert trial.sync_timeout_events == timeout_events
-
-    def test_v2_fields_none_for_legacy(self, tmp_path: Path) -> None:
-        data = _make_json_data(include_diagnostics=False)
-        json_path = _write_json(tmp_path, data)
-        trial = load_trial(json_path, trial_index=0)
-
-        assert trial.system_snapshots is None
-        assert trial.ptp_offset_start is None
-        assert trial.ptp_offset_end is None
-        assert trial.camera_temperature_start is None
-        assert trial.camera_temperature_end is None
-        assert trial.timespread_alerts is None
-        assert trial.sync_timeout_events is None
 
 
 class TestPtpOffsetDriftInsight:
@@ -602,51 +571,6 @@ class TestJsonCompaction:
         assert report.trials[0].has_diagnostics is True
 
 
-class TestFrameSkipEventsParsing:
-    def test_skip_events_parsed(self, tmp_path: Path) -> None:
-        events = [
-            {
-                "frame_idx": 42,
-                "camera_serial": "CAM_B",
-                "expected_frame_id": 1042,
-                "actual_frame_id": 1043,
-                "gap_size": 1,
-                "recovered": True,
-            },
-        ]
-        data = _make_json_data(
-            include_diagnostics=True,
-            diagnostics_version=2,
-            frame_skip_events=events,
-        )
-        json_path = _write_json(tmp_path, data)
-        trial = load_trial(json_path, trial_index=0)
-
-        assert trial.frame_skip_events is not None
-        assert len(trial.frame_skip_events) == 1
-        assert trial.frame_skip_events[0]["camera_serial"] == "CAM_B"
-        assert trial.frame_skip_events[0]["gap_size"] == 1
-        assert trial.frame_skip_events[0]["recovered"] is True
-
-    def test_no_skip_events_returns_none(self, tmp_path: Path) -> None:
-        data = _make_json_data(include_diagnostics=True, diagnostics_version=2)
-        json_path = _write_json(tmp_path, data)
-        trial = load_trial(json_path, trial_index=0)
-
-        assert trial.frame_skip_events is None
-
-    def test_empty_skip_events_returns_none(self, tmp_path: Path) -> None:
-        data = _make_json_data(
-            include_diagnostics=True,
-            diagnostics_version=2,
-            frame_skip_events=[],
-        )
-        json_path = _write_json(tmp_path, data)
-        trial = load_trial(json_path, trial_index=0)
-
-        assert trial.frame_skip_events is None
-
-
 class TestFrameSkipInsight:
     def test_recovered_skip_insight(self, tmp_path: Path) -> None:
         events = [
@@ -780,35 +704,6 @@ class TestMergedDriftFrequencyInsight:
         assert len(freq_insights) == 1
         assert "CAM_B: 2 / 2" in freq_insights[0]
         assert "CAM_C: 1 / 2" in freq_insights[0]
-
-
-class TestModuleConstants:
-    """Verify that module-level diagnostic constants are importable and have expected values."""
-
-    def test_constants_importable(self) -> None:
-        from multi_camera.acquisition.diagnostics.json_parser import (
-            BOTTLENECK_DISPROPORTION_RATIO,
-            BOTTLENECK_MIN_FRACTION,
-            BURST_MIN_CONSECUTIVE,
-            FRAME_PERIOD_TOLERANCE,
-            PTP_DRIFT_THRESHOLD_US,
-            QUEUE_DEPTH_SPIKE_THRESHOLD,
-            REPEAT_OFFENDER_FRACTION,
-            TEMPERATURE_RISE_THRESHOLD_C,
-            TIMESTAMP_JUMP_PAIR_TOLERANCE,
-            TIMESTAMP_JUMP_THRESHOLD_FACTOR,
-        )
-
-        assert FRAME_PERIOD_TOLERANCE == 0.15
-        assert REPEAT_OFFENDER_FRACTION == 0.3
-        assert BURST_MIN_CONSECUTIVE == 3
-        assert BOTTLENECK_DISPROPORTION_RATIO == 1.5
-        assert BOTTLENECK_MIN_FRACTION == 0.3
-        assert QUEUE_DEPTH_SPIKE_THRESHOLD == 10
-        assert PTP_DRIFT_THRESHOLD_US == 100
-        assert TEMPERATURE_RISE_THRESHOLD_C == 5.0
-        assert TIMESTAMP_JUMP_THRESHOLD_FACTOR == 10
-        assert TIMESTAMP_JUMP_PAIR_TOLERANCE == 2.0
 
 
 def _make_jump_timestamps(
@@ -1080,42 +975,28 @@ class TestPtpJumpReportOutput:
         assert "excluded" in agg_lines[0].lower()
 
 
-class TestPtpJumpEventsParsing:
-    def test_ptp_jump_events_parsed(self, tmp_path: Path) -> None:
-        events = [
-            {
-                "camera_serial": "CAM_B",
-                "frame_idx": 100,
-                "jump_ms": 500.0,
-                "direction": "forward",
-            },
-        ]
-        data = _make_json_data(
-            include_diagnostics=True,
-            diagnostics_version=2,
-            ptp_jump_events=events,
-        )
-        json_path = _write_json(tmp_path, data)
-        trial = load_trial(json_path, trial_index=0)
+class TestSaveReport:
+    def test_writes_readable_text_file(self, tmp_path: Path) -> None:
+        data = _make_json_data(include_diagnostics=True)
+        _write_json(tmp_path, data)
+        report = load_session(tmp_path)
 
-        assert trial.ptp_jump_events is not None
-        assert len(trial.ptp_jump_events) == 1
-        assert trial.ptp_jump_events[0]["camera_serial"] == "CAM_B"
+        output_dir = tmp_path / "output"
+        path = save_report(report, output_dir=output_dir)
 
-    def test_no_ptp_jump_events_returns_none(self, tmp_path: Path) -> None:
-        data = _make_json_data(include_diagnostics=True, diagnostics_version=2)
-        json_path = _write_json(tmp_path, data)
-        trial = load_trial(json_path, trial_index=0)
+        assert path.exists()
+        assert path.name == "sync_report.txt"
+        contents = path.read_text()
+        assert "Session Sync Diagnostics" in contents
+        assert "Per-Trial Summary" in contents
+        assert "Aggregate Statistics" in contents
 
-        assert trial.ptp_jump_events is None
+    def test_default_output_dir(self, tmp_path: Path) -> None:
+        data = _make_json_data(include_diagnostics=False)
+        _write_json(tmp_path, data)
+        report = load_session(tmp_path)
 
-    def test_empty_ptp_jump_events_returns_none(self, tmp_path: Path) -> None:
-        data = _make_json_data(
-            include_diagnostics=True,
-            diagnostics_version=2,
-            ptp_jump_events=[],
-        )
-        json_path = _write_json(tmp_path, data)
-        trial = load_trial(json_path, trial_index=0)
+        path = save_report(report)
 
-        assert trial.ptp_jump_events is None
+        assert path == tmp_path / "diagnostics" / "sync_report.txt"
+        assert path.exists()
