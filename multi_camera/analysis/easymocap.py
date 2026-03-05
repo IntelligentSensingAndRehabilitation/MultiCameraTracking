@@ -72,15 +72,15 @@ def mvmp_association_and_tracking(
             [
                 {
                     "id": -1,
-                    "keypoints3d": v.keypoints3d,
-                    "bbox": v.bbox,
+                    "keypoints3d": v.keypoints3d.copy(),
+                    "bbox": v.bbox.copy(),
                     "Vused": v.Vused,
                     "num_views": len(v.Vused),
-                    "kptsRepro": v.kptsRepro,
                 }
                 for k, v in group.items()
             ]
         )
+        del affinity, dimGroups, images, annots
 
     tracker = Track3D(
         with2d=False, WINDOW_SIZE=12, MIN_FRAMES=30, SMOOTH_SIZE=5, out=None, path=None

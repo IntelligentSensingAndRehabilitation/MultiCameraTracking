@@ -56,6 +56,9 @@ def _try_tracking_configs(dataset, tracking_fn) -> TrackingResult:
                     f"Config {i + 1}/{len(TRACKING_CONFIGS)} produced 0 tracks, trying next..."
                 )
                 failures.append("0_tracks")
+                del results
+                gc.collect()
+                libc.malloc_trim(0)
                 continue
             return TrackingResult(results, num_tracks, config_path, failures)
         except np.linalg.LinAlgError:
