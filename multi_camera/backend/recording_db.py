@@ -1,3 +1,5 @@
+import os
+
 from sqlalchemy import create_engine, Boolean, Column, Float, Integer, String, Date, DateTime, ForeignKey
 from sqlalchemy.orm import relationship, declarative_base, joinedload
 from typing import Union, Tuple, List, Optional
@@ -284,6 +286,24 @@ def modify_recording_entry(db: Session, participant: ParticipantOut, updated_rec
     recording.should_process = updated_recording.should_process
 
     # commit the changes
+    db.commit()
+
+
+def rename_recording_entry(db: Session, participant_name: str, old_filename: str, new_filename: str):
+    """Rename a recording: update the filename in the database and rename the directory on disk."""
+    query = db.query(Recording).join(Session).join(Participant)
+    query = query.filter(Participant.name == participant_name)
+    query = query.filter(Recording.filename == old_filename)
+
+    recording = query.first()
+    if recording is None:
+        raise ValueError(f"Recording not found: participant={participant_name}, filename={old_filename}")
+
+    # Rename directory on disk if it exists
+    if os.path.exists(old_filename):
+        os.rename(old_filename, new_filename)
+
+    recording.filename = new_filename
     db.commit()
 
 
