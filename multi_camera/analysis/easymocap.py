@@ -74,7 +74,7 @@ def mvmp_association_and_tracking(
                     "id": -1,
                     "keypoints3d": v.keypoints3d.copy(),
                     "bbox": v.bbox.copy(),
-                    "Vused": v.Vused,
+                    "Vused": v.Vused.copy(),
                     "num_views": len(v.Vused),
                 }
                 for k, v in group.items()
