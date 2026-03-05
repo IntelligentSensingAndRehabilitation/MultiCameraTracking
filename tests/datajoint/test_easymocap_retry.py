@@ -57,29 +57,28 @@ class TestTryTrackingConfigs:
         result = _try_tracking_configs(dataset, tracking_fn)
 
         assert tracking_fn.call_count == 2
-        results, num_tracks, config_path = result
-        assert num_tracks == 2
-        assert config_path == "config_b.yml"
+        assert result.results is not None
+        assert result.num_tracks == 2
+        assert result.config_path == "config_b.yml"
+        assert result.failures == ["0_tracks"]
 
-    def test_all_configs_zero_tracks_returns_none_with_failures(self, dataset):
+    def test_all_configs_zero_tracks(self, dataset):
         tracking_fn = MagicMock(return_value=_make_empty_results())
         result = _try_tracking_configs(dataset, tracking_fn)
 
         assert tracking_fn.call_count == 2
-        none_val, failures = result
-        assert none_val is None
-        assert failures == ["0_tracks", "0_tracks"]
+        assert result.results is None
+        assert result.failures == ["0_tracks", "0_tracks"]
 
-    def test_all_svd_errors_returns_svd_failures(self, dataset):
+    def test_all_svd_errors(self, dataset):
         tracking_fn = MagicMock(
             side_effect=np.linalg.LinAlgError("SVD did not converge")
         )
         result = _try_tracking_configs(dataset, tracking_fn)
 
         assert tracking_fn.call_count == 2
-        none_val, failures = result
-        assert none_val is None
-        assert failures == ["SVD_convergence", "SVD_convergence"]
+        assert result.results is None
+        assert result.failures == ["SVD_convergence", "SVD_convergence"]
 
     def test_mixed_failures_uses_first_success(self, dataset):
         with patch(f"{MODULE}.TRACKING_CONFIGS", ["a.yml", "b.yml", "c.yml"]):
@@ -93,11 +92,12 @@ class TestTryTrackingConfigs:
             result = _try_tracking_configs(dataset, tracking_fn)
 
         assert tracking_fn.call_count == 3
-        results, num_tracks, config_path = result
-        assert num_tracks == 1
-        assert config_path == "c.yml"
+        assert result.results is not None
+        assert result.num_tracks == 1
+        assert result.config_path == "c.yml"
+        assert result.failures == ["SVD_convergence", "0_tracks"]
 
-    def test_all_mixed_failures_returns_mixed_failure_list(self, dataset):
+    def test_all_mixed_failures(self, dataset):
         tracking_fn = MagicMock(
             side_effect=[
                 np.linalg.LinAlgError("SVD did not converge"),
@@ -107,15 +107,15 @@ class TestTryTrackingConfigs:
         result = _try_tracking_configs(dataset, tracking_fn)
 
         assert tracking_fn.call_count == 2
-        none_val, failures = result
-        assert none_val is None
-        assert failures == ["SVD_convergence", "0_tracks"]
+        assert result.results is None
+        assert result.failures == ["SVD_convergence", "0_tracks"]
 
     def test_first_config_succeeds(self, dataset):
         tracking_fn = MagicMock(return_value=_make_results_with_ids([0, 1, 2]))
         result = _try_tracking_configs(dataset, tracking_fn)
 
         assert tracking_fn.call_count == 1
-        results, num_tracks, config_path = result
-        assert num_tracks == 3
-        assert config_path == "config_a.yml"
+        assert result.results is not None
+        assert result.num_tracks == 3
+        assert result.config_path == "config_a.yml"
+        assert result.failures == []

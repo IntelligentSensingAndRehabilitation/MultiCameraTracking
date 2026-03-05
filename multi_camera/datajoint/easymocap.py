@@ -1,4 +1,5 @@
 import os
+from typing import NamedTuple
 
 import yaml
 import numpy as np
@@ -31,8 +32,15 @@ def _load_config_settings(config_path):
         return yaml.safe_load(f)
 
 
-def _try_tracking_configs(dataset, tracking_fn):
-    """Try each tracking config, returning (results, num_tracks, config_path) on success or (None, failures)."""
+class TrackingResult(NamedTuple):
+    results: list | None
+    num_tracks: int
+    config_path: str | None
+    failures: list[str]
+
+
+def _try_tracking_configs(dataset, tracking_fn) -> TrackingResult:
+    """Try each tracking config in the fallback chain."""
     import ctypes
     import gc
 
@@ -49,7 +57,7 @@ def _try_tracking_configs(dataset, tracking_fn):
                 )
                 failures.append("0_tracks")
                 continue
-            return results, num_tracks, config_path
+            return TrackingResult(results, num_tracks, config_path, failures)
         except np.linalg.LinAlgError:
             print(
                 f"Config {i + 1}/{len(TRACKING_CONFIGS)} failed with LinAlgError, trying next..."
@@ -59,7 +67,7 @@ def _try_tracking_configs(dataset, tracking_fn):
             libc.malloc_trim(0)
             continue
 
-    return None, failures
+    return TrackingResult(None, 0, None, failures)
 
 
 # Hardcoding a selected method
@@ -263,15 +271,13 @@ class EasymocapTracking(dj.Computed):
         dataset = MCTDataset(key)
         result = _try_tracking_configs(dataset, mvmp_association_and_tracking)
 
-        if len(result) == 3:
-            results, num_tracks, config_path = result
-            key["tracking_results"] = results
-            key["num_tracks"] = num_tracks
-            key["tracking_config"] = _load_config_settings(config_path)
+        if result.results is not None:
+            key["tracking_results"] = result.results
+            key["num_tracks"] = result.num_tracks
+            key["tracking_config"] = _load_config_settings(result.config_path)
             self.insert1(key)
         else:
-            _, failures = result
-            self._log_skipped(key, failures)
+            self._log_skipped(key, result.failures)
 
     def _log_skipped(self, key, failures):
         from .sessions import Recording
