@@ -1,4 +1,5 @@
 import os
+from typing import NamedTuple
 
 import yaml
 import numpy as np
@@ -29,6 +30,47 @@ TRACKING_CONFIGS = [
 def _load_config_settings(config_path):
     with open(config_path) as f:
         return yaml.safe_load(f)
+
+
+class TrackingResult(NamedTuple):
+    results: list | None
+    num_tracks: int
+    config_path: str | None
+    failures: list[str]
+
+
+def _try_tracking_configs(dataset, tracking_fn) -> TrackingResult:
+    """Try each tracking config in the fallback chain."""
+    import ctypes
+    import gc
+
+    libc = ctypes.CDLL("libc.so.6")
+    failures = []
+
+    for i, config_path in enumerate(TRACKING_CONFIGS):
+        try:
+            results = tracking_fn(dataset, config_file=config_path)
+            num_tracks = len(np.unique([k["id"] for r in results for k in r]))
+            if num_tracks == 0:
+                print(
+                    f"Config {i + 1}/{len(TRACKING_CONFIGS)} produced 0 tracks, trying next..."
+                )
+                failures.append("0_tracks")
+                del results
+                gc.collect()
+                libc.malloc_trim(0)
+                continue
+            return TrackingResult(results, num_tracks, config_path, failures)
+        except np.linalg.LinAlgError:
+            print(
+                f"Config {i + 1}/{len(TRACKING_CONFIGS)} failed with LinAlgError, trying next..."
+            )
+            failures.append("SVD_convergence")
+            gc.collect()
+            libc.malloc_trim(0)
+            continue
+
+    return TrackingResult(None, 0, None, failures)
 
 
 # Hardcoding a selected method
@@ -223,8 +265,6 @@ class EasymocapTracking(dj.Computed):
     """
 
     def make(self, key):
-        import gc
-        import ctypes
         from multi_camera.analysis.easymocap import mvmp_association_and_tracking
 
         assert len((SingleCameraVideo & key) - bottom_up) == 0, (
@@ -232,35 +272,33 @@ class EasymocapTracking(dj.Computed):
         )
 
         dataset = MCTDataset(key)
-        libc = ctypes.CDLL("libc.so.6")
+        result = _try_tracking_configs(dataset, mvmp_association_and_tracking)
 
-        for i, config_path in enumerate(TRACKING_CONFIGS):
-            try:
-                results = mvmp_association_and_tracking(
-                    dataset, config_file=config_path
-                )
-                key["tracking_results"] = results
-                key["num_tracks"] = len(
-                    np.unique([k["id"] for r in results for k in r])
-                )
-                key["tracking_config"] = _load_config_settings(config_path)
-                self.insert1(key)
-                return
-            except np.linalg.LinAlgError:
-                print(
-                    f"Config {i + 1}/{len(TRACKING_CONFIGS)} failed with LinAlgError, trying next..."
-                )
-                gc.collect()
-                libc.malloc_trim(0)
-                continue
+        if result.results is not None:
+            key["tracking_results"] = result.results
+            key["num_tracks"] = result.num_tracks
+            key["tracking_config"] = _load_config_settings(result.config_path)
+            self.insert1(key)
+        else:
+            self._log_skipped(key, result.failures)
 
-        self._log_skipped(key)
-
-    def _log_skipped(self, key):
+    def _log_skipped(self, key, failures):
         from .sessions import Recording
 
         recording = (Recording & key).fetch1()
         mcr = (MultiCameraRecording & key).fetch1()
+
+        reasons = set(failures)
+        if reasons == {"SVD_convergence"}:
+            skip_reason = (
+                "All tracking configs failed with LinAlgError (SVD did not converge)"
+            )
+        elif reasons == {"0_tracks"}:
+            skip_reason = "All tracking configs produced 0 tracks"
+        else:
+            skip_reason = (
+                f"All tracking configs exhausted — per-config failures: {failures}"
+            )
 
         SkippedRecording.insert1(
             {
@@ -270,7 +308,7 @@ class EasymocapTracking(dj.Computed):
                 "recording_comment": recording["comment"],
                 "video_project": mcr["video_project"],
                 "video_base_filename": mcr["video_base_filename"],
-                "skip_reason": "All tracking configs failed with LinAlgError (SVD did not converge)",
+                "skip_reason": skip_reason,
                 "configs_tried": [_load_config_settings(p) for p in TRACKING_CONFIGS],
             }
         )
