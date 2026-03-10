@@ -37,41 +37,6 @@ function downloadFile(name, contents, mime) {
     link.remove();
 }
 
-/**
- * Toggles the contact point debug in the scene.
- * @param {!ObjType} obj A Scene or Mesh object.
- * @param {boolean} debug Whether to add contact debugging.
- */
-function toggleContactDebug(obj, debug) {
-    for (let i = 0; i < obj.children.length; i++) {
-        let c = obj.children[i];
-        if (c.type == 'AxesHelper') {
-            /* toggle visibility on world axis */
-            c.visible = debug;
-        }
-        if (c.type == 'Group' && c.name && c.name.startsWith('contact')) {
-            /* toggle visibility of all contact points */
-            c.children[0].visible = debug;
-        }
-        if (c.type == 'Group') {
-            /* recurse over group's children */
-            for (let j = 0; j < c.children.length; j++) {
-                toggleContactDebug(c.children[j], debug);
-            }
-        }
-    }
-    if (obj.type == 'Mesh') {
-        /* change opacity for each mesh */
-        if (debug) {
-            obj.material.opacity = 0.6;
-            obj.material.transparent = true;
-        } else {
-            obj.material.opacity = 1.0;
-            obj.material.transparent = false;
-        }
-    }
-}
-
 const hoverMaterial = new THREE.MeshPhongMaterial({ color: 0x332722, emissive: 0x114a67 });
 const selectMaterial = new THREE.MeshPhongMaterial({
     color: 0x1a1a1a, // A darker color
@@ -147,7 +112,7 @@ class Viewer {
 
         this.gui = new GUI({ autoPlace: false });
 
-        if (guiElement != undefined) {
+        if (guiElement !== undefined) {
             guiElement.appendChild(this.gui.domElement);
         } else {
             // if full screen or in an iframe, this works.
@@ -232,7 +197,7 @@ class Viewer {
             // get updated. To get this working, we will need to extract an average
             // position from the morphTargets and use that as the position of the
             // mesh element.
-            if (system.smpl.ids.length == 1) {
+            if (system.smpl.ids.length === 1) {
                 console.log('setting up SMPL follower')
                 const smplGroup = this.scene.getObjectByName('smpl')
                 this.target = smplGroup.children[0];
@@ -296,7 +261,7 @@ class Viewer {
         if (h === undefined) {
             h = this.domElement.clientHeight;
         }
-        if (this.camera.type == 'OrthographicCamera') {
+        if (this.camera.type === 'OrthographicCamera') {
             this.camera.right =
                 this.camera.left + w * (this.camera.top - this.camera.bottom) / h;
         } else {
@@ -324,7 +289,7 @@ class Viewer {
         requestAnimationFrame(() => this.animate());
         this.animator.update();
 
-        const annotationMode = (this.system.smpl != undefined) && (this.system.smpl.ids.length > 1);
+        const annotationMode = (this.system.smpl !== undefined) && (this.system.smpl.ids.length > 1);
         if (this.target && !annotationMode) {
             // make sure the orbiter is pointed at the right target
             const targetPos = new THREE.Vector3();
