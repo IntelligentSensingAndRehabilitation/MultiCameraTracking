@@ -39,6 +39,7 @@ from multi_camera.backend.recording_db import (
     add_photo,
     get_recordings,
     modify_recording_entry,
+    rename_recording_entry,
     synchronize_to_datajoint,
     push_to_datajoint,
     ParticipantOut,
@@ -615,6 +616,22 @@ async def update_recording(recording: PriorRecordings, db=Depends(db_dependency)
 
     modify_recording_entry(db, participant, recording)
 
+    return {}
+
+
+class RenameRecordingData(BaseModel):
+    participant: str
+    filename: str
+    new_filename: str
+
+
+@api_router.post("/rename_recording")
+async def rename_recording(data: RenameRecordingData, db=Depends(db_dependency)):
+    print("Renaming recording: ", data)
+    try:
+        rename_recording_entry(db, data.participant, data.filename, data.new_filename)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     return {}
 
 
