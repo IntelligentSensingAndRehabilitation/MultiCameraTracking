@@ -17,13 +17,13 @@ General Arguments:
 - vid_base: path to calibration file
 - charuco: either charuco or checkerboard (default: charuco)
 - checkerboard_size: checkerboard square size in mm (default: 109)
-- checkerboard_dim: checkerboard dimensions in mm (default: [5,7])
+- checkerboard_dim: checkerboard dimensions in (rows, col) for the squares on the board (default: [5,7])
 - marker_bits: charuco marker bits (default: 6)
 - min_cameras: set minimum number of cameras necessary to fit board pose (default: 2)
 - output: output file to save calibration results (default: None)
 
 Releveling Arguments:
-- releveling_type: select a type from settings [more details below] (default: no_releveling)
+- releveling_type: select a type from settings [more details below] (default: no_leveling)
 - z_offset_set: board height for stroller/custom releveling [meters] (default: 1.534)
 - min_height: set minimum camera height for z_up [meters] (default: 2.0)
 - board_ground_time: frame range for ground board (default: [0,200]), used in floor or custom releveling
@@ -35,7 +35,7 @@ Releveling Arguments:
 
 
 Releveling Settings:
-- no_releveling: same as original calibration method (no releveling)
+- no_leveling: same as original calibration method (no leveling)
 - stroller: expects vertical rolling board with constant height. Optimizes calibration by tilting it to minimize the z variability of the board
 - z_up: checks camera axes and rotates them to make sure they are upright (assumes y-axis points towards floor). Also shifts camera group up to set lowest camera to a set height above the floor
 - ground: assumes the board is on the ground at a known point of time and aligns the global z axis with the board z axis and rotates the camera group accordingly
