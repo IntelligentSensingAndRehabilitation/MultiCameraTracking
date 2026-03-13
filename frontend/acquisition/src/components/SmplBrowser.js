@@ -25,7 +25,7 @@ const SmplBrowser = () => {
     const [selectedParticipant, setSelectedParticipant] = useState(null);
     const [selectedSession, setSelectedSession] = useState(null);
     const [selectedVideo, setSelectedVideo] = useState(null);
-    const [recordingValidated, setRecordingValidated] = useState(false);
+    const [, setRecordingValidated] = useState(false);
     const [selectedModel, setSelectedModel] = useState("SMPL");
 
     useEffect(() => {
@@ -136,12 +136,6 @@ const SmplBrowser = () => {
         height: '0px',
         zIndex: '1000'
     }
-
-    const dropDownStyle = {
-        maxHeight: '28px',
-        overflowY: 'scroll'
-    }
-
 
     return (
         <Container>
