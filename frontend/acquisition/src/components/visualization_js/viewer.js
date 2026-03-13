@@ -112,7 +112,7 @@ class Viewer {
 
         this.gui = new GUI({ autoPlace: false });
 
-        if (guiElement) {
+        if (guiElement !== undefined) {
             guiElement.appendChild(this.gui.domElement);
         } else {
             // if full screen or in an iframe, this works.
