@@ -125,11 +125,10 @@ class PersonKeypointReconstruction(dj.Computed):
         ).fetch("keypoints", "camera_name")
 
         if len(keypoints) == 0:
-            print(
-                f"WARNING: No keypoints found for key {key}. "
-                "TopDownPerson may not be populated for this recording's videos. Skipping."
+            raise RuntimeError(
+                f"No keypoints found for key {key}. "
+                "TopDownPerson may not be populated for this recording's videos."
             )
-            return
 
         # need to add zeros for missing frames at the end
         N = max([len(k) for k in keypoints])
@@ -137,13 +136,12 @@ class PersonKeypointReconstruction(dj.Computed):
             [np.concatenate([k, np.zeros([N - k.shape[0], *k.shape[1:]])], axis=0) for k in keypoints], axis=0
         )
 
-        print(len(camera_names), len(camera_name))
         # work out the order that matches the calibration (should normally match)
         order = [list(camera_name).index(c) for c in camera_names]
         points2d = np.stack([keypoints[o][:, :, :] for o in order], axis=0)
 
         if "No Skeleton" in reconstruction_method_name:
-            skeleton = np.empty((0, 2), dtype=int)
+            skeleton = None
         elif top_down_method_name == "MMPoseHalpe":
             joints = TopDownPerson.joint_names("MMPoseHalpe")
             pairs = [
@@ -197,7 +195,6 @@ class PersonKeypointReconstruction(dj.Computed):
             points2d[..., -1] = conf
             points3d = triangulate_point(camera_calibration, points2d, return_confidence=True)
             camera_weights = []
-            print(points3d.shape)
 
         elif reconstruction_method_name == "Robust Triangulation":
             points3d, camera_weights = robust_triangulate_points(camera_calibration, points2d, return_weights=True)
@@ -353,7 +350,7 @@ class PersonKeypointReconstruction(dj.Computed):
         key["keypoints3d"] = np.array(points3d)
         key["camera_weights"] = np.array(camera_weights)
         key["reprojection_loss"] = reprojection_loss(camera_calibration, points2d, points3d[:, :, :3], huber_max=100)
-        if "No Skeleton" in reconstruction_method_name:
+        if skeleton is None:
             key["skeleton_loss"] = 0.0
         else:
             key["skeleton_loss"] = skeleton_loss(points3d[:, :, :3], skeleton)
