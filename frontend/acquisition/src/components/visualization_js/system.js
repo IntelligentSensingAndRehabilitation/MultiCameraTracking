@@ -156,34 +156,34 @@ function createScene(system) {
         geom[1].forEach(function (collider) {
             const rgba = collider.rgba;
             const color = new THREE.Color(rgba[0], rgba[1], rgba[2]);
-            const mat = (collider.name == 'Plane') ?
+            const mat = (collider.name === 'Plane') ?
                 createCheckerBoard() :
-                (collider.name == 'heightMap') ?
+                (collider.name === 'heightMap') ?
                     new THREE.MeshStandardMaterial({ color: color, flatShading: true }) :
                     new THREE.MeshPhongMaterial({ color: color });
             let child;
             let axisSize;
-            if (collider.name == 'Box') {
+            if (collider.name === 'Box') {
                 child = createBox(collider, mat);
                 axisSize = getBoxAxisSize(collider);
-            } else if (collider.name == 'Capsule') {
+            } else if (collider.name === 'Capsule') {
                 child = createCapsule(collider, mat);
                 axisSize = getCapsuleAxisSize(collider);
-            } else if (collider.name == 'Plane') {
+            } else if (collider.name === 'Plane') {
                 child = createPlane(collider.plane, mat);
-            } else if (collider.name == 'Sphere') {
+            } else if (collider.name === 'Sphere') {
                 child = createSphere(collider, mat);
                 axisSize = getSphereAxisSize(collider);
-            } else if (collider.name == 'HeightMap') {
+            } else if (collider.name === 'HeightMap') {
                 console.log('heightMap not implemented');
                 return;
-            } else if (collider.name == 'Mesh') {
+            } else if (collider.name === 'Mesh') {
                 child = createMesh(collider, mat);
                 axisSize = getMeshAxisSize(collider);
             } else if ('clippedPlane' in collider) {
                 console.log('clippedPlane not implemented');
                 return;
-            } else if (collider.name == 'Convex') {
+            } else if (collider.name === 'Convex') {
                 console.log('convex not implemented');
                 return;
             }
@@ -220,8 +220,8 @@ function createScene(system) {
 
         ids.forEach((id) => {
             // filter out all the data for this specific ID
-            const firstFrame = meshes.filter((mesh) => mesh.some((m) => m.id == id))[0];
-            const verts = firstFrame.filter((m) => m.id == id)[0].verts;
+            const firstFrame = meshes.filter((mesh) => mesh.some((m) => m.id === id))[0];
+            const verts = firstFrame.filter((m) => m.id === id)[0].verts;
 
             const smpl = createSmplPerson(id, faces, verts);
             smplGroup.add(smpl);
@@ -339,9 +339,6 @@ function createSmplPerson(personId, faces, vertices) {
 
     const name = "person_" + personId;
 
-    // compute the number of vertices as the maximum index in the faces (list of list)
-    const numVertices = faces.reduce((max, face) => Math.max(max, ...face), 0) + 1;
-
     // This person isn't yet in the scene so we need to create a new mesh for them.
     const bufferGeometry = new THREE.BufferGeometry();
 
@@ -415,7 +412,7 @@ function createSmplTrajectory(system, scene) {
         // want to get a list of ids where the mesh is visible, need to first map each frame to include
         // the frame id, then filter
         const visibleFrames = allFrames.map((frame, frameId) => {
-            return { frameId: frameId, visible: frame.some((m) => m.id == index) };
+            return { frameId: frameId, visible: frame.some((m) => m.id === index) };
         }
         ).filter((frame) => frame.visible);
         const firstVisible = visibleFrames[0].frameId;

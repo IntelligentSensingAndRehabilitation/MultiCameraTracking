@@ -268,7 +268,7 @@ const AnalysisHome = () => {
     }
 
     const toggle = (val) => {
-        val = val == "true";
+        val = val === "true";
         console.log("toggle", val);
         setSortByDate(val);
     }
@@ -287,7 +287,7 @@ const AnalysisHome = () => {
                             variant={idx % 2 ? 'outline-success' : 'outline-danger'}
                             name="radio"
                             value={radio.value}
-                            checked={sortByDate == radio.value}
+                            checked={sortByDate === radio.value}
                             onChange={(e) => toggle(e.currentTarget.value)}
                         >
                             {radio.name}

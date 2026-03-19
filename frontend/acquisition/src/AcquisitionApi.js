@@ -65,7 +65,7 @@ export const AcquisitionApi = (props) => {
     const [recordingFileBase, setRecordingFileBase] = useState('');
     const [recordingFilename, setRecordingFilename] = useState('');
     const [recordingProgress, setRecordingProgress] = useState('');
-    const [keypoints, setKeypoints] = useState([]);
+    const [keypoints] = useState([]);
     const [diskSpaceInfo, setDiskSpaceInfo] = useState(null);
     const [showDiskWarningModal, setShowDiskWarningModal] = useState(false);
     const [diskWarningOnStartup, setDiskWarningOnStartup] = useState(false);
