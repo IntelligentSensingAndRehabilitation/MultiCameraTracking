@@ -69,6 +69,7 @@ class PersonKeypointReconstructionMethodLookup(dj.Lookup):
         {"reconstruction_method": 10, "reconstruction_method_name": r"Implicit Optimization $\\gamma=0.3$"},
         {"reconstruction_method": 11, "reconstruction_method_name": "Implicit Optimization, MaxHuber=10"},
         {"reconstruction_method": 12, "reconstruction_method_name": r"Implicit Optimization $\\sigma=50$"},
+        {"reconstruction_method": 14, "reconstruction_method_name": "Robust Triangulation - No Skeleton"},
     ]
 
 
@@ -108,6 +109,9 @@ class PersonKeypointReconstruction(dj.Computed):
         reconstruction_method = key["reconstruction_method"]
 
         top_down_method_name = (TopDownMethodLookup & key).fetch1("top_down_method_name")
+        reconstruction_method_name = (PersonKeypointReconstructionMethodLookup & key).fetch1(
+            "reconstruction_method_name"
+        )
 
         camera_calibration, camera_names = (Calibration & calibration_key).fetch1("camera_calibration", "camera_names")
         keypoints, camera_name = (
@@ -120,18 +124,25 @@ class PersonKeypointReconstruction(dj.Computed):
             & recording_key
         ).fetch("keypoints", "camera_name")
 
+        if len(keypoints) == 0:
+            raise RuntimeError(
+                f"No keypoints found for key {key}. "
+                "TopDownPerson may not be populated for this recording's videos."
+            )
+
         # need to add zeros for missing frames at the end
         N = max([len(k) for k in keypoints])
         keypoints = np.stack(
             [np.concatenate([k, np.zeros([N - k.shape[0], *k.shape[1:]])], axis=0) for k in keypoints], axis=0
         )
 
-        print(len(camera_names), len(camera_name))
         # work out the order that matches the calibration (should normally match)
         order = [list(camera_name).index(c) for c in camera_names]
         points2d = np.stack([keypoints[o][:, :, :] for o in order], axis=0)
 
-        if top_down_method_name == "MMPoseHalpe":
+        if "No Skeleton" in reconstruction_method_name:
+            skeleton = None
+        elif top_down_method_name == "MMPoseHalpe":
             joints = TopDownPerson.joint_names("MMPoseHalpe")
             pairs = [
                 ("Pelvis", "Right Hip"),
@@ -154,6 +165,7 @@ class PersonKeypointReconstruction(dj.Computed):
                 ("Left Shoulder", "Left Elbow"),
                 ("Left Elbow", "Left Wrist"),
             ]
+            skeleton = np.array([(joints.index(p[0]), joints.index(p[1])) for p in pairs])
         else:
             joints = TopDownPerson.joint_names(top_down_method_name)
             pairs = [
@@ -174,12 +186,7 @@ class PersonKeypointReconstruction(dj.Computed):
                 ("Left Shoulder", "Left Elbow"),
                 ("Left Elbow", "Left Wrist"),
             ]
-        skeleton = np.array([(joints.index(p[0]), joints.index(p[1])) for p in pairs])
-
-        # select method for reconstruction
-        reconstruction_method_name = (PersonKeypointReconstructionMethodLookup & key).fetch1(
-            "reconstruction_method_name"
-        )
+            skeleton = np.array([(joints.index(p[0]), joints.index(p[1])) for p in pairs])
 
         if reconstruction_method_name == "Triangulation":
             # downweight any views less than 0.5 confidence
@@ -188,9 +195,11 @@ class PersonKeypointReconstruction(dj.Computed):
             points2d[..., -1] = conf
             points3d = triangulate_point(camera_calibration, points2d, return_confidence=True)
             camera_weights = []
-            print(points3d.shape)
 
         elif reconstruction_method_name == "Robust Triangulation":
+            points3d, camera_weights = robust_triangulate_points(camera_calibration, points2d, return_weights=True)
+
+        elif reconstruction_method_name == "Robust Triangulation - No Skeleton":
             points3d, camera_weights = robust_triangulate_points(camera_calibration, points2d, return_weights=True)
 
         elif reconstruction_method_name == "Robust Triangulation $\sigma=100$":
@@ -341,7 +350,10 @@ class PersonKeypointReconstruction(dj.Computed):
         key["keypoints3d"] = np.array(points3d)
         key["camera_weights"] = np.array(camera_weights)
         key["reprojection_loss"] = reprojection_loss(camera_calibration, points2d, points3d[:, :, :3], huber_max=100)
-        key["skeleton_loss"] = skeleton_loss(points3d[:, :, :3], skeleton)
+        if skeleton is None:
+            key["skeleton_loss"] = 0.0
+        else:
+            key["skeleton_loss"] = skeleton_loss(points3d[:, :, :3], skeleton)
         key["smoothness_loss"] = smoothness_loss(points3d[:, :, :3])
         if np.isinf(key["smoothness_loss"]):
             key["smoothness_loss"] = 1e10
