@@ -630,6 +630,8 @@ async def rename_recording(data: RenameRecordingData, db=Depends(db_dependency))
     print("Renaming recording: ", data)
     try:
         rename_recording_entry(db, data.participant, data.filename, data.new_filename)
+    except FileExistsError as e:
+        raise HTTPException(status_code=409, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     return {}

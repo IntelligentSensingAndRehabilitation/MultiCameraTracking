@@ -289,8 +289,20 @@ def modify_recording_entry(db: Session, participant: ParticipantOut, updated_rec
     db.commit()
 
 
-def rename_recording_entry(db: Session, participant_name: str, old_filename: str, new_filename: str):
-    """Rename a recording: update the filename in the database and rename the directory on disk."""
+def rename_recording_entry(db: Session, participant_name: str, old_filename: str, new_name: str):
+    """Rename a recording: update the filename in the database and rename the directory on disk.
+
+    new_name must be a simple basename (no path separators or traversal). The new
+    full path is derived from the existing recording's directory.
+    """
+    # Validate new_name is a safe basename
+    if os.path.isabs(new_name):
+        raise ValueError("new_name must be a simple name, not an absolute path")
+    if os.sep in new_name or (os.altsep and os.altsep in new_name):
+        raise ValueError("new_name must not contain path separators")
+    if ".." in new_name:
+        raise ValueError("new_name must not contain '..'")
+
     query = db.query(Recording).join(Session).join(Participant)
     query = query.filter(Participant.name == participant_name)
     query = query.filter(Recording.filename == old_filename)
@@ -298,6 +310,16 @@ def rename_recording_entry(db: Session, participant_name: str, old_filename: str
     recording = query.first()
     if recording is None:
         raise ValueError(f"Recording not found: participant={participant_name}, filename={old_filename}")
+
+    # Derive new full path from the existing recording's parent directory
+    new_filename = os.path.join(os.path.dirname(old_filename), new_name)
+
+    # Check for collisions
+    existing = db.query(Recording).filter(Recording.filename == new_filename).first()
+    if existing is not None:
+        raise FileExistsError(f"A recording with filename '{new_filename}' already exists in the database")
+    if os.path.exists(new_filename):
+        raise FileExistsError(f"Path already exists on disk: {new_filename}")
 
     # Rename directory on disk if it exists
     if os.path.exists(old_filename):
