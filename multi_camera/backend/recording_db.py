@@ -289,19 +289,21 @@ def modify_recording_entry(db: Session, participant: ParticipantOut, updated_rec
     db.commit()
 
 
-def rename_recording_entry(db: Session, participant_name: str, old_filename: str, new_name: str):
+def rename_recording_entry(db: Session, participant_name: str, old_filename: str, new_filename: str):
     """Rename a recording: update the filename in the database and rename the directory on disk.
 
-    new_name must be a simple basename (no path separators or traversal). The new
-    full path is derived from the existing recording's directory.
+    The new filename must share the same parent directory as the old filename
+    (only the basename may change). Path traversal segments are rejected.
     """
-    # Validate new_name is a safe basename
-    if os.path.isabs(new_name):
-        raise ValueError("new_name must be a simple name, not an absolute path")
-    if os.sep in new_name or (os.altsep and os.altsep in new_name):
-        raise ValueError("new_name must not contain path separators")
-    if ".." in new_name:
-        raise ValueError("new_name must not contain '..'")
+    # Reject absolute paths and traversal segments
+    if os.path.isabs(new_filename):
+        raise ValueError("new_filename must not be an absolute path")
+    if ".." in new_filename.split(os.sep):
+        raise ValueError("new_filename must not contain '..' path segments")
+
+    # Ensure the parent directory hasn't changed (only the basename may differ)
+    if os.path.dirname(new_filename) != os.path.dirname(old_filename):
+        raise ValueError("new_filename must be in the same directory as the original recording")
 
     query = db.query(Recording).join(Session).join(Participant)
     query = query.filter(Participant.name == participant_name)
@@ -310,9 +312,6 @@ def rename_recording_entry(db: Session, participant_name: str, old_filename: str
     recording = query.first()
     if recording is None:
         raise ValueError(f"Recording not found: participant={participant_name}, filename={old_filename}")
-
-    # Derive new full path from the existing recording's parent directory
-    new_filename = os.path.join(os.path.dirname(old_filename), new_name)
 
     # Check for collisions
     existing = db.query(Recording).filter(Recording.filename == new_filename).first()
