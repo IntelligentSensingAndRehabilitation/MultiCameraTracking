@@ -438,6 +438,14 @@ def push_to_datajoint(db: Session, participant_id: str, session_date: date, vide
 
     participant_id = normalize_participant_id(participant_id)
 
+    # TODO(@ktshah04): Include FIN when pushing to DataJoint.
+    # Retrieve from the PHI database:
+    #   from multi_camera.backend.phi_db import get_phi_db, get_fin
+    #   phi_db = get_phi_db()
+    #   fin = get_fin(phi_db, participant_name=participant_id)
+    #   phi_db.close()
+    # Pass fin to import_session() once the DataJoint schema supports it.
+
     import_session(participant_id, session_date, video_project=video_project, recordings=recordings)
 
     synchronize_to_datajoint(db)

@@ -107,6 +107,15 @@ def db_dependency():
         db.close()
 
 
+def phi_db_dependency():
+    from multi_camera.backend.phi_db import get_phi_db
+    db = get_phi_db()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
 class ConnectionManager:
     def __init__(self):
         self.active_connections: list[WebSocket] = []
@@ -325,12 +334,14 @@ async def stop_recording():
 
 
 @api_router.post("/session", response_model=Session)
-async def set_session(subject_id: str) -> Session:
+async def set_session(subject_id: str, fin: Optional[str] = None, phi_db=Depends(phi_db_dependency)) -> Session:
     """
     Create a new session directory for the participant
 
     Args:
         subject_id (str): The participant ID
+        fin (str, optional): Financial Identification Number from patient wristband.
+            Stored in a separate PHI database (data/phi.db) with restricted access.
     Returns:
         dict: A dictionary with the recording directory and filename
     """
@@ -344,6 +355,11 @@ async def set_session(subject_id: str) -> Session:
         participant_name=subject_id, session_date=date, recording_path=session_dir
     )
     print("New session: ", state.current_session)
+
+    if fin and fin.strip():
+        from multi_camera.backend.phi_db import store_fin
+        store_fin(phi_db, participant_name=subject_id, fin=fin.strip())
+        print(f"FIN stored for participant {subject_id}")
 
     return state.current_session
 
