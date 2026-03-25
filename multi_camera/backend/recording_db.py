@@ -1,3 +1,5 @@
+import os
+
 from sqlalchemy import create_engine, Boolean, Column, Float, Integer, String, Date, DateTime, ForeignKey
 from sqlalchemy.orm import relationship, declarative_base, joinedload
 from typing import Union, Tuple, List, Optional
@@ -284,6 +286,45 @@ def modify_recording_entry(db: Session, participant: ParticipantOut, updated_rec
     recording.should_process = updated_recording.should_process
 
     # commit the changes
+    db.commit()
+
+
+def rename_recording_entry(db: Session, participant_name: str, old_filename: str, new_filename: str):
+    """Rename a recording: update the filename in the database and rename the directory on disk.
+
+    The new filename must share the same parent directory as the old filename
+    (only the basename may change). Path traversal segments are rejected.
+    """
+    # Reject absolute paths and traversal segments
+    if os.path.isabs(new_filename):
+        raise ValueError("new_filename must not be an absolute path")
+    if ".." in new_filename.split(os.sep):
+        raise ValueError("new_filename must not contain '..' path segments")
+
+    # Ensure the parent directory hasn't changed (only the basename may differ)
+    if os.path.dirname(new_filename) != os.path.dirname(old_filename):
+        raise ValueError("new_filename must be in the same directory as the original recording")
+
+    query = db.query(Recording).join(Session).join(Participant)
+    query = query.filter(Participant.name == participant_name)
+    query = query.filter(Recording.filename == old_filename)
+
+    recording = query.first()
+    if recording is None:
+        raise ValueError(f"Recording not found: participant={participant_name}, filename={old_filename}")
+
+    # Check for collisions
+    existing = db.query(Recording).filter(Recording.filename == new_filename).first()
+    if existing is not None:
+        raise FileExistsError(f"A recording with filename '{new_filename}' already exists in the database")
+    if os.path.exists(new_filename):
+        raise FileExistsError(f"Path already exists on disk: {new_filename}")
+
+    # Rename directory on disk if it exists
+    if os.path.exists(old_filename):
+        os.rename(old_filename, new_filename)
+
+    recording.filename = new_filename
     db.commit()
 
 
