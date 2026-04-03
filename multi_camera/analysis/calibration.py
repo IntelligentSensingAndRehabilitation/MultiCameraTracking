@@ -1,6 +1,4 @@
 import numpy as np
-from aniposelib.boards import CharucoBoard, Checkerboard
-from aniposelib.cameras import Camera, CameraGroup
 import os
 import glob
 import re
@@ -8,11 +6,7 @@ import json
 from datetime import datetime
 import cv2
 import argparse
-import plotly.offline as pyo
-import plotly.graph_objects as go
-from dash import Dash, dcc, html
 import subprocess
-import os
 import threading
 import time
 
@@ -148,6 +142,8 @@ def relevel_calibration(
         return params_dict_custom, per_frame_p3ds_custom, poses_custom
 
 def run_AniposeLib_calibration(vid_base = None, charuco="charuco", checkerboard_size=109, checkerboard_dim=(5,7), marker_bits=6):
+    from aniposelib.boards import CharucoBoard, Checkerboard
+    from aniposelib.cameras import CameraGroup
 
     vid_path, vid_base = os.path.split(vid_base) # vidbase full path to video without .camera.mp4 e.g. /mnt/CottonLab/mobile_system_data/20250122/q8o77/calibration_20250122_181045
 
@@ -719,6 +715,7 @@ def plot_per_frame_p3ds_with_board_slider(per_frame_p3ds, poses, board, params_d
 
     def serve_plot(fig, port=8050, delay=10):
         """Serve the Plotly figure using Dash."""
+        from dash import Dash, dcc, html
         app = Dash(__name__)
         app.layout = html.Div([
             html.H1("Plotly Figure Display"),
@@ -1246,6 +1243,8 @@ def get_num_frames_from_videos(input_folder, vid_base, cam_names):
     raise FileNotFoundError("No video files found for any camera.")
 
 def recreate_cgroup_from_entry(entry):
+    from aniposelib.cameras import Camera, CameraGroup
+
     params = entry["camera_calibration"]
     cam_names = entry["camera_names"]
     cameras = []
