@@ -16,6 +16,7 @@ class Participant(Base):
     name = Column(String)
 
     sessions = relationship("Session", back_populates="participant")
+    fin_record = relationship("ParticipantFIN", uselist=False, back_populates="participant")
 
 
 class Session(Base):
@@ -75,17 +76,42 @@ class Photo(Base):
     session = relationship("Session", back_populates="photos")
 
 
+class ParticipantFIN(Base):
+    """Maps a participant to their Financial Identification Number (FIN, from wristband).
+
+    One FIN per participant — upserted on conflict. Stored alongside other recording
+    metadata in recordings.db; proper PHI access control is deferred to the DataJoint
+    export layer (future work).
+    """
+
+    __tablename__ = "participant_fin"
+
+    id = Column(Integer, primary_key=True, index=True)
+    participant_id = Column(Integer, ForeignKey("participants.id"), unique=True, nullable=False)
+    fin = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    participant = relationship("Participant", back_populates="fin_record")
+
+
+def _get_or_create_participant(db, participant_name: str) -> Participant:
+    """Find or create a participant by name."""
+    participant = db.query(Participant).filter(Participant.name == participant_name).first()
+    if not participant:
+        participant = Participant(name=participant_name)
+        db.add(participant)
+        db.flush()
+    return participant
+
+
 def _get_or_create_session(db: Session, participant_name: str, session_date, session_path: str):
     """Find or create a participant and session, returning the Session object."""
     if isinstance(session_date, str):
         from datetime import datetime
         session_date = datetime.strptime(session_date, "%Y-%m-%d").date()
 
-    participant = db.query(Participant).filter(Participant.name == participant_name).first()
-    if not participant:
-        participant = Participant(name=participant_name)
-        db.add(participant)
-        db.flush()
+    participant = _get_or_create_participant(db, participant_name)
 
     session = (
         db.query(Session).filter(Session.participant_id == participant.id, Session.session_date == session_date).first()
@@ -96,6 +122,37 @@ def _get_or_create_session(db: Session, participant_name: str, session_date, ses
         db.flush()
 
     return session
+
+
+def store_fin(db, participant_name: str, fin: str) -> ParticipantFIN:
+    """Upsert a FIN for the given participant. Creates the participant row if needed."""
+    participant = _get_or_create_participant(db, participant_name)
+
+    existing = db.query(ParticipantFIN).filter(
+        ParticipantFIN.participant_id == participant.id
+    ).first()
+
+    if existing:
+        existing.fin = fin
+        existing.updated_at = datetime.now()
+    else:
+        existing = ParticipantFIN(participant_id=participant.id, fin=fin)
+        db.add(existing)
+
+    db.commit()
+    db.refresh(existing)
+    return existing
+
+
+def get_fin(db, participant_name: str) -> Optional[str]:
+    """Look up the FIN for a participant by name. Returns None if not found."""
+    record = (
+        db.query(ParticipantFIN)
+        .join(Participant, ParticipantFIN.participant_id == Participant.id)
+        .filter(Participant.name == participant_name)
+        .first()
+    )
+    return record.fin if record else None
 
 
 def add_recording(
@@ -437,6 +494,12 @@ def push_to_datajoint(db: Session, participant_id: str, session_date: date, vide
     # TODO: confirm calibration has been performed
 
     participant_id = normalize_participant_id(participant_id)
+
+    # TODO(@ktshah04): Include FIN when pushing to DataJoint.
+    # FIN is stored alongside the participant in this same database:
+    #   fin = get_fin(db, participant_name=participant_id)
+    # Pass fin to import_session() once the DataJoint schema supports it. This is also
+    # the layer where proper PHI access control should be enforced.
 
     import_session(participant_id, session_date, video_project=video_project, recordings=recordings)
 
