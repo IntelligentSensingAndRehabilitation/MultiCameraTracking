@@ -1098,13 +1098,24 @@ def import_recording(vid_base, vid_path=".", video_project="MULTICAMERA_TEST", l
 
     # search for files. expects them to be in the format vid_base.serial_number.mp4
     vids = []
-    camera_names = []
+    rejected = []
     for v in os.listdir(vid_path):
         base, ext = os.path.splitext(v)
         if ext == ".mp4" and len(base.split(".")) == 2 and base.split(".")[0] == vid_base:
             vids.append(os.path.join(vid_path, v))
+        elif ext.lower() == ".mp4":
+            rejected.append(v)
 
     print(f"Found {len(vids)} videos.")
+
+    if len(vids) == 0:
+        raise FileNotFoundError(
+            f"No videos matched pattern '{vid_base}.<serial>.mp4' in {vid_path!r}.\n"
+            f"  vid_base: {vid_base!r}\n"
+            f"  .mp4 files present but rejected ({len(rejected)}): {rejected}\n"
+            f"  Expected: extension '.mp4' (lowercase), exactly one '.' in basename, "
+            f"prefix exactly equal to vid_base."
+        )
 
     def mysplit(x):
         splits = x.split("_")
@@ -1141,7 +1152,16 @@ def import_recording(vid_base, vid_path=".", video_project="MULTICAMERA_TEST", l
         else:
             serials = ["UnknownRight", "UnknownLeft"]
 
-    assert all(np.sort(serials) == np.sort(camera_names))
+    serials_set = set(serials)
+    camera_names_set = set(camera_names)
+    if serials_set != camera_names_set:
+        raise ValueError(
+            f"Serial/filename mismatch for {vid_base!r} in {vid_path!r}.\n"
+            f"  serials in JSON ({len(serials)}): {sorted(serials)}\n"
+            f"  camera_names from filenames ({len(camera_names)}): {sorted(camera_names)}\n"
+            f"  in JSON but no video file: {sorted(serials_set - camera_names_set)}\n"
+            f"  video file but not in JSON: {sorted(camera_names_set - serials_set)}"
+        )
 
     vid_structs = []
     single_structs = []
