@@ -26,6 +26,7 @@ class Session(Base):
     session_date = Column(Date)
     session_path = Column(String)
     participant_id = Column(Integer, ForeignKey("participants.id"))
+    fin = Column(String, nullable=True)
 
     participant = relationship("Participant", back_populates="sessions")
     recordings = relationship("Recording", back_populates="session")
@@ -77,11 +78,11 @@ class Photo(Base):
 
 
 class ParticipantFIN(Base):
-    """Maps a participant to their Financial Identification Number (FIN, from wristband).
+    """DEPRECATED: FIN is now stored per-session on `Session.fin`.
 
-    One FIN per participant — upserted on conflict. Stored alongside other recording
-    metadata in recordings.db; proper PHI access control is deferred to the DataJoint
-    export layer (future work).
+    Kept for one release to support rollback and to feed the one-shot migration in
+    `_ensure_session_fin_column`. Do not write to this table; remove in a follow-up
+    once the new path is verified in production.
     """
 
     __tablename__ = "participant_fin"
@@ -124,35 +125,27 @@ def _get_or_create_session(db: Session, participant_name: str, session_date, ses
     return session
 
 
-def store_fin(db, participant_name: str, fin: str) -> ParticipantFIN:
-    """Upsert a FIN for the given participant. Creates the participant row if needed."""
-    participant = _get_or_create_participant(db, participant_name)
-
-    existing = db.query(ParticipantFIN).filter(
-        ParticipantFIN.participant_id == participant.id
-    ).first()
-
-    if existing:
-        existing.fin = fin
-        existing.updated_at = datetime.now()
-    else:
-        existing = ParticipantFIN(participant_id=participant.id, fin=fin)
-        db.add(existing)
-
+def store_fin(db, participant_name: str, session_date, session_path: str, fin: str) -> "Session":
+    """Set the FIN on the matching session row. Creates participant/session if needed."""
+    session = _get_or_create_session(db, participant_name, session_date, session_path)
+    session.fin = fin
     db.commit()
-    db.refresh(existing)
-    return existing
+    db.refresh(session)
+    return session
 
 
-def get_fin(db, participant_name: str) -> Optional[str]:
-    """Look up the FIN for a participant by name. Returns None if not found."""
-    record = (
-        db.query(ParticipantFIN)
-        .join(Participant, ParticipantFIN.participant_id == Participant.id)
-        .filter(Participant.name == participant_name)
+def get_fin(db, participant_name: str, session_date) -> Optional[str]:
+    """Look up the FIN for a (participant, session_date). Returns None if not set."""
+    if isinstance(session_date, str):
+        session_date = datetime.strptime(session_date, "%Y-%m-%d").date()
+
+    session = (
+        db.query(Session)
+        .join(Participant, Session.participant_id == Participant.id)
+        .filter(Participant.name == participant_name, Session.session_date == session_date)
         .first()
     )
-    return record.fin if record else None
+    return session.fin if session and session.fin else None
 
 
 def add_recording(
@@ -468,7 +461,7 @@ def check_datajoint_external_mounted(mount_path, sentinel_file_name=".multi_cam_
     print("External drive mounted and sentinel file found.")
 
 def push_to_datajoint(db: Session, participant_id: str, session_date: date, video_project: str):
-    from multi_camera.datajoint.sessions import import_session
+    from multi_camera.datajoint.sessions import import_session, PhotoSpec
 
     # get the list of recordings from the database with their comments
     # that match the participant and session date
@@ -479,6 +472,21 @@ def push_to_datajoint(db: Session, participant_id: str, session_date: date, vide
     sessions: SessionOut = db_recordings[0].sessions
     assert len(sessions) == 1, "Did not find exactly one session for this participant and date."
     recordings: List[RecordingOut] = sessions[0].recordings
+
+    # SQLite stores the un-normalized participant name (Participant.name == subject_id
+    # passed to /session), so look up FIN before normalization below.
+    fin = get_fin(db, participant_name=participant_id, session_date=session_date)
+
+    photos = [
+        PhotoSpec(
+            saved_path=p.saved_path,
+            filename=p.filename,
+            original_filename=p.original_filename,
+            upload_timestamp=p.upload_timestamp,
+            description=p.description,
+        )
+        for p in sessions[0].photos
+    ]
 
     # filter out the recordings that should not be processed and retain the
     # filename and comment
@@ -495,15 +503,48 @@ def push_to_datajoint(db: Session, participant_id: str, session_date: date, vide
 
     participant_id = normalize_participant_id(participant_id)
 
-    # TODO(@ktshah04): Include FIN when pushing to DataJoint.
-    # FIN is stored alongside the participant in this same database:
-    #   fin = get_fin(db, participant_name=participant_id)
-    # Pass fin to import_session() once the DataJoint schema supports it. This is also
-    # the layer where proper PHI access control should be enforced.
-
-    import_session(participant_id, session_date, video_project=video_project, recordings=recordings)
+    import_session(
+        participant_id,
+        session_date,
+        video_project=video_project,
+        recordings=recordings,
+        fin=fin,
+        photos=photos,
+    )
 
     synchronize_to_datajoint(db)
+
+
+def _ensure_session_fin_column(engine):
+    """Add `sessions.fin` column on existing DBs that pre-date #15.
+
+    SQLAlchemy's create_all only creates missing tables, not missing columns.
+    Best-effort backfill: copy ParticipantFIN.fin to the most recent session
+    per participant. Older sessions are left NULL because the legacy
+    ParticipantFIN table only kept the latest FIN per participant.
+    """
+    from sqlalchemy import inspect, text
+
+    insp = inspect(engine)
+    if "sessions" not in insp.get_table_names():
+        return
+    cols = [c["name"] for c in insp.get_columns("sessions")]
+    if "fin" in cols:
+        return
+
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE sessions ADD COLUMN fin VARCHAR"))
+        if "participant_fin" in insp.get_table_names():
+            conn.execute(text("""
+                UPDATE sessions
+                SET fin = (
+                    SELECT pf.fin FROM participant_fin pf
+                    WHERE pf.participant_id = sessions.participant_id
+                )
+                WHERE sessions.id IN (
+                    SELECT MAX(id) FROM sessions GROUP BY participant_id
+                )
+            """))
 
 
 def get_db():
@@ -513,6 +554,7 @@ def get_db():
 
     engine = create_engine(DATABASE_URL)
     Base.metadata.create_all(bind=engine)
+    _ensure_session_fin_column(engine)
 
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
