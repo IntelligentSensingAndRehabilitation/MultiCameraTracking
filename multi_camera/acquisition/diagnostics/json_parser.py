@@ -29,6 +29,14 @@ PTP_DRIFT_THRESHOLD_US = 100
 TEMPERATURE_RISE_THRESHOLD_C = 5.0
 TIMESTAMP_JUMP_THRESHOLD_FACTOR = 10
 TIMESTAMP_JUMP_PAIR_TOLERANCE = 2.0
+WARMUP_SETTLED_RATIO = 10.0
+WARMUP_MIN_SETTLED_TRIALS = 2
+FRAME_COUNT_ANOMALY_FRACTION = 0.10
+FRAME_COUNT_ANOMALY_MIN_TOTAL = 500
+PTP_CLUSTER_WITHIN_US = 500
+PTP_CLUSTER_MIN_OFFSET_US = 50
+PTP_CONVERGENCE_MIN_TRIALS = 3
+PTP_CONVERGENCE_RATIO = 3.0
 
 
 @dataclass(frozen=True)
@@ -400,6 +408,20 @@ def print_report(report: SessionSyncReport, file: TextIOBase | None = None) -> N
         for insight in insights:
             for line in insight.split("\n"):
                 print(f"  {line}", file=out)
+
+    session_insights, session_recs = diagnose_session_issues(report)
+    if session_insights:
+        print(file=out)
+        print("Session Insights", file=out)
+        print("\u2500" * width, file=out)
+        for insight in session_insights:
+            print(f"  {insight}", file=out)
+    if session_recs:
+        print(file=out)
+        print("Recommendations", file=out)
+        print("\u2500" * width, file=out)
+        for i, rec in enumerate(session_recs, 1):
+            print(f"  {i}. {rec}", file=out)
     print(file=out)
 
 
@@ -1039,6 +1061,252 @@ def diagnose_sync_issues(report: SessionSyncReport) -> list[str]:
                 )
 
     return insights
+
+
+def _detect_warmup(report: SessionSyncReport) -> tuple[list[str], list[str], list[int]]:
+    """Detector 17: Identify warm-up trials with unstable sync that settles later.
+
+    Returns (insights, recommendations, warmup_indices).
+    """
+    insights: list[str] = []
+    recs: list[str] = []
+    warmup_indices: list[int] = []
+
+    if report.n_trials < WARMUP_MIN_SETTLED_TRIALS + 1:
+        return insights, recs, warmup_indices
+
+    spreads = [t.max_timestamp_spread_ms for t in report.trials]
+    mid = report.n_trials // 2
+    settled = spreads[mid:]
+    if len(settled) < WARMUP_MIN_SETTLED_TRIALS:
+        return insights, recs, warmup_indices
+
+    settled_median = float(np.median(settled))
+    if settled_median <= 0:
+        return insights, recs, warmup_indices
+
+    for i in range(mid):
+        if spreads[i] > settled_median * WARMUP_SETTLED_RATIO:
+            warmup_indices.append(i)
+
+    if not warmup_indices:
+        return insights, recs, warmup_indices
+
+    max_warmup = max(spreads[i] for i in warmup_indices)
+    if max_warmup > 1000:
+        warmup_str = f"{max_warmup / 1000:.1f}s"
+    else:
+        warmup_str = f"{max_warmup:.1f}ms"
+
+    if settled_median > 1000:
+        settled_str = f"{settled_median / 1000:.1f}s"
+    else:
+        settled_str = f"{settled_median:.3f}ms"
+
+    trial_str = ", ".join(str(i) for i in warmup_indices)
+    first_good = max(warmup_indices) + 1
+    insights.append(
+        f"Trials {trial_str} show warm-up sync instability (max {warmup_str}). "
+        f"Trials {first_good}+ stable (<{settled_str})."
+    )
+    recs.append("Run `make validate-sync` before recording to avoid warm-up trials.")
+
+    return insights, recs, warmup_indices
+
+
+def _detect_frame_count_anomaly(
+    report: SessionSyncReport,
+) -> tuple[list[str], list[str]]:
+    """Detector 18: Flag cameras acquiring significantly fewer frames than peers.
+
+    Fires only if the deficit is large (>10%), the session has enough frames to
+    be meaningful (>500 median), and the camera was affected in more than half
+    of the trials (so a single bad trial doesn't produce a scary session-wide
+    message). Intentionally conservative — false positives here lead operators
+    to unnecessary cable-swap interventions.
+    """
+    insights: list[str] = []
+    recs: list[str] = []
+
+    diag_trials = [t for t in report.trials if t.camera_error_summary]
+    if not diag_trials:
+        return insights, recs
+
+    camera_totals: dict[str, int] = {}
+    per_trial_counts: dict[str, list[int]] = {}
+    for t in diag_trials:
+        for cam, counters in t.camera_error_summary.items():
+            acquired = counters.get("total_acquired", 0)
+            camera_totals[cam] = camera_totals.get(cam, 0) + acquired
+            per_trial_counts.setdefault(cam, []).append(acquired)
+
+    if len(camera_totals) < 2:
+        return insights, recs
+
+    counts = sorted(camera_totals.values())
+    median_count = float(np.median(counts))
+    if median_count < FRAME_COUNT_ANOMALY_MIN_TOTAL:
+        return insights, recs
+
+    n_trials = len(diag_trials)
+    trial_threshold = max(1, n_trials // 2 + 1)
+
+    for cam, total in sorted(camera_totals.items()):
+        deficit = (median_count - total) / median_count
+        if deficit <= FRAME_COUNT_ANOMALY_FRACTION:
+            continue
+
+        # Count per-trial deficits: only flag if this was persistent across
+        # trials, not driven by one bad trial with many retries.
+        trials_with_deficit = sum(
+            1
+            for c in per_trial_counts.get(cam, [])
+            if c < median_count / n_trials * (1 - FRAME_COUNT_ANOMALY_FRACTION)
+        )
+        if trials_with_deficit < trial_threshold:
+            continue
+
+        deficit_pct = int(round(deficit * 100))
+        scope = (
+            "across all trials"
+            if trials_with_deficit == n_trials
+            else f"across {trials_with_deficit}/{n_trials} trials"
+        )
+        insights.append(
+            f"Camera {cam} acquired ~{deficit_pct}% fewer frames than peers "
+            f"({total:,} vs {int(median_count):,} median {scope})."
+        )
+        recs.append(
+            f"Check the cable/port for camera {cam}. If it persists, unplug/replug "
+            f"and re-run a short validation recording."
+        )
+
+    return insights, recs
+
+
+def _detect_ptp_clusters(report: SessionSyncReport) -> tuple[list[str], list[str]]:
+    """Detector 19: Identify groups of cameras sharing similar PTP offsets."""
+    insights: list[str] = []
+    recs: list[str] = []
+
+    last_with_ptp = None
+    for t in reversed(report.trials):
+        if t.ptp_offset_end:
+            last_with_ptp = t
+            break
+
+    if last_with_ptp is None:
+        return insights, recs
+
+    offsets_ns = last_with_ptp.ptp_offset_end
+    cameras = sorted(offsets_ns.keys(), key=lambda c: offsets_ns[c])
+    if len(cameras) < 2:
+        return insights, recs
+
+    offsets_us = {cam: offsets_ns[cam] / 1000.0 for cam in cameras}
+
+    groups: list[list[str]] = []
+    current_group = [cameras[0]]
+    for i in range(1, len(cameras)):
+        if (
+            abs(offsets_us[cameras[i]] - offsets_us[cameras[i - 1]])
+            <= PTP_CLUSTER_WITHIN_US
+        ):
+            current_group.append(cameras[i])
+        else:
+            groups.append(current_group)
+            current_group = [cameras[i]]
+    groups.append(current_group)
+
+    for group in groups:
+        if len(group) < 2:
+            continue
+        mean_offset = sum(offsets_us[c] for c in group) / len(group)
+        if abs(mean_offset) < PTP_CLUSTER_MIN_OFFSET_US:
+            continue
+        cam_set = "{" + ", ".join(sorted(group)) + "}"
+        insights.append(
+            f"PTP cluster detected: cameras {cam_set} share similar offsets "
+            f"(~{mean_offset / 1000:.1f}ms from reference), suggesting a shared network segment."
+        )
+        recs.append(
+            f"Cameras {cam_set} are likely on a separate network switch from the reference camera. "
+            f"Try connecting all cameras to the same switch, or contact network admin."
+        )
+
+    return insights, recs
+
+
+def _detect_ptp_convergence(
+    report: SessionSyncReport, warmup_indices: list[int]
+) -> tuple[list[str], list[str]]:
+    """Detector 20: Detect PTP offsets converging across the session."""
+    insights: list[str] = []
+    recs: list[str] = []
+
+    trials_with_ptp = [
+        t
+        for t in report.trials
+        if t.ptp_offset_end and t.trial_index not in warmup_indices
+    ]
+    if len(trials_with_ptp) < PTP_CONVERGENCE_MIN_TRIALS:
+        return insights, recs
+
+    def _mean_abs_offset_us(t: TrialSyncMetrics) -> float:
+        offsets = t.ptp_offset_end
+        ref = t.reference_camera
+        non_ref = [cam for cam in offsets if cam != ref]
+        if not non_ref:
+            return 0.0
+        return sum(abs(offsets[cam]) / 1000.0 for cam in non_ref) / len(non_ref)
+
+    first_mean = _mean_abs_offset_us(trials_with_ptp[0])
+    last_mean = _mean_abs_offset_us(trials_with_ptp[-1])
+
+    if last_mean <= 0 or first_mean / last_mean < PTP_CONVERGENCE_RATIO:
+        return insights, recs
+
+    first_idx = trials_with_ptp[0].trial_index
+    last_idx = trials_with_ptp[-1].trial_index
+    insights.append(
+        f"PTP offsets converging across session "
+        f"(Trial {first_idx}: {first_mean / 1000:.1f}ms avg → "
+        f"Trial {last_idx}: {last_mean / 1000:.2f}ms avg). "
+        f"System was not fully converged when recording started."
+    )
+    recs.append(
+        "Wait longer after camera startup for PTP to converge, "
+        "or run `make validate-sync` before recording."
+    )
+
+    return insights, recs
+
+
+def diagnose_session_issues(report: SessionSyncReport) -> tuple[list[str], list[str]]:
+    """Run session-level root cause detectors and return (insights, recommendations)."""
+    all_insights: list[str] = []
+    all_recs: list[str] = []
+
+    warmup_insights, warmup_recs, warmup_indices = _detect_warmup(report)
+    all_insights.extend(warmup_insights)
+    all_recs.extend(warmup_recs)
+
+    for detector in [
+        _detect_frame_count_anomaly,
+    ]:
+        ins, rec = detector(report)
+        all_insights.extend(ins)
+        all_recs.extend(rec)
+
+    ptp_cluster_ins, ptp_cluster_recs = _detect_ptp_clusters(report)
+    all_insights.extend(ptp_cluster_ins)
+    all_recs.extend(ptp_cluster_recs)
+
+    convergence_ins, convergence_recs = _detect_ptp_convergence(report, warmup_indices)
+    all_insights.extend(convergence_ins)
+    all_recs.extend(convergence_recs)
+
+    return all_insights, all_recs
 
 
 def _build_trial_boundary_shapes(
