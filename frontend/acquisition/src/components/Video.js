@@ -9,6 +9,7 @@ const Video = () => {
     const { videoUrl, isPreview, selectedCamera, selectCamera, cameraStatusList } = useContext(AcquisitionState);
     const [imageSrc, setImageSrc] = useState("");
     const ws = useRef(null);
+    const lastUrl = useRef("");
 
     useEffectOnce(() => {
 
@@ -21,15 +22,12 @@ const Video = () => {
         };
 
         ws.current.onmessage = (event) => {
-            console.log("new image")
-            const data = event.data;
-
-            if (imageSrc) {
-                URL.revokeObjectURL(imageSrc);
-            }
-
-            const blob = new Blob([data], { type: "image/jpeg" });
+            const blob = new Blob([event.data], { type: "image/jpeg" });
             const url = URL.createObjectURL(blob);
+            if (lastUrl.current) {
+                URL.revokeObjectURL(lastUrl.current);
+            }
+            lastUrl.current = url;
             setImageSrc(url);
         };
 
@@ -45,8 +43,9 @@ const Video = () => {
             if (ws.current) {
                 ws.current.close();
             }
-            if (imageSrc) {
-                URL.revokeObjectURL(imageSrc);
+            if (lastUrl.current) {
+                URL.revokeObjectURL(lastUrl.current);
+                lastUrl.current = "";
             }
         };
     }, []);
