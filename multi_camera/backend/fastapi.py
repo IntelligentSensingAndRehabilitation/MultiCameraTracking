@@ -42,11 +42,13 @@ from multi_camera.acquisition.diagnostics.json_parser import (
 )
 from multi_camera.acquisition.health import (
     CameraReachabilityReport,
+    CameraUnreachableError,
     DhcpServerStatus,
     HealthCheckReport,
     HealthConfig,
     HealthIdlePoller,
     HostNetworkStatus,
+    check_camera_reachability,
     run_health_check,
     severity_changed,
 )
@@ -584,6 +586,55 @@ def _build_session_summary(session_dir: str) -> SessionSummaryReport:
     )
 
 
+def _broadcast_new_session_insights() -> None:
+    """Run session-level + per-trial detectors, broadcast only NEW findings.
+
+    Called after each trial completes. Diffs against
+    ``state.last_session_insights`` (updated in-place) so the same finding
+    doesn't re-broadcast when a later trial includes earlier trials in its
+    sidecar set. Per-trial detectors typically embed trial identifiers in
+    the finding string, so they dedup naturally.
+
+    Failures inside the synthesizers are caught and logged — the trial has
+    already finished, so we never want this to raise back into the
+    task_done_callback path.
+    """
+    state = get_global_state()
+    if state.current_session is None:
+        return
+    try:
+        report = load_session(Path(state.current_session.recording_path))
+        session_insights, _recommendations = diagnose_session_issues(report)
+        per_trial_insights = diagnose_sync_issues(report)
+        n_trials = len(report.trials)
+    except Exception as e:  # noqa: BLE001
+        acquisition_logger.error(f"Could not run diagnostics: {e}", exc_info=True)
+        return
+
+    session_set = set(session_insights)
+    per_trial_set = set(per_trial_insights)
+    current = session_set | per_trial_set
+    new_insights = current - state.last_session_insights
+    state.last_session_insights = current
+
+    for insight in new_insights:
+        is_per_trial = insight in per_trial_set and insight not in session_set
+        broadcast_event(
+            event_type="session_insight",
+            level="warn",
+            code=(
+                "trial_symptom_detected"
+                if is_per_trial
+                else "session_pattern_detected"
+            ),
+            message=insight,
+            details={
+                "n_trials": n_trials,
+                "scope": "trial" if is_per_trial else "session",
+            },
+        )
+
+
 @api_router.get("/health/session_summary", response_model=SessionSummaryReport)
 async def get_session_summary() -> SessionSummaryReport:
     """Run session-level synthesizers over the current session's recordings.
@@ -780,6 +831,37 @@ async def new_trial(data: NewTrialData, db: Session = Depends(db_dependency)):
     state.selected_camera = None
     current_session = state.current_session
 
+    expected = _expected_serials(state.acquisition)
+    if expected:
+        preflight = await run_in_threadpool(
+            check_camera_reachability,
+            expected_serials=expected,
+            recorder=state.acquisition,
+        )
+        if preflight.missing:
+            broadcast_event(
+                event_type="error",
+                level="error",
+                code="camera_unreachable",
+                message=(
+                    f"Cannot start recording — camera(s) "
+                    f"{', '.join(preflight.missing)} are not reachable. "
+                    "Check cables and power."
+                ),
+                details={"missing": preflight.missing},
+            )
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "camera_unreachable",
+                    "missing": preflight.missing,
+                    "message": (
+                        "Cannot start recording — expected cameras are not "
+                        "reachable. Check cables and power, then try again."
+                    ),
+                },
+            )
+
     def receive_frames_wrapper(frames):
         loop.create_task(receive_frames(frames))
 
@@ -813,8 +895,32 @@ async def new_trial(data: NewTrialData, db: Session = Depends(db_dependency)):
                     comment=comment,
                     timestamp_spread=record["timestamp_spread"],
                 )
+            _broadcast_new_session_insights()
+        except CameraUnreachableError as e:
+            acquisition_logger.error(f"Preflight failed: {e}")
+            broadcast_event(
+                event_type="error",
+                level="error",
+                code="camera_unreachable",
+                message=(
+                    f"Cannot start recording — camera(s) {', '.join(e.missing)} "
+                    "are not reachable. Check cables and power."
+                ),
+                details={"missing": list(e.missing)},
+            )
         except Exception as e:
+            import traceback
             acquisition_logger.error(f"Trial failed: {e}", exc_info=True)
+            broadcast_event(
+                event_type="error",
+                level="error",
+                code="trial_failed",
+                message=f"Recording failed: {e}",
+                details={
+                    "exception_type": type(e).__name__,
+                    "traceback": traceback.format_exc(),
+                },
+            )
 
     task.add_done_callback(task_done_callback)
 
