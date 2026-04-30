@@ -155,3 +155,28 @@ def test_session_summary_returns_404_without_session(
     with TestClient(backend_fastapi.app) as client:
         r = client.get("/api/v1/health/session_summary")
     assert r.status_code == 404
+
+
+def test_session_summary_returns_empty_when_no_trials_yet(
+    configured_session, tmp_path
+) -> None:
+    """A session that's been created but hasn't recorded yet returns an empty
+    summary instead of crashing — this is the common case right after the
+    operator sets a participant ID.
+    """
+    state = configured_session
+    empty_dir = tmp_path / "participant_2" / "20260430"
+    empty_dir.mkdir(parents=True)
+    state.current_session = backend_fastapi.Session(
+        participant_name="participant_2",
+        session_date=datetime.date(2026, 4, 30),
+        recording_path=str(empty_dir),
+    )
+    with TestClient(backend_fastapi.app) as client:
+        r = client.get("/api/v1/health/session_summary")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["n_trials"] == 0
+    assert body["insights"] == []
+    assert body["recommendations"] == []
+    assert body["trial_findings"] == []

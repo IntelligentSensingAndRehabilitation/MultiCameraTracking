@@ -573,8 +573,18 @@ def _build_session_summary(session_dir: str) -> SessionSummaryReport:
     Combines session-level synthesizers (``diagnose_session_issues``) with
     per-trial detectors (``diagnose_sync_issues``).
     """
+    now = datetime.datetime.now(datetime.timezone.utc)
     path = Path(session_dir)
-    report = load_session(path)
+    try:
+        report = load_session(path)
+    except FileNotFoundError:
+        return SessionSummaryReport(
+            n_trials=0,
+            insights=[],
+            recommendations=[],
+            trial_findings=[],
+            generated_at=now,
+        )
     insights, recommendations = diagnose_session_issues(report)
     trial_findings = diagnose_sync_issues(report)
     return SessionSummaryReport(
@@ -582,7 +592,7 @@ def _build_session_summary(session_dir: str) -> SessionSummaryReport:
         insights=insights,
         recommendations=recommendations,
         trial_findings=trial_findings,
-        generated_at=datetime.datetime.now(datetime.timezone.utc),
+        generated_at=now,
     )
 
 
