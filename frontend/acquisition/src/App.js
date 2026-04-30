@@ -14,6 +14,7 @@ import { AcquisitionApi } from './AcquisitionApi';
 import Container from "react-bootstrap/Container";
 import SmplBrowser from './components/SmplBrowser';
 import HealthBanner from './components/HealthBanner';
+import DiagnosticsPage from './components/DiagnosticsPage';
 
 function App() {
 
@@ -32,6 +33,9 @@ function App() {
             </LinkContainer>
             <LinkContainer to="/smpl_browser">
               <Nav.Link>SMPL</Nav.Link>
+            </LinkContainer>
+            <LinkContainer to="/diagnostics">
+              <Nav.Link>Diagnostics</Nav.Link>
             </LinkContainer>
           </Nav>
         </Container>
@@ -56,6 +60,7 @@ function App() {
           <Route path="/" element={<AcquisitionHome />} />
           <Route path="/analysis" element={<AnalysisHome />} />
           <Route path="/smpl_browser" element={<SmplBrowser />} />
+          <Route path="/diagnostics" element={<DiagnosticsPage />} />
         </Routes>
       </AcquisitionApi>
 
