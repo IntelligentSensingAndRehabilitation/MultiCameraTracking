@@ -20,6 +20,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 from pathlib import Path
 from typing import Any, Callable, Literal, Protocol
 
@@ -318,11 +319,15 @@ def check_dhcp_server(
             elif interface_ip != expected_interface_ip:
                 findings.append(
                     Finding(
-                        level="warn",
+                        level="error",
                         code="dhcp_interface_ip_unexpected",
                         message=(
                             f"Network interface {interface} has IP {interface_ip} "
-                            f"(expected {expected_interface_ip})."
+                            f"(expected {expected_interface_ip}). The DHCP server "
+                            "won't bind to the camera subnet at this address — "
+                            "cameras will not receive leases. Activate the "
+                            "DHCP-Server nmcli profile, or check that the cable is "
+                            "in the configured network port."
                         ),
                         details={
                             "actual": interface_ip,
@@ -1008,6 +1013,84 @@ class CameraUnreachableError(RuntimeError):
 
 
 # ---------------------------------------------------------------------------
+# Background idle poller
+# ---------------------------------------------------------------------------
+
+
+class HealthIdlePoller:
+    """Background daemon thread that periodically runs ``run_health_check``.
+
+    Pauses automatically while a recording is in progress (predicate
+    ``is_recording`` returns True). On every completed check, calls
+    ``on_poll(new_report, previous_report)`` — consumers can decide whether to
+    broadcast based on severity changes, new findings, etc.
+    """
+
+    def __init__(
+        self,
+        config: HealthConfig,
+        run_check: Callable[[], HealthCheckReport],
+        is_recording: Callable[[], bool],
+        on_poll: Callable[[HealthCheckReport, HealthCheckReport | None], None],
+        logger: logging.Logger | None = None,
+    ):
+        self._config = config
+        self._run_check = run_check
+        self._is_recording = is_recording
+        self._on_poll = on_poll
+        self._logger = logger or logging.getLogger(__name__)
+
+        self._stop_event = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._last_report: HealthCheckReport | None = None
+
+    @property
+    def last_report(self) -> HealthCheckReport | None:
+        return self._last_report
+
+    def start(self) -> None:
+        if self._thread is not None:
+            return
+        self._stop_event.clear()
+        self._thread = threading.Thread(
+            target=self._loop, name="health_idle_poller", daemon=True
+        )
+        self._thread.start()
+
+    def stop(self) -> None:
+        if self._thread is None:
+            return
+        self._stop_event.set()
+        self._thread.join(timeout=self._config.idle_poll_s + 2)
+        self._thread = None
+
+    def _loop(self) -> None:
+        while not self._stop_event.wait(self._config.idle_poll_s):
+            if self._is_recording():
+                continue
+            try:
+                new_report = self._run_check()
+            except Exception as e:  # noqa: BLE001 — log and keep the loop alive
+                self._logger.error(f"Idle health check failed: {e}", exc_info=True)
+                continue
+            previous = self._last_report
+            self._last_report = new_report
+            try:
+                self._on_poll(new_report, previous)
+            except Exception as e:  # noqa: BLE001
+                self._logger.error(f"on_poll callback raised: {e}", exc_info=True)
+
+
+def severity_changed(
+    new_report: HealthCheckReport, previous: HealthCheckReport | None
+) -> bool:
+    """Return True iff overall severity differs between new and previous report."""
+    if previous is None:
+        return new_report.overall != "ok"
+    return new_report.overall != previous.overall
+
+
+# ---------------------------------------------------------------------------
 # Auto-remediation
 # ---------------------------------------------------------------------------
 
@@ -1147,6 +1230,7 @@ __all__ = [
     "Finding",
     "HealthCheckReport",
     "HealthConfig",
+    "HealthIdlePoller",
     "HostNetworkStatus",
     "IpAddrRunner",
     "RecorderLike",
@@ -1161,6 +1245,7 @@ __all__ = [
     "max_severity",
     "run_health_check",
     "run_host_remediation",
+    "severity_changed",
 ]
 
 
