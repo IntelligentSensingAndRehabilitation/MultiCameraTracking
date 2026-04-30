@@ -1,7 +1,7 @@
 # This is the build file for the docker. Note this should be run from the
 # parent directory for the necessary files to be available
 
-.PHONY: clean build run run-no-checks _docker-run run-mocap-test test test-matrix test-diagnostics validate-sync diag-recording diag-analyze
+.PHONY: clean build run run-no-checks _docker-run run-mocap-test test test-matrix test-diagnostics validate-sync diag-recording diag-analyze health health-fix
 
 DIR := ${CURDIR}
 
@@ -75,3 +75,14 @@ diag-analyze:
 	docker compose run --rm --entrypoint python3 test \
 		-m multi_camera.acquisition.diagnostics.json_parser \
 		$(or $(DATA),/data) --no-plots
+
+# Quick host health check (DHCP, host-network MTU/rmem, camera reachability).
+health:
+	docker compose run --rm --entrypoint python3 test \
+		-m multi_camera.acquisition.health
+
+# Same as `make health` but auto-remediates known drift before reporting.
+# Requires passwordless sudo for ip link / sysctl / systemctl.
+health-fix:
+	docker compose run --rm --entrypoint python3 test \
+		-m multi_camera.acquisition.health --remediate

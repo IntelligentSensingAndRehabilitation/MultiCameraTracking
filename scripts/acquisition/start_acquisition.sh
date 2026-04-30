@@ -140,28 +140,54 @@ run_system_checks() {
         print_success "Network interface $NETWORK_INTERFACE found"
     fi
 
-    # Check 4: MTU setting
+    # Check 4: MTU setting (auto-remediate before failing).
     print_step "4/7" "Checking MTU setting"
     if ip link show "$NETWORK_INTERFACE" &>/dev/null; then
         local mtu=$(ip link show "$NETWORK_INTERFACE" | grep -oP 'mtu \K\d+')
         if [ "$mtu" = "9000" ]; then
             print_success "MTU set to 9000"
         else
-            print_warning "MTU is $mtu, should be 9000"
-            print_info "Run: ./scripts/acquisition/make_settings_persistent.sh"
-            checks_passed=false
+            print_warning "MTU is $mtu, attempting auto-fix"
+            if sudo -n ip link set "$NETWORK_INTERFACE" mtu 9000 2>/dev/null; then
+                local mtu_after=$(ip link show "$NETWORK_INTERFACE" | grep -oP 'mtu \K\d+')
+                if [ "$mtu_after" = "9000" ]; then
+                    print_success "Auto-fixed MTU to 9000 (was $mtu)"
+                else
+                    print_error "MTU still $mtu_after after auto-fix attempt"
+                    print_info "Run: ./scripts/acquisition/make_settings_persistent.sh"
+                    checks_passed=false
+                fi
+            else
+                print_error "MTU is $mtu, expected 9000 — auto-fix failed (passwordless sudo unavailable?)"
+                print_info "Run: sudo ip link set $NETWORK_INTERFACE mtu 9000"
+                print_info "Or persist via: ./scripts/acquisition/make_settings_persistent.sh"
+                checks_passed=false
+            fi
         fi
     fi
 
-    # Check 5: Network buffers
+    # Check 5: Network buffers (auto-remediate before failing).
     print_step "5/7" "Checking network buffer settings"
     local rmem_max=$(sysctl -n net.core.rmem_max 2>/dev/null)
     if [ -n "$rmem_max" ] && [ "$rmem_max" -ge 10000000 ]; then
         print_success "Network buffers configured correctly"
     else
-        print_warning "Network buffers not optimally configured"
-        print_info "Run: ./scripts/acquisition/make_settings_persistent.sh"
-        checks_passed=false
+        print_warning "rmem_max is ${rmem_max:-unset}, attempting auto-fix"
+        if sudo -n sysctl -w net.core.rmem_max=10000000 >/dev/null 2>&1; then
+            local rmem_after=$(sysctl -n net.core.rmem_max 2>/dev/null)
+            if [ -n "$rmem_after" ] && [ "$rmem_after" -ge 10000000 ]; then
+                print_success "Auto-fixed net.core.rmem_max to $rmem_after"
+            else
+                print_error "rmem_max still $rmem_after after auto-fix attempt"
+                print_info "Run: ./scripts/acquisition/make_settings_persistent.sh"
+                checks_passed=false
+            fi
+        else
+            print_error "rmem_max is ${rmem_max:-unset} — auto-fix failed (passwordless sudo unavailable?)"
+            print_info "Run: sudo sysctl -w net.core.rmem_max=10000000"
+            print_info "Or persist via: ./scripts/acquisition/make_settings_persistent.sh"
+            checks_passed=false
+        fi
     fi
 
     # Check 6: Disk space
@@ -251,15 +277,29 @@ activate_network() {
         print_warning "Network interface IP is $ip_addr (expected 192.168.1.1)"
     fi
 
-    # Check DHCP server status
+    # Check DHCP server status. In laptop mode there is no fallback DHCP
+    # server upstream — if isc-dhcp-server isn't running, no cameras will
+    # boot. Auto-remediate before failing.
     print_step "2/2" "Checking DHCP server status"
     if systemctl is-active --quiet isc-dhcp-server 2>/dev/null; then
         print_success "DHCP server is running"
     else
-        print_warning "DHCP server is not running"
-        print_info "If you ran the persistence script, it should start automatically on boot"
-        print_info "Start manually with: sudo systemctl start isc-dhcp-server"
-        # Don't fail here - cameras might still work if DHCP server was started manually
+        print_warning "DHCP server not running, attempting to start it"
+        if sudo -n systemctl start isc-dhcp-server >/dev/null 2>&1; then
+            sleep 1
+            if systemctl is-active --quiet isc-dhcp-server 2>/dev/null; then
+                print_success "Auto-started isc-dhcp-server"
+            else
+                print_error "isc-dhcp-server still not running after start attempt"
+                print_info "Check logs: journalctl -u isc-dhcp-server -n 50"
+                return 1
+            fi
+        else
+            print_error "Could not start isc-dhcp-server (passwordless sudo unavailable?)"
+            print_info "Start manually: sudo systemctl start isc-dhcp-server"
+            print_info "Or enable on boot: ./scripts/acquisition/make_settings_persistent.sh"
+            return 1
+        fi
     fi
 
     echo ""
@@ -286,11 +326,36 @@ wait_for_cameras() {
         # This is a basic check - the actual acquisition software does more thorough detection
 
         if [ "$DEPLOYMENT_MODE" = "laptop" ]; then
-            # In laptop mode, check DHCP leases
+            # Count current leases only — the previous `grep -c '^lease'` counted
+            # stale leases from previous boots and reported false-positive counts.
             if [ -f /var/lib/dhcp/dhcpd.leases ]; then
-                local lease_count=$(grep -c "^lease" /var/lib/dhcp/dhcpd.leases 2>/dev/null || echo 0)
+                local lease_count=$(python3 - /var/lib/dhcp/dhcpd.leases <<'PY' 2>/dev/null || echo 0
+import datetime, re, sys
+try:
+    text = open(sys.argv[1]).read()
+except OSError:
+    print(0); sys.exit(0)
+now = datetime.datetime.utcnow()
+n = 0
+for m in re.finditer(r"lease\s+\d+\.\d+\.\d+\.\d+\s*\{(.*?)\}", text, re.DOTALL):
+    body = m.group(1)
+    if "abandoned" in body:
+        continue
+    em = re.search(r"ends\s+\d+\s+(\d{4})/(\d+)/(\d+)\s+(\d+):(\d+):(\d+)", body)
+    if em is None:
+        if re.search(r"ends\s+never", body):
+            n += 1
+        continue
+    try:
+        if datetime.datetime(*map(int, em.groups())) > now:
+            n += 1
+    except ValueError:
+        pass
+print(n)
+PY
+)
                 if [ "$lease_count" -gt 0 ]; then
-                    print_success "DHCP has issued $lease_count lease(s)"
+                    print_success "DHCP has issued $lease_count current lease(s)"
                     break
                 fi
             fi

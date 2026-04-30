@@ -9,6 +9,11 @@ services:
     environment:
       REACT_APP_BASE_URL: ${REACT_APP_BASE_URL:-localhost}
       PYTHONUNBUFFERED: 1
+      DEPLOYMENT_MODE: ${DEPLOYMENT_MODE:-network}
+      NETWORK_INTERFACE: ${NETWORK_INTERFACE:-enp5s0}
+      DHCP_LEASE_FILE: ${DHCP_LEASE_FILE:-/var/lib/dhcp/dhcpd.leases}
+      DISK_SPACE_WARNING_THRESHOLD_GB: ${DISK_SPACE_WARNING_THRESHOLD_GB:-50}
+      HEALTH_IDLE_POLL_S: ${HEALTH_IDLE_POLL_S:-30}
     volumes:
       - ${DATA_VOLUME:-/data}:/data
       - ${CAMERA_CONFIGS:-/camera_configs}:/configs
@@ -28,6 +33,11 @@ services:
       REACT_APP_BASE_URL: ${REACT_APP_BASE_URL:-localhost}
       REACT_APP_TEST_MODE: "true"
       PYTHONUNBUFFERED: 1
+      DEPLOYMENT_MODE: ${DEPLOYMENT_MODE:-network}
+      NETWORK_INTERFACE: ${NETWORK_INTERFACE:-enp5s0}
+      DHCP_LEASE_FILE: ${DHCP_LEASE_FILE:-/var/lib/dhcp/dhcpd.leases}
+      DISK_SPACE_WARNING_THRESHOLD_GB: ${DISK_SPACE_WARNING_THRESHOLD_GB:-50}
+      HEALTH_IDLE_POLL_S: ${HEALTH_IDLE_POLL_S:-30}
     volumes:
       - ${TEST_DATA_VOLUME:-/data-test}:/data
       - ${CAMERA_CONFIGS:-/camera_configs}:/configs
@@ -39,6 +49,13 @@ services:
   test:
     image: isr/mct_acquisition
     command: /Mocap/entrypoints/run_tests.sh
+    environment:
+      PYTHONUNBUFFERED: 1
+      DEPLOYMENT_MODE: ${DEPLOYMENT_MODE:-network}
+      NETWORK_INTERFACE: ${NETWORK_INTERFACE:-enp5s0}
+      DHCP_LEASE_FILE: ${DHCP_LEASE_FILE:-/var/lib/dhcp/dhcpd.leases}
+      DISK_SPACE_WARNING_THRESHOLD_GB: ${DISK_SPACE_WARNING_THRESHOLD_GB:-50}
+      HEALTH_IDLE_POLL_S: ${HEALTH_IDLE_POLL_S:-30}
     volumes:
       - ${DATA_VOLUME:-/data}:/data
       - ${CAMERA_CONFIGS:-/camera_configs}:/configs

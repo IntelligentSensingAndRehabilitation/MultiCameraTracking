@@ -14,6 +14,7 @@ import pytest
 from multi_camera.acquisition.diagnostics.json_parser import (
     create_sync_wait_figure,
     detect_timestamp_jumps,
+    diagnose_session_issues,
     diagnose_sync_issues,
     load_session,
     load_trial,
@@ -1000,3 +1001,380 @@ class TestSaveReport:
 
         assert path == tmp_path / "diagnostics" / "sync_report.txt"
         assert path.exists()
+
+
+def _write_multi_trial(
+    tmp_path: Path,
+    n_trials: int,
+    trial_overrides: dict[int, dict] | None = None,
+) -> None:
+    """Write multiple trial JSON files with optional per-trial overrides."""
+    overrides = trial_overrides or {}
+    for i in range(n_trials):
+        kwargs = overrides.get(i, {})
+        data = _make_json_data(**kwargs)
+        _write_json(
+            tmp_path, data, filename=f"test_20250101_{120000 + i * 100:06d}.json"
+        )
+
+
+class TestWarmupDetection:
+    def test_warmup_detected(self, tmp_path: Path) -> None:
+        """2 bad trials + 3 clean → warm-up flagged."""
+        for i in range(5):
+            n = 20
+            timestamps = []
+            for f in range(n):
+                row = [
+                    BASE_TIMESTAMP_NS + f * FRAME_PERIOD_NS + c * 100 for c in range(3)
+                ]
+                if i < 2 and f == 5:
+                    row[2] += 500_000_000  # 500ms jitter on one camera → big spread
+                timestamps.append(row)
+            data = _make_json_data(n_frames=n)
+            data["timestamps"] = timestamps
+            _write_json(
+                tmp_path, data, filename=f"test_20250101_{120000 + i * 100:06d}.json"
+            )
+
+        report = load_session(tmp_path)
+        session_insights, recs = diagnose_session_issues(report)
+
+        warmup = [i for i in session_insights if "warm-up" in i]
+        assert len(warmup) == 1
+        assert "validate-sync" in recs[0]
+
+    def test_all_clean_no_warmup(self, tmp_path: Path) -> None:
+        _write_multi_trial(tmp_path, 5)
+        report = load_session(tmp_path)
+        session_insights, recs = diagnose_session_issues(report)
+
+        warmup = [i for i in session_insights if "warm-up" in i]
+        assert len(warmup) == 0
+
+    def test_all_bad_no_warmup(self, tmp_path: Path) -> None:
+        """When all trials are bad, there's no settled baseline → no warm-up flag."""
+        for i in range(5):
+            n = 20
+            timestamps = []
+            for f in range(n):
+                row = [
+                    BASE_TIMESTAMP_NS + f * FRAME_PERIOD_NS + c * 100 for c in range(3)
+                ]
+                if f == 5:
+                    row[2] += 500_000_000  # all trials have big spread
+                timestamps.append(row)
+            data = _make_json_data(n_frames=n)
+            data["timestamps"] = timestamps
+            _write_json(
+                tmp_path, data, filename=f"test_20250101_{120000 + i * 100:06d}.json"
+            )
+
+        report = load_session(tmp_path)
+        session_insights, _ = diagnose_session_issues(report)
+
+        warmup = [i for i in session_insights if "warm-up" in i]
+        assert len(warmup) == 0
+
+    def test_single_trial_no_warmup(self, tmp_path: Path) -> None:
+        _write_multi_trial(tmp_path, 1)
+        report = load_session(tmp_path)
+        session_insights, _ = diagnose_session_issues(report)
+
+        warmup = [i for i in session_insights if "warm-up" in i]
+        assert len(warmup) == 0
+
+
+class TestFrameCountAnomaly:
+    def test_large_deficit_flags(self, tmp_path: Path) -> None:
+        """A camera acquiring 20% fewer frames should fire the anomaly."""
+        error_summary = {
+            "CAM_A": {
+                "total_acquired": 3500,
+                "incomplete_frames": 0,
+                "exceptions": 0,
+                "frame_id_gaps": 0,
+            },
+            "CAM_B": {
+                "total_acquired": 4400,
+                "incomplete_frames": 0,
+                "exceptions": 0,
+                "frame_id_gaps": 0,
+            },
+            "CAM_C": {
+                "total_acquired": 4400,
+                "incomplete_frames": 0,
+                "exceptions": 0,
+                "frame_id_gaps": 0,
+            },
+        }
+        data = _make_json_data(
+            include_diagnostics=True, camera_error_summary=error_summary
+        )
+        _write_json(tmp_path, data)
+        report = load_session(tmp_path)
+
+        session_insights, recs = diagnose_session_issues(report)
+
+        anomaly = [i for i in session_insights if "CAM_A" in i and "frames" in i]
+        assert len(anomaly) == 1
+        assert "3,500" in anomaly[0]
+        assert "30fps" not in anomaly[0], "message should not hard-code 30fps"
+        cable_recs = [r for r in recs if "cable" in r.lower()]
+        assert len(cable_recs) == 1
+
+    def test_small_deficit_does_not_flag(self, tmp_path: Path) -> None:
+        """A 4.5% deficit is within normal variance — should NOT fire."""
+        error_summary = {
+            "CAM_A": {
+                "total_acquired": 4200,
+                "incomplete_frames": 0,
+                "exceptions": 0,
+                "frame_id_gaps": 0,
+            },
+            "CAM_B": {
+                "total_acquired": 4400,
+                "incomplete_frames": 0,
+                "exceptions": 0,
+                "frame_id_gaps": 0,
+            },
+            "CAM_C": {
+                "total_acquired": 4400,
+                "incomplete_frames": 0,
+                "exceptions": 0,
+                "frame_id_gaps": 0,
+            },
+        }
+        data = _make_json_data(
+            include_diagnostics=True, camera_error_summary=error_summary
+        )
+        _write_json(tmp_path, data)
+        report = load_session(tmp_path)
+
+        session_insights, _ = diagnose_session_issues(report)
+
+        anomaly = [i for i in session_insights if "CAM_A" in i and "frames" in i]
+        assert len(anomaly) == 0, f"small deficit should not flag; got: {anomaly}"
+
+    def test_short_trial_does_not_flag(self, tmp_path: Path) -> None:
+        """Below the minimum total frames, don't flag even a large deficit."""
+        error_summary = {
+            "CAM_A": {
+                "total_acquired": 50,
+                "incomplete_frames": 0,
+                "exceptions": 0,
+                "frame_id_gaps": 0,
+            },
+            "CAM_B": {
+                "total_acquired": 200,
+                "incomplete_frames": 0,
+                "exceptions": 0,
+                "frame_id_gaps": 0,
+            },
+            "CAM_C": {
+                "total_acquired": 200,
+                "incomplete_frames": 0,
+                "exceptions": 0,
+                "frame_id_gaps": 0,
+            },
+        }
+        data = _make_json_data(
+            include_diagnostics=True, camera_error_summary=error_summary
+        )
+        _write_json(tmp_path, data)
+        report = load_session(tmp_path)
+        session_insights, _ = diagnose_session_issues(report)
+        anomaly = [i for i in session_insights if "CAM_A" in i and "frames" in i]
+        assert len(anomaly) == 0
+
+    def test_uniform_no_flag(self, tmp_path: Path) -> None:
+        error_summary = {
+            "CAM_A": {
+                "total_acquired": 4400,
+                "incomplete_frames": 0,
+                "exceptions": 0,
+                "frame_id_gaps": 0,
+            },
+            "CAM_B": {
+                "total_acquired": 4400,
+                "incomplete_frames": 0,
+                "exceptions": 0,
+                "frame_id_gaps": 0,
+            },
+            "CAM_C": {
+                "total_acquired": 4400,
+                "incomplete_frames": 0,
+                "exceptions": 0,
+                "frame_id_gaps": 0,
+            },
+        }
+        data = _make_json_data(
+            include_diagnostics=True, camera_error_summary=error_summary
+        )
+        _write_json(tmp_path, data)
+        report = load_session(tmp_path)
+
+        session_insights, _ = diagnose_session_issues(report)
+
+        anomaly = [i for i in session_insights if "frames vs" in i]
+        assert len(anomaly) == 0
+
+    def test_no_error_summary_no_crash(self, tmp_path: Path) -> None:
+        data = _make_json_data(include_diagnostics=True)
+        _write_json(tmp_path, data)
+        report = load_session(tmp_path)
+
+        session_insights, _ = diagnose_session_issues(report)
+        anomaly = [i for i in session_insights if "frames vs" in i]
+        assert len(anomaly) == 0
+
+
+class TestPtpClusterDetection:
+    def test_two_groups_detected(self, tmp_path: Path) -> None:
+        """Cameras with two distinct offset clusters → cluster reported."""
+        ptp_end = {
+            "CAM_A": 0,
+            "CAM_B": 100_000,  # 100µs
+            "CAM_C": -2_000_000,  # -2ms
+            "CAM_D": -2_100_000,  # -2.1ms
+            "CAM_E": -1_900_000,  # -1.9ms
+        }
+        data = _make_json_data(
+            camera_ids=["CAM_A", "CAM_B", "CAM_C", "CAM_D", "CAM_E"],
+            include_diagnostics=True,
+            diagnostics_version=2,
+            ptp_offset_end=ptp_end,
+        )
+        _write_json(tmp_path, data)
+        report = load_session(tmp_path)
+
+        session_insights, recs = diagnose_session_issues(report)
+
+        cluster = [i for i in session_insights if "PTP cluster" in i]
+        assert len(cluster) >= 1
+        assert "CAM_C" in cluster[0]
+        assert "CAM_D" in cluster[0]
+        assert "CAM_E" in cluster[0]
+        switch_recs = [r for r in recs if "switch" in r.lower()]
+        assert len(switch_recs) >= 1
+
+    def test_all_close_no_cluster(self, tmp_path: Path) -> None:
+        ptp_end = {
+            "CAM_A": 0,
+            "CAM_B": 10_000,  # 10µs
+            "CAM_C": -15_000,  # -15µs
+        }
+        data = _make_json_data(
+            include_diagnostics=True,
+            diagnostics_version=2,
+            ptp_offset_end=ptp_end,
+        )
+        _write_json(tmp_path, data)
+        report = load_session(tmp_path)
+
+        session_insights, _ = diagnose_session_issues(report)
+
+        cluster = [i for i in session_insights if "PTP cluster" in i]
+        assert len(cluster) == 0
+
+    def test_no_ptp_data_no_crash(self, tmp_path: Path) -> None:
+        data = _make_json_data(include_diagnostics=True)
+        _write_json(tmp_path, data)
+        report = load_session(tmp_path)
+
+        session_insights, _ = diagnose_session_issues(report)
+        cluster = [i for i in session_insights if "PTP cluster" in i]
+        assert len(cluster) == 0
+
+
+class TestPtpConvergence:
+    def test_decreasing_offsets_flagged(self, tmp_path: Path) -> None:
+        """PTP offsets decreasing across trials → convergence flagged."""
+        offsets = [2_000_000, 1_500_000, 1_000_000, 500_000, 100_000]  # ns, decreasing
+        for i, offset in enumerate(offsets):
+            data = _make_json_data(
+                include_diagnostics=True,
+                diagnostics_version=2,
+                ptp_offset_end={"CAM_A": 0, "CAM_B": offset, "CAM_C": -offset},
+            )
+            _write_json(
+                tmp_path, data, filename=f"test_20250101_{120000 + i * 100:06d}.json"
+            )
+
+        report = load_session(tmp_path)
+        session_insights, recs = diagnose_session_issues(report)
+
+        convergence = [i for i in session_insights if "converging" in i]
+        assert len(convergence) == 1
+        assert "Trial 0" in convergence[0]
+        wait_recs = [r for r in recs if "converge" in r.lower()]
+        assert len(wait_recs) == 1
+
+    def test_stable_offsets_no_flag(self, tmp_path: Path) -> None:
+        for i in range(5):
+            data = _make_json_data(
+                include_diagnostics=True,
+                diagnostics_version=2,
+                ptp_offset_end={"CAM_A": 0, "CAM_B": 50_000, "CAM_C": -50_000},
+            )
+            _write_json(
+                tmp_path, data, filename=f"test_20250101_{120000 + i * 100:06d}.json"
+            )
+
+        report = load_session(tmp_path)
+        session_insights, _ = diagnose_session_issues(report)
+
+        convergence = [i for i in session_insights if "converging" in i]
+        assert len(convergence) == 0
+
+    def test_fewer_than_3_trials_no_flag(self, tmp_path: Path) -> None:
+        for i in range(2):
+            data = _make_json_data(
+                include_diagnostics=True,
+                diagnostics_version=2,
+                ptp_offset_end={"CAM_A": 0, "CAM_B": 2_000_000, "CAM_C": -2_000_000},
+            )
+            _write_json(
+                tmp_path, data, filename=f"test_20250101_{120000 + i * 100:06d}.json"
+            )
+
+        report = load_session(tmp_path)
+        session_insights, _ = diagnose_session_issues(report)
+
+        convergence = [i for i in session_insights if "converging" in i]
+        assert len(convergence) == 0
+
+
+class TestSessionInsightsInReport:
+    def test_sections_appear_in_save_report(self, tmp_path: Path) -> None:
+        """Session Insights and Recommendations sections appear in saved report."""
+        offsets = [2_000_000, 1_500_000, 1_000_000, 500_000, 100_000]
+        for i, offset in enumerate(offsets):
+            data = _make_json_data(
+                include_diagnostics=True,
+                diagnostics_version=2,
+                ptp_offset_end={"CAM_A": 0, "CAM_B": offset, "CAM_C": -offset},
+            )
+            _write_json(
+                tmp_path, data, filename=f"test_20250101_{120000 + i * 100:06d}.json"
+            )
+
+        report = load_session(tmp_path)
+        output_dir = tmp_path / "output"
+        path = save_report(report, output_dir=output_dir)
+
+        contents = path.read_text()
+        assert "Session Insights" in contents
+        assert "Recommendations" in contents
+        assert "converging" in contents
+
+    def test_no_recommendations_section_omitted(self, tmp_path: Path) -> None:
+        """When no session issues, sections are omitted."""
+        _write_multi_trial(tmp_path, 3)
+        report = load_session(tmp_path)
+        output_dir = tmp_path / "output"
+        path = save_report(report, output_dir=output_dir)
+
+        contents = path.read_text()
+        assert "Session Insights" not in contents
+        assert "Recommendations" not in contents

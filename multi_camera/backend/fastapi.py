@@ -267,7 +267,9 @@ app.add_middleware(
 
 @app.get("/")
 async def read_root(request: Request):
-    return templates.TemplateResponse("index.html", context={"request": request})
+    # Newer Starlette versions require ``request`` as a positional/named arg
+    # on TemplateResponse, not as a field in ``context``. Pass it explicitly.
+    return templates.TemplateResponse(request=request, name="index.html")
 
 
 class NewTrialData(BaseModel):
@@ -514,13 +516,10 @@ async def new_trial(data: NewTrialData, db: Session = Depends(db_dependency)):
     config = await get_current_config()
 
     def task_done_callback(task):
-        print("Task completed.")
-        # You can retrieve the result (or exception) of the task using `result()` method.
         try:
             result = task.result()
-            print(f"Task result: {result}")
 
-            # The result now contains a list of all the recordings after acquisition was started
+            # The result contains a list of all the recordings after acquisition was started
             for record in result:
                 add_recording(
                     db,
@@ -534,7 +533,7 @@ async def new_trial(data: NewTrialData, db: Session = Depends(db_dependency)):
                     timestamp_spread=record["timestamp_spread"],
                 )
         except Exception as e:
-            print(f"Task raised an exception: {e}")
+            acquisition_logger.error(f"Trial failed: {e}", exc_info=True)
 
     task.add_done_callback(task_done_callback)
 

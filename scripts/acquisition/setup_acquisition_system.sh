@@ -550,7 +550,7 @@ EOF
             print_info "Updating existing DHCP-Server profile..."
             nmcli con modify DHCP-Server \
                 ifname "$NETWORK_INTERFACE" \
-                autoconnect no \
+                autoconnect yes \
                 ipv4.method manual \
                 ipv4.addresses 192.168.1.1/24 \
                 ipv4.gateway 192.168.1.1 \
@@ -561,7 +561,7 @@ EOF
         fi
     else
         nmcli con add type ethernet con-name DHCP-Server ifname "$NETWORK_INTERFACE" \
-            autoconnect no \
+            autoconnect yes \
             ipv4.method manual \
             ipv4.addresses 192.168.1.1/24 \
             ipv4.gateway 192.168.1.1 \

@@ -53,7 +53,7 @@ if [ "$DEPLOYMENT_MODE" = "laptop" ]; then
     # In laptop mode, modify the DHCP-Server connection profile
     if nmcli con show DHCP-Server &>/dev/null; then
         nmcli con modify DHCP-Server ethernet.mtu 9000
-        echo -e "${GREEN}✓${NC} MTU set to 9000 on DHCP-Server connection"
+        echo -e "${GREEN}✓${NC} MTU set to 9000 on DHCP-Server connection (persistent)"
     else
         echo -e "${RED}Error: DHCP-Server connection profile not found${NC}"
         echo "Please complete DHCP setup before running this script."
@@ -64,11 +64,21 @@ else
     ACTIVE_CON=$(nmcli -t -f NAME,DEVICE con show --active | grep "$NETWORK_INTERFACE" | cut -d: -f1)
     if [ -n "$ACTIVE_CON" ]; then
         nmcli con modify "$ACTIVE_CON" ethernet.mtu 9000
-        echo -e "${GREEN}✓${NC} MTU set to 9000 on connection '$ACTIVE_CON'"
+        echo -e "${GREEN}✓${NC} MTU set to 9000 on connection '$ACTIVE_CON' (persistent)"
     else
         echo -e "${YELLOW}Warning: No active connection found on $NETWORK_INTERFACE${NC}"
         echo "You may need to manually set MTU with: nmcli con modify <connection-name> ethernet.mtu 9000"
     fi
+fi
+
+# Apply MTU to the live interface so it takes effect immediately — nmcli con
+# modify only writes the profile; without this, the new MTU would only apply
+# on next connection activation or reboot.
+if sudo ip link set "$NETWORK_INTERFACE" mtu 9000 2>/dev/null; then
+    echo -e "${GREEN}✓${NC} MTU applied to live interface $NETWORK_INTERFACE (immediate)"
+else
+    echo -e "${YELLOW}Warning: Could not apply MTU to live interface $NETWORK_INTERFACE.${NC}"
+    echo "It will take effect on next connection activation or reboot."
 fi
 
 # 2. Make network buffer settings persistent via sysctl.conf
@@ -78,21 +88,30 @@ echo "Configuring persistent network buffer settings..."
 SYSCTL_CONF="/etc/sysctl.conf"
 SETTINGS_ADDED=0
 
-if ! grep -q "^net.core.rmem_max=10000000" "$SYSCTL_CONF" 2>/dev/null; then
-    echo "net.core.rmem_max=10000000" | sudo tee -a "$SYSCTL_CONF" > /dev/null
-    SETTINGS_ADDED=1
-    echo -e "${GREEN}✓${NC} Added net.core.rmem_max to $SYSCTL_CONF"
-else
-    echo -e "${GREEN}✓${NC} net.core.rmem_max already configured"
-fi
+# Check by key (not exact line). Updates the value in place if a wrong value
+# was hand-edited; appends if the key isn't present at all.
+ensure_sysctl_value() {
+    local key="$1"
+    local desired="$2"
+    if grep -qE "^${key}[[:space:]]*=" "$SYSCTL_CONF" 2>/dev/null; then
+        local current
+        current=$(grep -E "^${key}[[:space:]]*=" "$SYSCTL_CONF" | tail -1 | sed -E "s/^${key}[[:space:]]*=[[:space:]]*//")
+        if [ "$current" != "$desired" ]; then
+            sudo sed -i -E "s|^${key}[[:space:]]*=.*|${key}=${desired}|" "$SYSCTL_CONF"
+            SETTINGS_ADDED=1
+            echo -e "${GREEN}✓${NC} Updated ${key} in $SYSCTL_CONF (was ${current}, now ${desired})"
+        else
+            echo -e "${GREEN}✓${NC} ${key} already set to ${desired}"
+        fi
+    else
+        echo "${key}=${desired}" | sudo tee -a "$SYSCTL_CONF" > /dev/null
+        SETTINGS_ADDED=1
+        echo -e "${GREEN}✓${NC} Added ${key} to $SYSCTL_CONF"
+    fi
+}
 
-if ! grep -q "^net.core.rmem_default=10000000" "$SYSCTL_CONF" 2>/dev/null; then
-    echo "net.core.rmem_default=10000000" | sudo tee -a "$SYSCTL_CONF" > /dev/null
-    SETTINGS_ADDED=1
-    echo -e "${GREEN}✓${NC} Added net.core.rmem_default to $SYSCTL_CONF"
-else
-    echo -e "${GREEN}✓${NC} net.core.rmem_default already configured"
-fi
+ensure_sysctl_value "net.core.rmem_max" "10000000"
+ensure_sysctl_value "net.core.rmem_default" "10000000"
 
 # Apply sysctl settings immediately
 if [ $SETTINGS_ADDED -eq 1 ]; then
