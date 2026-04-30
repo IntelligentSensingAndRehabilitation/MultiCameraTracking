@@ -127,6 +127,100 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
+
+class DiagnosticsManager:
+    """WebSocket fan-out for structured diagnostic envelopes.
+
+    Separate from :class:`ConnectionManager` so that bursty diagnostic broadcasts
+    (per-trial detector findings, idle-poll health reports) cannot delay the
+    recording status writer on ``/api/v1/ws``.
+
+    Hardened against the failure modes that broke the v2 implementation:
+
+    - **Per-connection write lock**: serializes writes to a single connection so
+      simultaneous broadcasts from different sources don't race the underlying
+      websockets keepalive ping (which manifested as
+      ``AssertionError in _drain_helper``).
+    - **Dead-connection cleanup**: a failed ``send_json`` removes the connection
+      instead of leaving a stale entry that subsequent broadcasts will keep
+      hitting.
+    - **Per-connection isolation**: one slow/dead client does not block the others.
+    """
+
+    def __init__(self):
+        self.active_connections: list[WebSocket] = []
+        self._locks: dict[WebSocket, asyncio.Lock] = {}
+
+    async def connect(self, websocket: WebSocket) -> None:
+        await websocket.accept()
+        self.active_connections.append(websocket)
+        self._locks[websocket] = asyncio.Lock()
+        logger.debug("Diagnostics websocket connected")
+
+    def disconnect(self, websocket: WebSocket) -> None:
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+        self._locks.pop(websocket, None)
+        logger.debug("Diagnostics websocket disconnected")
+
+    async def _send_one(self, websocket: WebSocket, message: dict) -> bool:
+        lock = self._locks.get(websocket)
+        if lock is None:
+            return False
+        async with lock:
+            try:
+                await websocket.send_json(message)
+                return True
+            except Exception as e:  # noqa: BLE001
+                acquisition_logger.warning(
+                    f"Diagnostics WS send failed, dropping connection: {e}"
+                )
+                return False
+
+    async def broadcast(self, message: dict) -> None:
+        if not self.active_connections:
+            return
+        results = await asyncio.gather(
+            *(self._send_one(c, message) for c in list(self.active_connections)),
+            return_exceptions=False,
+        )
+        for connection, ok in zip(list(self.active_connections), results):
+            if not ok:
+                self.disconnect(connection)
+
+
+diagnostics_manager = DiagnosticsManager()
+
+
+def broadcast_event(
+    event_type: str,
+    level: str,
+    code: str,
+    message: str,
+    details: dict | None = None,
+) -> None:
+    """Build and dispatch a structured diagnostic envelope. Safe from any thread.
+
+    Envelope shape: ``{type, level, code, message, details, ts}``.
+    ``level`` follows the Finding severity contract (``ok | warn | error``).
+    Frontend dispatches on ``type`` (``health_report``, ``session_insight``,
+    ``trial_failed``, ``camera_unreachable``, ...).
+    """
+    envelope = {
+        "type": event_type,
+        "level": level,
+        "code": code,
+        "message": message,
+        "details": details or {},
+        "ts": datetime.datetime.utcnow().isoformat() + "Z",
+    }
+    coro = diagnostics_manager.broadcast(envelope)
+    try:
+        asyncio.get_running_loop()
+        asyncio.create_task(coro)
+    except RuntimeError:
+        asyncio.run_coroutine_threadsafe(coro, loop)
+
 RECORDING_BASE = "data"
 CONFIG_PATH = "/configs/"
 DEFAULT_CONFIG = os.path.join(CONFIG_PATH, "cotton_lab_config_20230620.yaml")
@@ -781,6 +875,28 @@ async def websocket_endpoint(websocket: WebSocket):
     manager.disconnect(websocket)
 
     logger.info("Regular websocket exited")
+
+
+@api_router.websocket("/ws/diagnostics")
+async def diagnostics_websocket_endpoint(websocket: WebSocket):
+    """Push channel for structured diagnostic envelopes.
+
+    Separate from /api/v1/ws (which carries recording {status, progress})
+    so a bursty diagnostic broadcast cannot delay the recording status writer.
+    """
+    await diagnostics_manager.connect(websocket)
+    try:
+        while not AppStatus.should_exit:
+            try:
+                await asyncio.wait_for(websocket.receive(), timeout=0.5)
+            except asyncio.TimeoutError:
+                pass
+    except WebSocketDisconnect as e:
+        logger.debug("Diagnostics websocket disconnected: %s", e)
+    except RuntimeError as e:
+        logger.debug("Diagnostics websocket disconnected (RuntimeError): %s", e)
+    finally:
+        diagnostics_manager.disconnect(websocket)
 
 
 class SelectCameraData(BaseModel):
