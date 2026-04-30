@@ -42,7 +42,6 @@ from multi_camera.acquisition.diagnostics.json_parser import (
 )
 from multi_camera.acquisition.health import (
     CameraReachabilityReport,
-    CameraUnreachableError,
     DhcpServerStatus,
     HealthCheckReport,
     HealthConfig,
@@ -849,27 +848,19 @@ async def new_trial(data: NewTrialData, db: Session = Depends(db_dependency)):
             recorder=state.acquisition,
         )
         if preflight.missing:
+            # Match historical FlirRecorder behavior: missing cameras are
+            # skipped gracefully, the trial proceeds with whatever cameras
+            # are reachable. Surface a warning so the operator can fix it
+            # later without losing the current take.
             broadcast_event(
-                event_type="error",
-                level="error",
-                code="camera_unreachable",
+                event_type="session_insight",
+                level="warn",
+                code="camera_missing",
                 message=(
-                    f"Cannot start recording — camera(s) "
-                    f"{', '.join(preflight.missing)} are not reachable. "
-                    "Check cables and power."
+                    f"Recording started without camera(s) "
+                    f"{', '.join(preflight.missing)} — check cables and power."
                 ),
                 details={"missing": preflight.missing},
-            )
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "code": "camera_unreachable",
-                    "missing": preflight.missing,
-                    "message": (
-                        "Cannot start recording — expected cameras are not "
-                        "reachable. Check cables and power, then try again."
-                    ),
-                },
             )
 
     def receive_frames_wrapper(frames):
@@ -906,18 +897,6 @@ async def new_trial(data: NewTrialData, db: Session = Depends(db_dependency)):
                     timestamp_spread=record["timestamp_spread"],
                 )
             _broadcast_new_session_insights()
-        except CameraUnreachableError as e:
-            acquisition_logger.error(f"Preflight failed: {e}")
-            broadcast_event(
-                event_type="error",
-                level="error",
-                code="camera_unreachable",
-                message=(
-                    f"Cannot start recording — camera(s) {', '.join(e.missing)} "
-                    "are not reachable. Check cables and power."
-                ),
-                details={"missing": list(e.missing)},
-            )
         except Exception as e:
             import traceback
             acquisition_logger.error(f"Trial failed: {e}", exc_info=True)
