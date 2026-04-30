@@ -75,6 +75,13 @@ const HostHealthPanel = () => {
     }
 
     const { overall, dhcp, cameras, host_network, recording_state, deployment_mode, generated_at } = healthReport;
+    const dhcpFindings = (dhcp && dhcp.findings) || [];
+    const cameraFindings = (cameras && cameras.findings) || [];
+    const hostFindings = (host_network && host_network.findings) || [];
+    const expectedList = (cameras && cameras.expected) || [];
+    const detectedList = (cameras && cameras.detected) || [];
+    const missingList = (cameras && cameras.missing) || [];
+    const extraList = (cameras && cameras.extra) || [];
 
     return (
         <Card className="mb-4">
@@ -96,10 +103,10 @@ const HostHealthPanel = () => {
 
                 <SubsystemCard
                     title="DHCP server"
-                    severity={dhcp?.findings?.length ? maxLevel(dhcp.findings) : 'ok'}
-                    findings={dhcp?.findings}
+                    severity={maxLevel(dhcpFindings)}
+                    findings={dhcpFindings}
                     extra={
-                        dhcp?.applicable ? (
+                        dhcp && dhcp.applicable ? (
                             <Table size="sm" borderless className="mb-2">
                                 <tbody>
                                     <tr><td>Service</td><td>{describeBool(dhcp.service_active)}</td></tr>
@@ -115,15 +122,15 @@ const HostHealthPanel = () => {
 
                 <SubsystemCard
                     title="Cameras"
-                    severity={cameras?.findings?.length ? maxLevel(cameras.findings) : 'ok'}
-                    findings={cameras?.findings}
+                    severity={maxLevel(cameraFindings)}
+                    findings={cameraFindings}
                     extra={
                         <Table size="sm" borderless className="mb-2">
                             <tbody>
-                                <tr><td>Expected</td><td>{cameras?.expected?.length ?? 0}</td></tr>
-                                <tr><td>Detected</td><td>{cameras?.detected?.length ?? 0}</td></tr>
-                                <tr><td>Missing</td><td>{cameras?.missing?.join(', ') || '—'}</td></tr>
-                                <tr><td>Extra</td><td>{cameras?.extra?.join(', ') || '—'}</td></tr>
+                                <tr><td>Expected</td><td>{expectedList.length}</td></tr>
+                                <tr><td>Detected</td><td>{detectedList.length}</td></tr>
+                                <tr><td>Missing</td><td>{missingList.join(', ') || '—'}</td></tr>
+                                <tr><td>Extra</td><td>{extraList.join(', ') || '—'}</td></tr>
                             </tbody>
                         </Table>
                     }
@@ -131,17 +138,29 @@ const HostHealthPanel = () => {
 
                 <SubsystemCard
                     title="Host network"
-                    severity={host_network?.findings?.length ? maxLevel(host_network.findings) : 'ok'}
-                    findings={host_network?.findings}
+                    severity={maxLevel(hostFindings)}
+                    findings={hostFindings}
                     extra={
-                        <Table size="sm" borderless className="mb-2">
-                            <tbody>
-                                <tr><td>Interface</td><td><code>{host_network?.interface}</code></td></tr>
-                                <tr><td>Carrier</td><td>{describeBool(host_network?.carrier_up)}</td></tr>
-                                <tr><td>MTU</td><td>{host_network?.mtu ?? '—'} (expected {host_network?.expected_mtu})</td></tr>
-                                <tr><td>rmem_max</td><td>{host_network?.rmem_max ?? '—'} (expected {host_network?.expected_rmem_max})</td></tr>
-                            </tbody>
-                        </Table>
+                        host_network ? (
+                            <Table size="sm" borderless className="mb-2">
+                                <tbody>
+                                    <tr><td>Interface</td><td><code>{host_network.interface}</code></td></tr>
+                                    <tr><td>Carrier</td><td>{describeBool(host_network.carrier_up)}</td></tr>
+                                    <tr>
+                                        <td>MTU</td>
+                                        <td>
+                                            {host_network.mtu == null ? '—' : host_network.mtu} (expected {host_network.expected_mtu})
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td>rmem_max</td>
+                                        <td>
+                                            {host_network.rmem_max == null ? '—' : host_network.rmem_max} (expected {host_network.expected_rmem_max})
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </Table>
+                        ) : null
                     }
                 />
             </Card.Body>
@@ -190,7 +209,7 @@ const CurrentSessionPanel = () => {
                         <Accordion defaultActiveKey={["0", "1", "2"]} alwaysOpen>
                             <Accordion.Item eventKey="0">
                                 <Accordion.Header>
-                                    Insights ({sessionSummary.insights?.length || 0})
+                                    Insights ({(sessionSummary.insights || []).length})
                                 </Accordion.Header>
                                 <Accordion.Body>
                                     {renderStringList(sessionSummary.insights, 'No session-level patterns detected.')}
@@ -199,7 +218,7 @@ const CurrentSessionPanel = () => {
 
                             <Accordion.Item eventKey="1">
                                 <Accordion.Header>
-                                    Recommendations ({sessionSummary.recommendations?.length || 0})
+                                    Recommendations ({(sessionSummary.recommendations || []).length})
                                 </Accordion.Header>
                                 <Accordion.Body>
                                     {renderStringList(sessionSummary.recommendations, 'No recommendations.')}
@@ -208,7 +227,7 @@ const CurrentSessionPanel = () => {
 
                             <Accordion.Item eventKey="2">
                                 <Accordion.Header>
-                                    Per-trial findings ({sessionSummary.trial_findings?.length || 0})
+                                    Per-trial findings ({(sessionSummary.trial_findings || []).length})
                                 </Accordion.Header>
                                 <Accordion.Body>
                                     {renderStringList(sessionSummary.trial_findings, 'No per-trial issues detected.')}
