@@ -14,6 +14,12 @@
 # on the Ubuntu laptop used for acquisition (HOST system, not inside container)
 ################################################################################
 
+# Anchor all cwd-relative paths (.env, ./diagnostics_output) to the repo root
+# so this script runs correctly from any directory.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+cd "$REPO_ROOT"
+
 # Parse command line arguments
 VERBOSE=false
 QUICK=false
