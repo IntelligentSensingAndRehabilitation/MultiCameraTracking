@@ -626,7 +626,7 @@ def check_camera_reachability(
     for serial in missing:
         findings.append(
             Finding(
-                level="error",
+                level="warn",
                 code="camera_unreachable",
                 message=f"Camera {serial} is not reachable. Check its ethernet cable and power.",
                 details={"serial": serial},

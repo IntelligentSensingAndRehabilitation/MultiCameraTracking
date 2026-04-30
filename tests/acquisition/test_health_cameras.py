@@ -109,7 +109,9 @@ class TestEnumeratorPath:
         )
         assert report.missing == ["222"]
         assert any(f.code == "camera_unreachable" for f in report.findings)
-        assert report.severity == "error"
+        # Missing cameras warn but don't escalate to error — the recorder
+        # gracefully proceeds with whatever cameras are reachable.
+        assert report.severity == "warn"
         missing_cam = next(c for c in report.cameras if c.serial == "222")
         assert missing_cam.detected is False
         assert missing_cam.expected is True

@@ -238,7 +238,7 @@ def test_refresh_bypasses_cache(configured_backend) -> None:
         r2 = client.post("/api/v1/health/refresh").json()
     assert r1["cameras"]["missing"] == []
     assert r2["cameras"]["missing"] == ["222"]
-    assert r2["overall"] == "error"
+    assert r2["overall"] == "warn"
 
 
 def test_cache_expires_after_ttl(configured_backend) -> None:
