@@ -10,6 +10,7 @@ const BASE_URL = `${BASE_HOSTNAME}:8000/api/v1`;
 const API_BASE_URL = `http://${BASE_URL}`;
 const WS_BASE_URL = `ws://${BASE_URL}/ws`;
 const WS_DIAGNOSTICS_URL = `ws://${BASE_URL}/ws/diagnostics`;
+const MAX_SESSION_INSIGHTS = 50;
 
 const initialState = {
     partipant: "",
@@ -131,6 +132,16 @@ export const AcquisitionApi = (props) => {
             console.log("Diagnostics WebSocket connection established");
         };
 
+        const appendInsight = (env, dedupKey) => {
+            setSessionInsights(prev => {
+                if (prev.some(i => dedupKey(i) === dedupKey(env))) return prev;
+                const next = [...prev, env];
+                return next.length > MAX_SESSION_INSIGHTS
+                    ? next.slice(-MAX_SESSION_INSIGHTS)
+                    : next;
+            });
+        };
+
         socket.onmessage = (event) => {
             const env = JSON.parse(event.data);
             switch (env.type) {
@@ -138,22 +149,14 @@ export const AcquisitionApi = (props) => {
                     fetchHealth();
                     break;
                 case "session_insight":
-                    setSessionInsights(prev => {
-                        if (prev.some(i => i.message === env.message)) return prev;
-                        return [...prev, env];
-                    });
+                    appendInsight(env, (i) => i.message);
                     break;
                 case "error":
                     fetchHealth();
-                    setSessionInsights(prev => {
-                        if (prev.some(i => i.code === env.code && i.message === env.message)) {
-                            return prev;
-                        }
-                        return [...prev, env];
-                    });
+                    appendInsight(env, (i) => `${i.code}::${i.message}`);
                     break;
                 default:
-                    console.debug("Diagnostics envelope:", env);
+                    break;
             }
         };
 
@@ -215,9 +218,9 @@ export const AcquisitionApi = (props) => {
             const response = await axios.get(`${API_BASE_URL}/health/session_summary`);
             setSessionSummary(response.data);
         } catch (error) {
-            if (error.response && error.response.status !== 404) {
-                console.error("Error fetching session summary:", error);
-            }
+            // 404 = no active session; anything else = transient backend issue
+            // (e.g. session dir not yet populated). Both surface as "no
+            // summary available" to the operator.
             setSessionSummary(null);
         }
     };
