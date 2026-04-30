@@ -13,6 +13,7 @@ import AnalysisHome from './AnalysisHome';
 import { AcquisitionApi } from './AcquisitionApi';
 import Container from "react-bootstrap/Container";
 import SmplBrowser from './components/SmplBrowser';
+import HealthBanner from './components/HealthBanner';
 
 function App() {
 
@@ -50,6 +51,7 @@ function App() {
       )}
 
       <AcquisitionApi>
+        <HealthBanner />
         <Routes>
           <Route path="/" element={<AcquisitionHome />} />
           <Route path="/analysis" element={<AnalysisHome />} />

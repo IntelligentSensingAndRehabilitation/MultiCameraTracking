@@ -9,6 +9,7 @@ const BASE_HOSTNAME = process.env.REACT_APP_BASE_URL || 'localhost';
 const BASE_URL = `${BASE_HOSTNAME}:8000/api/v1`;
 const API_BASE_URL = `http://${BASE_URL}`;
 const WS_BASE_URL = `ws://${BASE_URL}/ws`;
+const WS_DIAGNOSTICS_URL = `ws://${BASE_URL}/ws/diagnostics`;
 
 const initialState = {
     partipant: "",
@@ -71,6 +72,9 @@ export const AcquisitionApi = (props) => {
     const [diskWarningOnStartup, setDiskWarningOnStartup] = useState(false);
     const [isPreview, setIsPreview] = useState(false);
     const [selectedCamera, setSelectedCamera] = useState(null);
+    const [healthReport, setHealthReport] = useState(null);
+    const [sessionInsights, setSessionInsights] = useState([]);
+    const [sessionSummary, setSessionSummary] = useState(null);
 
     useEffect(() => {
         // axios.interceptors.request.use(request => {
@@ -96,12 +100,10 @@ export const AcquisitionApi = (props) => {
 
         socket.onmessage = (event) => {
             const data = JSON.parse(event.data);
-            console.log("WebSocket message received", data);
-            setRecordingSystemStatus(data.status);
-
-            // if there is a progress field, then update the progress bar
-            if (data.progress) {
-                // Compute progress as percentage and take ceiling to nearest integer
+            if (data.status !== undefined) {
+                setRecordingSystemStatus(data.status);
+            }
+            if (data.progress !== undefined) {
                 setRecordingProgress(Math.ceil(data.progress * 100));
             }
         };
@@ -121,6 +123,51 @@ export const AcquisitionApi = (props) => {
         }
     }, []);
 
+    useEffectOnce(() => {
+        const socket = new WebSocket(WS_DIAGNOSTICS_URL);
+        console.log("Connecting to diagnostics websocket...", WS_DIAGNOSTICS_URL);
+
+        socket.onopen = () => {
+            console.log("Diagnostics WebSocket connection established");
+        };
+
+        socket.onmessage = (event) => {
+            const env = JSON.parse(event.data);
+            switch (env.type) {
+                case "health_report":
+                    fetchHealth();
+                    break;
+                case "session_insight":
+                    setSessionInsights(prev => {
+                        if (prev.some(i => i.message === env.message)) return prev;
+                        return [...prev, env];
+                    });
+                    break;
+                case "error":
+                    fetchHealth();
+                    setSessionInsights(prev => {
+                        if (prev.some(i => i.code === env.code && i.message === env.message)) {
+                            return prev;
+                        }
+                        return [...prev, env];
+                    });
+                    break;
+                default:
+                    console.debug("Diagnostics envelope:", env);
+            }
+        };
+
+        socket.onclose = () => {
+            console.log("Diagnostics WebSocket closed");
+        };
+
+        socket.onerror = (event) => {
+            console.log("Diagnostics WebSocket error:", event);
+        };
+
+        return () => socket.close();
+    }, []);
+
     useEffect(() => {
         fetchCameraStatus();
         fetchConfigs();
@@ -129,6 +176,7 @@ export const AcquisitionApi = (props) => {
         fetchRecordingStatus();
         fetchSession();
         fetchDiskStatus();
+        fetchHealth();
     }, []);
 
     useEffect(() => {
@@ -150,6 +198,29 @@ export const AcquisitionApi = (props) => {
             console.log("No active session");
         }
     }
+
+    const fetchHealth = async (forceRefresh = false) => {
+        try {
+            const path = forceRefresh ? "/health/refresh" : "/health";
+            const method = forceRefresh ? "post" : "get";
+            const response = await axios({ method, url: `${API_BASE_URL}${path}` });
+            setHealthReport(response.data);
+        } catch (error) {
+            console.error("Error fetching health:", error);
+        }
+    };
+
+    const fetchSessionSummary = async () => {
+        try {
+            const response = await axios.get(`${API_BASE_URL}/health/session_summary`);
+            setSessionSummary(response.data);
+        } catch (error) {
+            if (error.response && error.response.status !== 404) {
+                console.error("Error fetching session summary:", error);
+            }
+            setSessionSummary(null);
+        }
+    };
 
     async function fetchDiskStatus() {
         try {
@@ -480,6 +551,11 @@ export const AcquisitionApi = (props) => {
         processSession,
         fetchSmplTrials,
         fetchSmpl,
+        healthReport: healthReport,
+        sessionInsights: sessionInsights,
+        sessionSummary: sessionSummary,
+        fetchHealth,
+        fetchSessionSummary,
     }}> {props.children} </AcquisitionState.Provider >)
     //return (<div> {children} </div>)
 };
