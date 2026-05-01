@@ -1,7 +1,7 @@
 # This is the build file for the docker. Note this should be run from the
 # parent directory for the necessary files to be available
 
-.PHONY: clean build run run-no-checks _docker-run run-mocap-test test test-matrix test-diagnostics validate-sync diag-recording diag-analyze health health-fix
+.PHONY: clean build run run-no-checks _docker-run run-mocap-test test test-matrix test-diagnostics validate-sync diag-recording diag-analyze health health-fix setup-env
 
 DIR := ${CURDIR}
 
@@ -10,6 +10,10 @@ build-mocap:
 
 build-annotate:
 	docker compose build annotate
+
+# Validate .env against .env.template; prompt for any missing/empty values.
+setup-env:
+	@./scripts/acquisition/check_env.sh
 
 # Start acquisition with full system validation (recommended)
 run:

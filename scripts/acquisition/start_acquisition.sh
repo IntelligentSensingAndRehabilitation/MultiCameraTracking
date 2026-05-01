@@ -434,6 +434,14 @@ main() {
     echo -e "${BOLD}${CYAN}║  MultiCameraTracking Acquisition Start ║${NC}"
     echo -e "${BOLD}${CYAN}╔════════════════════════════════════════╝${NC}"
 
+    # Validate .env against .env.template; prompt for any missing/empty vars.
+    # In --skip-checks mode, only verify (don't prompt) — the operator opted out.
+    if $SKIP_CHECKS; then
+        "$SCRIPT_DIR/check_env.sh" --quiet || exit 1
+    else
+        "$SCRIPT_DIR/check_env.sh"
+    fi
+
     # Run system checks
     if ! $SKIP_CHECKS; then
         if ! run_system_checks; then
