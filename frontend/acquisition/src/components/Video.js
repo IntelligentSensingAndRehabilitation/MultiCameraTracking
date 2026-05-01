@@ -10,6 +10,8 @@ const Video = () => {
     const [imageSrc, setImageSrc] = useState("");
     const ws = useRef(null);
     const lastUrl = useRef("");
+    const pendingUrl = useRef("");
+    const rafId = useRef(0);
 
     useEffectOnce(() => {
 
@@ -21,14 +23,29 @@ const Video = () => {
             console.log("Video WebSocket connected");
         };
 
+        // Coalesce inbound frames into one React render per browser refresh.
+        // Cameras stream at 30+ Hz; rendering each frame walks the full fiber
+        // tree (especially expensive in dev mode with Strict Mode + DevTools)
+        // and was causing the page to drown in allocations during preview.
         ws.current.onmessage = (event) => {
             const blob = new Blob([event.data], { type: "image/jpeg" });
             const url = URL.createObjectURL(blob);
-            if (lastUrl.current) {
-                URL.revokeObjectURL(lastUrl.current);
+            if (pendingUrl.current) {
+                URL.revokeObjectURL(pendingUrl.current);
             }
-            lastUrl.current = url;
-            setImageSrc(url);
+            pendingUrl.current = url;
+            if (rafId.current === 0) {
+                rafId.current = requestAnimationFrame(() => {
+                    rafId.current = 0;
+                    const next = pendingUrl.current;
+                    pendingUrl.current = "";
+                    if (lastUrl.current) {
+                        URL.revokeObjectURL(lastUrl.current);
+                    }
+                    lastUrl.current = next;
+                    setImageSrc(next);
+                });
+            }
         };
 
         ws.current.onclose = () => {
@@ -40,6 +57,14 @@ const Video = () => {
         }
 
         return () => {
+            if (rafId.current !== 0) {
+                cancelAnimationFrame(rafId.current);
+                rafId.current = 0;
+            }
+            if (pendingUrl.current) {
+                URL.revokeObjectURL(pendingUrl.current);
+                pendingUrl.current = "";
+            }
             if (ws.current) {
                 ws.current.close();
             }
