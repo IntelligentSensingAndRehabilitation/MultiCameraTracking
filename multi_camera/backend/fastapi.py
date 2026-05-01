@@ -1123,6 +1123,48 @@ async def reset_cameras():
     return {"status": "success"}
 
 
+@api_router.post("/restart_acquisition")
+async def restart_acquisition():
+    """Tear down the PySpin system and reinitialize from the saved config.
+
+    Distinct from /reset_cameras (which power-cycles each camera via
+    DeviceReset) — this only re-creates the software stack and re-runs
+    the PTP sync setup in configure_cameras. Recovery path for the
+    timestamp-spread > 1.0 / drifted-PTP case.
+
+    Returns 409 while a recording is active.
+    """
+    state: GlobalState = get_global_state()
+    if state.recording_status == "Recording":
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot restart acquisition while a recording is active.",
+        )
+
+    # config_file gets cleared by close(); capture before reset().
+    saved_config = getattr(state.acquisition, "config_file", None)
+
+    broadcast_event(
+        event_type="session_insight",
+        level="warn",
+        code="restart_started",
+        message="Restarting acquisition system…",
+    )
+
+    state.acquisition.reset()
+    if saved_config:
+        await state.acquisition.configure_cameras(saved_config)
+
+    broadcast_event(
+        event_type="session_insight",
+        level="ok",
+        code="restart_complete",
+        message="Acquisition system restarted.",
+    )
+
+    return {"status": "success", "config": saved_config}
+
+
 # create an endpoint that exposes the camera statuses
 @api_router.get("/camera_status")
 async def get_camera_status() -> List[CameraStatus]:

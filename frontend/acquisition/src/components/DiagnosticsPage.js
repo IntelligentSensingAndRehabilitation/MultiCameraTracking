@@ -262,9 +262,47 @@ const CurrentSessionPanel = () => {
     );
 };
 
+const RestartAcquisitionButton = () => {
+    const { restartAcquisition, recordingSystemStatus } = useContext(AcquisitionState);
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState(null);
+    const isRecording = recordingSystemStatus === 'Recording';
+
+    const handleClick = async () => {
+        setBusy(true);
+        setError(null);
+        try {
+            await restartAcquisition();
+        } catch (e) {
+            const msg = (e && e.response && e.response.data && e.response.data.detail) || e.message;
+            setError(msg || 'Restart failed.');
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    return (
+        <div>
+            <Button
+                onClick={handleClick}
+                disabled={busy || isRecording}
+                size="sm"
+                variant="outline-warning"
+                title={isRecording ? 'Stop the recording before restarting' : 'Re-init PySpin and re-run PTP sync'}
+            >
+                {busy ? 'Restarting…' : 'Restart acquisition'}
+            </Button>
+            {error && <div className="text-danger small mt-1">{error}</div>}
+        </div>
+    );
+};
+
 const DiagnosticsPage = () => (
     <Container className="mt-3">
-        <h3 className="mb-3">Diagnostics</h3>
+        <div className="d-flex justify-content-between align-items-center mb-3">
+            <h3 className="mb-0">Diagnostics</h3>
+            <RestartAcquisitionButton />
+        </div>
         <HostHealthPanel />
         <CurrentSessionPanel />
     </Container>
