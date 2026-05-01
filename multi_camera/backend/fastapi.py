@@ -155,20 +155,10 @@ manager = ConnectionManager()
 class DiagnosticsManager:
     """WebSocket fan-out for structured diagnostic envelopes.
 
-    Separate from :class:`ConnectionManager` so that bursty diagnostic broadcasts
-    (per-trial detector findings, idle-poll health reports) cannot delay the
-    recording status writer on ``/api/v1/ws``.
-
-    Hardened against the failure modes that broke the v2 implementation:
-
-    - **Per-connection write lock**: serializes writes to a single connection so
-      simultaneous broadcasts from different sources don't race the underlying
-      websockets keepalive ping (which manifested as
-      ``AssertionError in _drain_helper``).
-    - **Dead-connection cleanup**: a failed ``send_json`` removes the connection
-      instead of leaving a stale entry that subsequent broadcasts will keep
-      hitting.
-    - **Per-connection isolation**: one slow/dead client does not block the others.
+    Separate from :class:`ConnectionManager` so bursty diagnostic broadcasts
+    can't delay the recording status writer on ``/api/v1/ws``. Per-connection
+    asyncio.Lock serializes writes to avoid racing the websockets keepalive
+    ping; failed sends drop the connection instead of leaving stale entries.
     """
 
     def __init__(self):
@@ -251,13 +241,7 @@ def broadcast_event(
     message: str,
     details: dict | None = None,
 ) -> None:
-    """Build and dispatch a structured diagnostic envelope. Safe from any thread.
-
-    Envelope shape: ``{type, level, code, message, details, ts}``.
-    ``level`` follows the Finding severity contract (``ok | warn | error``).
-    Frontend dispatches on ``type`` (``health_report``, ``session_insight``,
-    ``trial_failed``, ``camera_unreachable``, ...).
-    """
+    """Dispatch a structured diagnostic envelope. Safe from any thread."""
     envelope = {
         "type": event_type,
         "level": level,
@@ -848,10 +832,8 @@ async def new_trial(data: NewTrialData, db: Session = Depends(db_dependency)):
             recorder=state.acquisition,
         )
         if preflight.missing:
-            # Match historical FlirRecorder behavior: missing cameras are
-            # skipped gracefully, the trial proceeds with whatever cameras
-            # are reachable. Surface a warning so the operator can fix it
-            # later without losing the current take.
+            # FlirRecorder skips missing cameras and continues; warn the
+            # operator without blocking the take.
             broadcast_event(
                 event_type="session_insight",
                 level="warn",

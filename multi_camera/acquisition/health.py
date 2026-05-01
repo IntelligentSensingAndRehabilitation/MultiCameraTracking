@@ -1004,14 +1004,6 @@ def _prioritize_findings(findings: list[Finding]) -> list[Finding]:
     return sorted(findings, key=lambda f: -_SEVERITY_ORDER[f.level])
 
 
-class CameraUnreachableError(RuntimeError):
-    """Raised when a preflight reachability check finds expected cameras missing."""
-
-    def __init__(self, missing: list[str], message: str | None = None):
-        self.missing = list(missing)
-        super().__init__(message or f"Cameras unreachable: {', '.join(self.missing)}")
-
-
 # ---------------------------------------------------------------------------
 # Background idle poller
 # ---------------------------------------------------------------------------
@@ -1224,7 +1216,6 @@ __all__ = [
     "CameraEnumerator",
     "CameraReachability",
     "CameraReachabilityReport",
-    "CameraUnreachableError",
     "DetectedCamera",
     "DhcpServerStatus",
     "Finding",

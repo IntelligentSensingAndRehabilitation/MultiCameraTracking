@@ -23,10 +23,8 @@ const Video = () => {
             console.log("Video WebSocket connected");
         };
 
-        // Coalesce inbound frames into one React render per browser refresh.
-        // Cameras stream at 30+ Hz; rendering each frame walks the full fiber
-        // tree (especially expensive in dev mode with Strict Mode + DevTools)
-        // and was causing the page to drown in allocations during preview.
+        // Coalesce 30+ Hz frames to one React render per refresh; without
+        // this the per-frame fiber-tree walk drowns the page in allocations.
         ws.current.onmessage = (event) => {
             const blob = new Blob([event.data], { type: "image/jpeg" });
             const url = URL.createObjectURL(blob);
