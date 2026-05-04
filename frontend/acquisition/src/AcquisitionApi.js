@@ -435,6 +435,14 @@ export const AcquisitionApi = (props) => {
         return response.data;
     };
 
+    const setCameraExcluded = async (serial, excluded) => {
+        const path = excluded ? 'exclude' : 'include';
+        const response = await axios.post(`${API_BASE_URL}/cameras/${serial}/${path}`);
+        await fetchCameraStatus();
+        await fetchHealth(true);
+        return response.data;
+    };
+
     /* Code for editing recording database */
 
     const getMatchingPriorRecordings = async (participant, filename) => {
@@ -556,6 +564,7 @@ export const AcquisitionApi = (props) => {
         resetCameras,
         restartAcquisition,
         restoreCameraDefaults,
+        setCameraExcluded,
         newSession,
         newTrial,
         previewVideo,

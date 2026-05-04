@@ -151,6 +151,7 @@ const HostHealthPanel = () => {
                                             <th>Link</th>
                                             <th>Throughput</th>
                                             <th>Status</th>
+                                            <th>Action</th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -162,7 +163,12 @@ const HostHealthPanel = () => {
                                                 <td>{c.link_throughput_bytes_per_sec != null
                                                     ? `${Math.round(c.link_throughput_bytes_per_sec * 8 / 1000000)} Mbps`
                                                     : '—'}</td>
-                                                <td>{c.detected ? 'reachable' : (c.expected ? 'missing' : 'unexpected')}</td>
+                                                <td>{c.excluded
+                                                    ? 'excluded'
+                                                    : (c.detected ? 'reachable' : (c.expected ? 'missing' : 'unexpected'))}</td>
+                                                <td>{(c.excluded || c.expected || c.detected)
+                                                    ? <ExcludeCameraButton serial={c.serial} excluded={c.excluded} />
+                                                    : null}</td>
                                             </tr>
                                         ))}
                                     </tbody>
@@ -295,6 +301,50 @@ const CurrentSessionPanel = () => {
                 )}
             </Card.Body>
         </Card>
+    );
+};
+
+const ExcludeCameraButton = ({ serial, excluded }) => {
+    const { setCameraExcluded, recordingSystemStatus } = useContext(AcquisitionState);
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState(null);
+    const isRecording = recordingSystemStatus === 'Recording';
+
+    const handleClick = async () => {
+        const target = !excluded;
+        const verb = target ? 'Exclude' : 'Include';
+        const ok = window.confirm(
+            target
+                ? `Exclude camera ${serial} from this session? The system will reconfigure ` +
+                  `with one fewer camera. You can re-include it later.`
+                : `Re-include camera ${serial}? The system will reconfigure with this camera back in the recording.`
+        );
+        if (!ok) return;
+        setBusy(true);
+        setError(null);
+        try {
+            await setCameraExcluded(serial, target);
+        } catch (e) {
+            const msg = (e && e.response && e.response.data && e.response.data.detail) || e.message;
+            setError(msg || `${verb} failed.`);
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    return (
+        <div>
+            <Button
+                onClick={handleClick}
+                disabled={busy || isRecording}
+                size="sm"
+                variant={excluded ? 'outline-success' : 'outline-secondary'}
+                title={isRecording ? 'Stop the recording first' : (excluded ? 'Re-include this camera in the recording' : 'Skip this camera in this session')}
+            >
+                {busy ? '…' : (excluded ? 'Include' : 'Exclude')}
+            </Button>
+            {error && <div className="text-danger small mt-1">{error}</div>}
+        </div>
     );
 };
 

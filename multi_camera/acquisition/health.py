@@ -71,6 +71,7 @@ class CameraReachability(BaseModel):
     serial: str
     detected: bool
     expected: bool
+    excluded: bool = False
     ip: str | None = None
     link_speed_mbps: int | None = None
     link_throughput_bytes_per_sec: int | None = None
@@ -554,6 +555,7 @@ def check_camera_reachability(
     minimum_link_speed_mbps: int = 1000,
     include_unexpected: bool = False,
     enumerator: CameraEnumerator = _default_camera_enumerator,
+    excluded_serials: set[str] | None = None,
 ) -> CameraReachabilityReport:
     """Report which expected cameras are reachable right now.
 
@@ -630,14 +632,16 @@ def check_camera_reachability(
     missing = sorted(expected_set - detected_set)
     extra = sorted(detected_set - expected_set)
 
+    excluded_set = set(excluded_serials or set())
     cameras: list[CameraReachability] = []
-    for serial in sorted(expected_set | detected_set):
+    for serial in sorted(expected_set | detected_set | excluded_set):
         cam = detected_by_serial.get(serial)
         cameras.append(
             CameraReachability(
                 serial=serial,
                 detected=cam is not None,
                 expected=serial in expected_set,
+                excluded=serial in excluded_set,
                 ip=cam.ip if cam else None,
                 link_speed_mbps=cam.link_speed_mbps if cam else None,
                 link_throughput_bytes_per_sec=(
@@ -988,6 +992,11 @@ def run_health_check(
         )
         camera_future = None
         if not skip_camera_enumeration:
+            excluded_serials = (
+                getattr(recorder, "excluded_serials", None)
+                if recorder is not None
+                else None
+            )
             camera_future = executor.submit(
                 check_camera_reachability,
                 expected_serials=expected_serials,
@@ -995,6 +1004,7 @@ def run_health_check(
                 minimum_link_speed_mbps=config.minimum_link_speed_mbps,
                 include_unexpected=include_unexpected_cameras,
                 enumerator=camera_enumerator or _default_camera_enumerator,
+                excluded_serials=excluded_serials,
             )
         host_future = executor.submit(
             check_host_network,

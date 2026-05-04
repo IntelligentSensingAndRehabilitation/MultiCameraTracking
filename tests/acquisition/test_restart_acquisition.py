@@ -89,6 +89,15 @@ class StubRecorder:
             raise ValueError(f"Camera {serial} not found")
         self.calls.append(("restore_camera_defaults", serial))
 
+    def __post_init_excluded(self):
+        if not hasattr(self, "excluded_serials"):
+            self.excluded_serials = set()
+
+    def set_excluded_serials(self, serials):
+        self.__post_init_excluded()
+        self.excluded_serials = {str(s) for s in serials}
+        self.calls.append(("set_excluded_serials", sorted(self.excluded_serials)))
+
 
 @pytest.fixture
 def configured_backend(monkeypatch: pytest.MonkeyPatch):
@@ -158,6 +167,44 @@ def test_restore_defaults_returns_409_while_recording(configured_backend) -> Non
     state.recording_status = "Recording"
     with TestClient(backend.app) as client:
         r = client.post("/api/v1/cameras/23280538/restore_defaults")
+    assert r.status_code == 409
+    assert stub.calls == []
+
+
+def test_exclude_camera_sets_then_reconfigures(configured_backend) -> None:
+    state, stub = configured_backend
+    stub.excluded_serials = set()
+    saved_config = stub.config_file
+    with TestClient(backend.app) as client:
+        r = client.post("/api/v1/cameras/23280538/exclude")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["excluded"] is True
+    assert body["excluded_serials"] == ["23280538"]
+    # Order: set the exclusion, then reset, then configure_cameras.
+    assert stub.calls == [
+        ("set_excluded_serials", ["23280538"]),
+        "reset",
+        ("configure_cameras", saved_config),
+    ]
+
+
+def test_include_camera_clears_exclusion(configured_backend) -> None:
+    state, stub = configured_backend
+    stub.excluded_serials = {"23280538", "20150962"}
+    with TestClient(backend.app) as client:
+        r = client.post("/api/v1/cameras/23280538/include")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["excluded"] is False
+    assert body["excluded_serials"] == ["20150962"]
+
+
+def test_exclude_returns_409_while_recording(configured_backend) -> None:
+    state, stub = configured_backend
+    state.recording_status = "Recording"
+    with TestClient(backend.app) as client:
+        r = client.post("/api/v1/cameras/23280538/exclude")
     assert r.status_code == 409
     assert stub.calls == []
 

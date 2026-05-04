@@ -1143,6 +1143,68 @@ async def reset_cameras():
     return {"status": "success"}
 
 
+async def _set_camera_excluded(serial: str, excluded: bool) -> dict:
+    """Add/remove a camera from the operator-excluded set, then full
+    reconfigure so the change takes effect. Returns the new exclusion list.
+    """
+    state: GlobalState = get_global_state()
+    if state.recording_status == "Recording":
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot change camera exclusion while a recording is active.",
+        )
+    saved_config = getattr(state.acquisition, "config_file", None)
+    current = set(getattr(state.acquisition, "excluded_serials", set()))
+    if excluded:
+        current.add(str(serial))
+    else:
+        current.discard(str(serial))
+    state.acquisition.set_excluded_serials(current)
+
+    action = "Excluded" if excluded else "Included"
+    broadcast_event(
+        event_type="session_insight",
+        level="warn" if excluded else "ok",
+        code=("camera_excluded" if excluded else "camera_included"),
+        message=f"{action} camera {serial}; reconfiguring…",
+    )
+
+    state.acquisition.reset()
+    if saved_config:
+        await state.acquisition.configure_cameras(saved_config)
+
+    await _refresh_health_after_configure()
+
+    return {
+        "status": "success",
+        "serial": serial,
+        "excluded": excluded,
+        "excluded_serials": sorted(current),
+    }
+
+
+@api_router.post("/cameras/{serial}/exclude")
+async def exclude_camera(serial: str):
+    """Remove a camera from this session's recordings without editing the
+    YAML config. Recovery path for one bad camera that's holding up the
+    rest of the rig (e.g. stuck-link case from the throughput-outlier
+    finding). Excluded cameras are not Init'd, do not appear in the
+    camera_status table, and are skipped by configure_cameras until
+    re-included via /cameras/{serial}/include or until the system restarts.
+
+    Returns 409 while a recording is active.
+    """
+    return await _set_camera_excluded(serial, excluded=True)
+
+
+@api_router.post("/cameras/{serial}/include")
+async def include_camera(serial: str):
+    """Re-add an operator-excluded camera back into the recording set
+    and reconfigure. Returns 409 while a recording is active.
+    """
+    return await _set_camera_excluded(serial, excluded=False)
+
+
 @api_router.post("/cameras/{serial}/restore_defaults")
 async def restore_camera_defaults(serial: str):
     """Restore one camera to factory defaults via UserSetLoad, then re-init

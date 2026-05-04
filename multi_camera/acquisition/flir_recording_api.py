@@ -654,6 +654,7 @@ class FlirRecorder:
         self.image_queue_dict = {}
         self.config_file = None
         self.iface = None
+        self.excluded_serials: set[str] = set()
         self.status_callback = status_callback
 
         # Edge-fired diagnostic envelopes from the acquisition workers. Each
@@ -794,6 +795,16 @@ class FlirRecorder:
         if config_file:
             with open(config_file, "r") as file:
                 self.camera_config = yaml.safe_load(file)
+
+            # Drop operator-excluded cameras from both camera_info (so
+            # downstream code doesn't expect frames from them) and the
+            # requested_cameras list (so they're never Init'd).
+            if self.excluded_serials:
+                self.camera_config["camera-info"] = {
+                    k: v
+                    for k, v in self.camera_config["camera-info"].items()
+                    if str(k) not in self.excluded_serials
+                }
 
             # Updating interface_cameras if a config file is passed
             # with the camera IDs passed
@@ -1809,6 +1820,15 @@ class FlirRecorder:
 
     def stop_acquisition(self):
         self.stop_recording.set()
+
+    def set_excluded_serials(self, serials: set[str]) -> None:
+        """Replace the operator-excluded serial list. Cameras whose serials
+        appear here are skipped by configure_cameras — neither Init'd nor
+        recorded from. Used to work around a single broken camera without
+        editing the YAML config. Caller must trigger a reconfigure for the
+        change to take effect.
+        """
+        self.excluded_serials = {str(s) for s in serials}
 
     def restore_camera_defaults(self, serial: str) -> None:
         """Load the 'Default' UserSet on the named camera and pin it as the
