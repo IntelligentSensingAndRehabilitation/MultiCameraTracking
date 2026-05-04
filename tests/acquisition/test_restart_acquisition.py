@@ -65,6 +65,7 @@ class StubRecorder:
         self.cams: list[Any] = []
         self.calls: list[Any] = []
         self.known_serials: list[str] = []
+        self.excluded_serials: set[str] = set()
 
     def __call__(self, *args, **kwargs):
         return self
@@ -89,12 +90,7 @@ class StubRecorder:
             raise ValueError(f"Camera {serial} not found")
         self.calls.append(("restore_camera_defaults", serial))
 
-    def __post_init_excluded(self):
-        if not hasattr(self, "excluded_serials"):
-            self.excluded_serials = set()
-
     def set_excluded_serials(self, serials):
-        self.__post_init_excluded()
         self.excluded_serials = {str(s) for s in serials}
         self.calls.append(("set_excluded_serials", sorted(self.excluded_serials)))
 
@@ -158,7 +154,7 @@ def test_restore_defaults_returns_404_for_unknown_serial(configured_backend) -> 
         r = client.post("/api/v1/cameras/99999999/restore_defaults")
     assert r.status_code == 404
     # No reset/reconfigure when the target serial isn't recognized.
-    assert all(c[0] != "reset" for c in stub.calls if isinstance(c, str) is False) or "reset" not in stub.calls
+    assert "reset" not in stub.calls
 
 
 def test_restore_defaults_returns_409_while_recording(configured_backend) -> None:
@@ -173,7 +169,6 @@ def test_restore_defaults_returns_409_while_recording(configured_backend) -> Non
 
 def test_exclude_camera_sets_then_reconfigures(configured_backend) -> None:
     state, stub = configured_backend
-    stub.excluded_serials = set()
     saved_config = stub.config_file
     with TestClient(backend.app) as client:
         r = client.post("/api/v1/cameras/23280538/exclude")

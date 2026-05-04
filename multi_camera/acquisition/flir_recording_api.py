@@ -1867,7 +1867,6 @@ class FlirRecorder:
             f"DeviceLinkThroughputLimit before: {before_throughput}"
         )
 
-        # Step 1: select the 'Default' UserSet.
         selector = PySpin.CEnumerationPtr(nodemap.GetNode("UserSetSelector"))
         if not PySpin.IsAvailable(selector) or not PySpin.IsWritable(selector):
             raise RuntimeError(
@@ -1880,7 +1879,6 @@ class FlirRecorder:
             )
         selector.SetIntValue(default_entry.GetValue())
 
-        # Step 2: execute UserSetLoad — this writes Default values back.
         load_cmd = PySpin.CCommandPtr(nodemap.GetNode("UserSetLoad"))
         if not PySpin.IsAvailable(load_cmd) or not PySpin.IsWritable(load_cmd):
             raise RuntimeError(
@@ -1889,9 +1887,9 @@ class FlirRecorder:
         load_cmd.Execute()
         print(f"[restore_defaults] camera {serial} UserSetLoad executed")
 
-        # Step 3: pin 'Default' as the boot UserSet so this persists
-        # across power cycles (otherwise the camera could reload a
-        # different stored UserSet at next boot).
+        # Pin 'Default' as the boot UserSet so the restore survives a
+        # power-cycle (otherwise the camera could reload a different
+        # stored UserSet at next boot).
         user_default = PySpin.CEnumerationPtr(nodemap.GetNode("UserSetDefault"))
         if PySpin.IsAvailable(user_default) and PySpin.IsWritable(user_default):
             user_default_entry = user_default.GetEntryByName("Default")
