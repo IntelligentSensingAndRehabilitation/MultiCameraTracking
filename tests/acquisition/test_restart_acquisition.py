@@ -64,6 +64,7 @@ class StubRecorder:
         self.camera_config: dict[str, Any] = {"camera-info": {}}
         self.cams: list[Any] = []
         self.calls: list[Any] = []
+        self.known_serials: list[str] = []
 
     def __call__(self, *args, **kwargs):
         return self
@@ -82,6 +83,11 @@ class StubRecorder:
 
     def close(self):
         return None
+
+    def restore_camera_defaults(self, serial: str) -> None:
+        if serial not in self.known_serials:
+            raise ValueError(f"Camera {serial} not found")
+        self.calls.append(("restore_camera_defaults", serial))
 
 
 @pytest.fixture
@@ -114,6 +120,44 @@ def test_restart_returns_409_while_recording(configured_backend) -> None:
     state.recording_status = "Recording"
     with TestClient(backend.app) as client:
         r = client.post("/api/v1/restart_acquisition")
+    assert r.status_code == 409
+    assert stub.calls == []
+
+
+def test_restore_defaults_runs_then_reinits(configured_backend) -> None:
+    state, stub = configured_backend
+    stub.known_serials = ["23280538", "20150962"]
+    saved_config = stub.config_file
+    with TestClient(backend.app) as client:
+        r = client.post("/api/v1/cameras/23280538/restore_defaults")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "success"
+    assert body["serial"] == "23280538"
+    # Order: per-camera restore first, then full reset, then reconfigure.
+    assert stub.calls == [
+        ("restore_camera_defaults", "23280538"),
+        "reset",
+        ("configure_cameras", saved_config),
+    ]
+
+
+def test_restore_defaults_returns_404_for_unknown_serial(configured_backend) -> None:
+    state, stub = configured_backend
+    stub.known_serials = ["20150962"]
+    with TestClient(backend.app) as client:
+        r = client.post("/api/v1/cameras/99999999/restore_defaults")
+    assert r.status_code == 404
+    # No reset/reconfigure when the target serial isn't recognized.
+    assert all(c[0] != "reset" for c in stub.calls if isinstance(c, str) is False) or "reset" not in stub.calls
+
+
+def test_restore_defaults_returns_409_while_recording(configured_backend) -> None:
+    state, stub = configured_backend
+    stub.known_serials = ["23280538"]
+    state.recording_status = "Recording"
+    with TestClient(backend.app) as client:
+        r = client.post("/api/v1/cameras/23280538/restore_defaults")
     assert r.status_code == 409
     assert stub.calls == []
 

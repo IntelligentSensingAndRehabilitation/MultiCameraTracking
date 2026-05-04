@@ -428,6 +428,13 @@ export const AcquisitionApi = (props) => {
         return response.data;
     };
 
+    const restoreCameraDefaults = async (serial) => {
+        const response = await axios.post(`${API_BASE_URL}/cameras/${serial}/restore_defaults`);
+        await fetchCameraStatus();
+        await fetchHealth(true);
+        return response.data;
+    };
+
     /* Code for editing recording database */
 
     const getMatchingPriorRecordings = async (participant, filename) => {
@@ -548,6 +555,7 @@ export const AcquisitionApi = (props) => {
         selectCamera,
         resetCameras,
         restartAcquisition,
+        restoreCameraDefaults,
         newSession,
         newTrial,
         previewVideo,

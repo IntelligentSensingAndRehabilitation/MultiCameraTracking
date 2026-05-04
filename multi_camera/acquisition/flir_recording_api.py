@@ -1810,6 +1810,28 @@ class FlirRecorder:
     def stop_acquisition(self):
         self.stop_recording.set()
 
+    def restore_camera_defaults(self, serial: str) -> None:
+        """Load the 'Default' UserSet on the named camera and pin it as the
+        boot-time UserSet. Equivalent to SpinView's 'Restore Factory Defaults'
+        — clears any latched feature state (e.g. DeviceLinkThroughputLimit)
+        without a hardware power-cycle.
+
+        Caller must guarantee no recording is in progress. The camera must be
+        present in self.cams (Init'd via configure_cameras).
+        """
+        target = next(
+            (c for c in self.cams if str(c.DeviceSerialNumber) == str(serial)),
+            None,
+        )
+        if target is None:
+            raise ValueError(
+                f"Camera {serial} not found in self.cams "
+                f"(have: {[c.DeviceSerialNumber for c in self.cams]})"
+            )
+        target.UserSetSelector = "Default"
+        target.UserSetLoad()
+        target.UserSetDefault = "Default"
+
     async def reset_cameras(self):
         """Reset all the cameras and reopen the system"""
 

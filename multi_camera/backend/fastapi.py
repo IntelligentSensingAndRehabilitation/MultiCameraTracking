@@ -1123,6 +1123,54 @@ async def reset_cameras():
     return {"status": "success"}
 
 
+@api_router.post("/cameras/{serial}/restore_defaults")
+async def restore_camera_defaults(serial: str):
+    """Restore one camera to factory defaults via UserSetLoad, then re-init
+    the system so every camera picks up the saved config cleanly. Recovery
+    path for the 'one camera latched a bad feature value
+    (DeviceLinkThroughputLimit, LineMode, etc.) that survives soft restart'
+    case — equivalent to SpinView's 'Restore Factory Defaults' followed by
+    reconfigure.
+
+    Returns 409 if recording, 404 if the serial isn't currently in cams.
+    """
+    state: GlobalState = get_global_state()
+    if state.recording_status == "Recording":
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot restore camera defaults while a recording is active.",
+        )
+
+    saved_config = getattr(state.acquisition, "config_file", None)
+
+    broadcast_event(
+        event_type="session_insight",
+        level="warn",
+        code="restore_defaults_started",
+        message=f"Restoring factory defaults on camera {serial}…",
+    )
+
+    try:
+        await run_in_threadpool(
+            state.acquisition.restore_camera_defaults, serial
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    state.acquisition.reset()
+    if saved_config:
+        await state.acquisition.configure_cameras(saved_config)
+
+    broadcast_event(
+        event_type="session_insight",
+        level="ok",
+        code="restore_defaults_complete",
+        message=f"Camera {serial} restored to factory defaults and re-configured.",
+    )
+
+    return {"status": "success", "serial": serial, "config": saved_config}
+
+
 @api_router.post("/restart_acquisition")
 async def restart_acquisition():
     """Tear down the PySpin system and reinitialize from the saved config.
