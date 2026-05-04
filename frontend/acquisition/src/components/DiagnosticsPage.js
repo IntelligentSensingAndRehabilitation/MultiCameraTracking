@@ -153,7 +153,7 @@ const HostHealthPanel = () => {
                                                 <td>{c.ip || '—'}</td>
                                                 <td>{c.link_speed_mbps != null ? `${c.link_speed_mbps} Mbps` : '—'}</td>
                                                 <td>{c.link_throughput_bytes_per_sec != null
-                                                    ? `${Math.round(c.link_throughput_bytes_per_sec * 8 / 1_000_000)} Mbps`
+                                                    ? `${Math.round(c.link_throughput_bytes_per_sec * 8 / 1000000)} Mbps`
                                                     : '—'}</td>
                                                 <td>{c.detected ? 'reachable' : (c.expected ? 'missing' : 'unexpected')}</td>
                                             </tr>
