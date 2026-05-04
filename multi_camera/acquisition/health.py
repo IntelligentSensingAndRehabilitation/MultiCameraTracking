@@ -729,12 +729,13 @@ def check_camera_reachability(
                 median_mbps = median_t * 8 // 1_000_000
                 findings.append(
                     Finding(
-                        level="warn",
+                        level="error",
                         code="camera_throughput_outlier",
                         message=(
                             f"Camera {cam_info.serial} link throughput is "
                             f"~{cam_mbps} Mbps vs median ~{median_mbps} Mbps "
                             f"across the rig — likely stuck at 100 Mbps. "
+                            f"Recording will be unusable until fixed. "
                             f"Try unplug/replug the camera's cable."
                         ),
                         details={
