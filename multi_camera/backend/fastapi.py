@@ -1102,6 +1102,25 @@ async def get_current_config() -> str:
     return os.path.split(config)[-1]
 
 
+async def _refresh_health_after_configure() -> None:
+    """Force a health re-check after a camera reconfigure so the operator
+    immediately sees post-init state (link speeds, throughput, missing
+    cameras) without waiting for the next idle poll. Broadcasts the new
+    report so the GUI re-fetches.
+    """
+    try:
+        report = await _get_health_report(force_refresh=True)
+    except Exception as e:  # noqa: BLE001
+        acquisition_logger.warning(f"Post-configure health refresh failed: {e}")
+        return
+    broadcast_event(
+        event_type="health_report",
+        level=report.overall,
+        code="post_configure_refresh",
+        message="Health report updated after camera reconfigure.",
+    )
+
+
 @api_router.post("/current_config")
 async def update_config(config: ConfigFileData):
     print("Received config: ", config.config)
@@ -1112,6 +1131,7 @@ async def update_config(config: ConfigFileData):
         await state.acquisition.configure_cameras(
             os.path.join(CONFIG_PATH, config.config)
         )
+    await _refresh_health_after_configure()
     return {"status": "success", "config": config.config}
 
 
@@ -1161,6 +1181,8 @@ async def restore_camera_defaults(serial: str):
     if saved_config:
         await state.acquisition.configure_cameras(saved_config)
 
+    await _refresh_health_after_configure()
+
     broadcast_event(
         event_type="session_insight",
         level="ok",
@@ -1202,6 +1224,8 @@ async def restart_acquisition():
     state.acquisition.reset()
     if saved_config:
         await state.acquisition.configure_cameras(saved_config)
+
+    await _refresh_health_after_configure()
 
     broadcast_event(
         event_type="session_insight",

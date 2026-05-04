@@ -39,12 +39,19 @@ def max_severity(levels: list[Severity]) -> Severity:
 
 
 class Finding(BaseModel):
-    """A single plain-English health observation for display to the operator."""
+    """A single plain-English health observation for display to the operator.
+
+    ``message`` is the short banner-friendly summary (kept under ~80 chars where
+    practical). ``remediation`` is an optional ordered list of recovery steps,
+    rendered as a numbered list inside the Diagnostics tab. Long step-by-step
+    text belongs in ``remediation``, not ``message``.
+    """
 
     level: Severity
     code: str
     message: str
     details: dict[str, Any] = Field(default_factory=dict)
+    remediation: list[str] | None = None
 
 
 class DhcpServerStatus(BaseModel):
@@ -733,17 +740,14 @@ def check_camera_reachability(
                         code="camera_throughput_outlier",
                         message=(
                             f"Camera {cam_info.serial} link is at ~{cam_mbps} Mbps "
-                            f"(others at ~{median_mbps} Mbps). Recordings will be "
-                            f"unusable until fixed. Software fixes (Restart "
-                            f"acquisition / Restore defaults) won't help — this is "
-                            f"a physical link issue. "
-                            f"(1) Unplug and re-plug the camera's ethernet cable at "
-                            f"both ends to force the link to renegotiate. "
-                            f"(2) If the issue returns, swap the cable with a "
-                            f"known-good one to rule out cable damage. "
-                            f"(3) If a fresh cable doesn't help, move the camera "
-                            f"to a different switch port."
+                            f"(others at ~{median_mbps} Mbps) — recordings unusable."
                         ),
+                        remediation=[
+                            "Unplug and re-plug the camera's ethernet cable at both ends to force PHY renegotiation.",
+                            "If the issue returns within a session, swap the cable with a known-good one to rule out cable damage.",
+                            "If a fresh cable doesn't help, move the camera to a different switch port.",
+                            "Software fixes (Restart acquisition, Restore defaults) won't help — this is a physical link issue.",
+                        ],
                         details={
                             "serial": cam_info.serial,
                             "link_throughput_bytes_per_sec": cam_info.link_throughput_bytes_per_sec,

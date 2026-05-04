@@ -25,6 +25,13 @@ const FindingList = ({ findings }) => {
                 <ListGroup.Item key={`${f.code}-${i}`} className="d-flex justify-content-between align-items-start">
                     <div className="ms-2 me-auto">
                         <div className="fw-bold">{f.message}</div>
+                        {f.remediation && f.remediation.length > 0 && (
+                            <ol className="small mb-1 mt-1 ps-3">
+                                {f.remediation.map((step, j) => (
+                                    <li key={j}>{step}</li>
+                                ))}
+                            </ol>
+                        )}
                         <small className="text-muted">{f.code}</small>
                     </div>
                     <SeverityBadge level={f.level} />
