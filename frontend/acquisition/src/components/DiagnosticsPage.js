@@ -151,7 +151,7 @@ const HostHealthPanel = () => {
                                             <tr key={c.serial}>
                                                 <td>{c.serial}</td>
                                                 <td>{c.ip || '—'}</td>
-                                                <td>{c.link_speed_mbps != null ? `${c.link_speed_mbps} Mbps` : '—'}</td>
+                                                <td>{deriveLinkLabel(c)}</td>
                                                 <td>{c.link_throughput_bytes_per_sec != null
                                                     ? `${Math.round(c.link_throughput_bytes_per_sec * 8 / 1000000)} Mbps`
                                                     : '—'}</td>
@@ -338,6 +338,23 @@ const DiagnosticsPage = () => (
 );
 
 const describeBool = (b) => (b === true ? 'OK' : b === false ? 'down' : '—');
+
+// Derive a human-readable link rating. Some Blackfly firmware doesn't populate
+// GevLinkSpeed via the held-recorder snapshot path, so we fall back to the
+// observed payload throughput. A 1 Gbps link tops out around 700-750 Mbps
+// payload (jumbo frames at 30 fps); a 100 Mbps link tops out around 95-100.
+const deriveLinkLabel = (c) => {
+    if (c.link_speed_mbps != null && c.link_speed_mbps > 0) {
+        return `${c.link_speed_mbps} Mbps`;
+    }
+    if (c.link_throughput_bytes_per_sec != null) {
+        const mbps = c.link_throughput_bytes_per_sec * 8 / 1000000;
+        if (mbps > 200) return '1 Gbps';
+        if (mbps > 20) return '100 Mbps';
+        if (mbps > 0) return '10 Mbps';
+    }
+    return '—';
+};
 
 const SEVERITY_RANK = { unknown: 0, ok: 1, warn: 2, error: 3 };
 const maxLevel = (findings) => {

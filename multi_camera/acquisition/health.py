@@ -732,11 +732,17 @@ def check_camera_reachability(
                         level="error",
                         code="camera_throughput_outlier",
                         message=(
-                            f"Camera {cam_info.serial} link throughput is "
-                            f"~{cam_mbps} Mbps vs median ~{median_mbps} Mbps "
-                            f"across the rig — likely stuck at 100 Mbps. "
-                            f"Recording will be unusable until fixed. "
-                            f"Try unplug/replug the camera's cable."
+                            f"Camera {cam_info.serial} link is at ~{cam_mbps} Mbps "
+                            f"(others at ~{median_mbps} Mbps). Recordings will be "
+                            f"unusable until fixed. Software fixes (Restart "
+                            f"acquisition / Restore defaults) won't help — this is "
+                            f"a physical link issue. "
+                            f"(1) Unplug and re-plug the camera's ethernet cable at "
+                            f"both ends to force the link to renegotiate. "
+                            f"(2) If the issue returns, swap the cable with a "
+                            f"known-good one to rule out cable damage. "
+                            f"(3) If a fresh cable doesn't help, move the camera "
+                            f"to a different switch port."
                         ),
                         details={
                             "serial": cam_info.serial,
