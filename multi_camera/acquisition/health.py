@@ -717,10 +717,13 @@ def check_camera_reachability(
                     )
                 )
 
-    # Throughput-outlier detector: catches the case where GevDeviceLinkSpeed
-    # reports 1000 (camera firmware bug) but DeviceLinkThroughputLimit reveals
-    # the link is actually 100 Mbps. Fires when one camera's throughput is
-    # < 50% of the median across detected cameras.
+    # Throughput-outlier detector. DeviceLinkThroughputLimit is the camera's
+    # configured outbound cap, derived by Spinnaker from the link speed
+    # negotiated at Init. A value far below other cameras is strong (but
+    # indirect) evidence the link came up at a lower rate (e.g. 100 Mbps
+    # fallback) — useful when GevDeviceLinkSpeed reports 1000 but the
+    # negotiated PHY rate is actually lower. Fires when one camera's
+    # throughput is < 50% of the median across detected cameras.
     throughputs = [
         c.link_throughput_bytes_per_sec
         for c in cameras

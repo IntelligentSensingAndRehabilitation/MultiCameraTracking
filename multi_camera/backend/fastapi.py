@@ -872,6 +872,13 @@ async def new_trial(data: NewTrialData, db: Session = Depends(db_dependency)):
     def receive_frames_wrapper(frames):
         loop.create_task(receive_frames(frames))
 
+    # Flip status synchronously before scheduling the acquisition thread, so
+    # recovery endpoints (restart/restore/exclude) immediately see the system
+    # as busy. Otherwise this handler returns 200 before start_acquisition's
+    # set_status("Recording") runs on the worker, leaving a window where a
+    # follow-up Restart click would tear down PySpin mid-BeginAcquisition.
+    state.recording_status = "Starting"
+
     # run acquisition in a separate thread
     acquisition_coroutine = run_in_threadpool(
         state.acquisition.start_acquisition,
@@ -906,6 +913,11 @@ async def new_trial(data: NewTrialData, db: Session = Depends(db_dependency)):
         except Exception as e:
             import traceback
             acquisition_logger.error(f"Trial failed: {e}", exc_info=True)
+            # If start_acquisition raised before its set_status("Recording")
+            # ran, status is still "Starting" — clear it so recovery
+            # endpoints aren't blocked.
+            if state.recording_status == "Starting":
+                state.recording_status = "Idle"
             broadcast_event(
                 event_type="error",
                 level="error",
@@ -1102,6 +1114,14 @@ async def get_current_config() -> str:
     return os.path.split(config)[-1]
 
 
+# States during which recovery endpoints (restart / restore / exclude) must
+# refuse to act. "Starting" exists to close the race between new_trial
+# returning 200 and FlirRecorder.start_acquisition flipping the status to
+# "Recording" on its worker thread — without it, a fast click on
+# "Restart acquisition" could tear down PySpin mid-BeginAcquisition.
+_BUSY_RECORDING_STATES = frozenset({"Starting", "Recording"})
+
+
 async def _refresh_health_after_configure() -> None:
     """Force a health re-check after a camera reconfigure so the operator
     immediately sees post-init state (link speeds, throughput, missing
@@ -1119,6 +1139,45 @@ async def _refresh_health_after_configure() -> None:
         code="post_configure_refresh",
         message="Health report updated after camera reconfigure.",
     )
+
+
+async def _reset_and_configure(saved_config: str | None, action: str) -> None:
+    """Tear down PySpin and reconfigure from saved_config. If reconfigure
+    fails the system is left with no cams Init'd; broadcast an error
+    envelope with recovery instructions so the operator sees it in the
+    diagnostics-tab finding list rather than just a small red div under
+    the button. Re-raises so the calling endpoint returns 500.
+
+    `action` is the operator-facing verb (e.g. "Restart") used in the
+    error message.
+    """
+    state: GlobalState = get_global_state()
+    # Camera close is per-camera over a threadpool inside FlirRecorder; with
+    # 8+ cameras it can stall the asyncio event loop for seconds, blocking
+    # the very websocket fanout that just queued the "started" envelope.
+    await run_in_threadpool(state.acquisition.reset)
+    if saved_config is None:
+        return
+    try:
+        await state.acquisition.configure_cameras(saved_config)
+    except Exception as e:  # noqa: BLE001
+        acquisition_logger.error(
+            f"{action}: configure_cameras failed after reset: {e}", exc_info=True
+        )
+        broadcast_event(
+            event_type="session_insight",
+            level="error",
+            code="reconfigure_failed",
+            message=f"{action} failed: cameras did not come back up ({e}).",
+            details={
+                "remediation": [
+                    "Click 'Restart acquisition' to retry.",
+                    "If it fails again, power-cycle the camera switch and retry.",
+                    "If the issue persists, check that all cameras are powered and connected.",
+                ],
+            },
+        )
+        raise
 
 
 @api_router.post("/current_config")
@@ -1148,7 +1207,7 @@ async def _set_camera_excluded(serial: str, excluded: bool) -> dict:
     reconfigure so the change takes effect. Returns the new exclusion list.
     """
     state: GlobalState = get_global_state()
-    if state.recording_status == "Recording":
+    if state.recording_status in _BUSY_RECORDING_STATES:
         raise HTTPException(
             status_code=409,
             detail="Cannot change camera exclusion while a recording is active.",
@@ -1169,9 +1228,7 @@ async def _set_camera_excluded(serial: str, excluded: bool) -> dict:
         message=f"{action} camera {serial}; reconfiguring…",
     )
 
-    state.acquisition.reset()
-    if saved_config:
-        await state.acquisition.configure_cameras(saved_config)
+    await _reset_and_configure(saved_config, action=action)
 
     await _refresh_health_after_configure()
 
@@ -1217,7 +1274,7 @@ async def restore_camera_defaults(serial: str):
     Returns 409 if recording, 404 if the serial isn't currently in cams.
     """
     state: GlobalState = get_global_state()
-    if state.recording_status == "Recording":
+    if state.recording_status in _BUSY_RECORDING_STATES:
         raise HTTPException(
             status_code=409,
             detail="Cannot restore camera defaults while a recording is active.",
@@ -1239,9 +1296,7 @@ async def restore_camera_defaults(serial: str):
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
-    state.acquisition.reset()
-    if saved_config:
-        await state.acquisition.configure_cameras(saved_config)
+    await _reset_and_configure(saved_config, action="Restore defaults")
 
     await _refresh_health_after_configure()
 
@@ -1267,7 +1322,7 @@ async def restart_acquisition():
     Returns 409 while a recording is active.
     """
     state: GlobalState = get_global_state()
-    if state.recording_status == "Recording":
+    if state.recording_status in _BUSY_RECORDING_STATES:
         raise HTTPException(
             status_code=409,
             detail="Cannot restart acquisition while a recording is active.",
@@ -1283,9 +1338,7 @@ async def restart_acquisition():
         message="Restarting acquisition system…",
     )
 
-    state.acquisition.reset()
-    if saved_config:
-        await state.acquisition.configure_cameras(saved_config)
+    await _reset_and_configure(saved_config, action="Restart")
 
     await _refresh_health_after_configure()
 
