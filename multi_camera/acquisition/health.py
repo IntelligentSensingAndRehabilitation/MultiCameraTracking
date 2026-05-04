@@ -66,6 +66,7 @@ class CameraReachability(BaseModel):
     expected: bool
     ip: str | None = None
     link_speed_mbps: int | None = None
+    link_throughput_bytes_per_sec: int | None = None
     locked_by_other_process: bool = False
     last_error: str | None = None
 
@@ -408,6 +409,12 @@ class DetectedCamera(BaseModel):
     serial: str
     ip: str | None = None
     link_speed_mbps: int | None = None
+    # Camera's negotiated outbound throughput cap. Auto-set from link speed at
+    # Init time, so a value much lower than other cameras' is the strongest
+    # available signal that the camera fell back to a slower link (e.g. 100 Mbps
+    # on a degraded cable). Only readable from an Init'd device, so the bare
+    # PySpin enumerator path leaves this None.
+    link_throughput_bytes_per_sec: int | None = None
 
 
 class RecorderLike(Protocol):
@@ -439,7 +446,14 @@ def _snapshot_from_recorder(cam: Any) -> DetectedCamera | None:
         if isinstance(link_speed, int) and link_speed > 0
         else None
     )
-    return DetectedCamera(serial=str(serial), ip=ip, link_speed_mbps=link_mbps)
+    throughput = _read_camera_attribute(cam, "DeviceLinkThroughputLimit")
+    throughput_int = int(throughput) if isinstance(throughput, int) else None
+    return DetectedCamera(
+        serial=str(serial),
+        ip=ip,
+        link_speed_mbps=link_mbps,
+        link_throughput_bytes_per_sec=throughput_int,
+    )
 
 
 def _int_to_ipv4(value: int) -> str | None:
@@ -619,6 +633,9 @@ def check_camera_reachability(
                 expected=serial in expected_set,
                 ip=cam.ip if cam else None,
                 link_speed_mbps=cam.link_speed_mbps if cam else None,
+                link_throughput_bytes_per_sec=(
+                    cam.link_throughput_bytes_per_sec if cam else None
+                ),
             )
         )
 
@@ -685,6 +702,45 @@ def check_camera_reachability(
                         details={
                             "serial": cam_info.serial,
                             "link_speed_mbps": cam_info.link_speed_mbps,
+                        },
+                    )
+                )
+
+    # Throughput-outlier detector: catches the case where GevDeviceLinkSpeed
+    # reports 1000 (camera firmware bug) but DeviceLinkThroughputLimit reveals
+    # the link is actually 100 Mbps. Fires when one camera's throughput is
+    # < 50% of the median across detected cameras.
+    throughputs = [
+        c.link_throughput_bytes_per_sec
+        for c in cameras
+        if c.detected and c.link_throughput_bytes_per_sec is not None
+    ]
+    if len(throughputs) >= 3:
+        sorted_t = sorted(throughputs)
+        median_t = sorted_t[len(sorted_t) // 2]
+        outlier_threshold = median_t // 2
+        for cam_info in cameras:
+            if (
+                cam_info.detected
+                and cam_info.link_throughput_bytes_per_sec is not None
+                and cam_info.link_throughput_bytes_per_sec < outlier_threshold
+            ):
+                cam_mbps = cam_info.link_throughput_bytes_per_sec * 8 // 1_000_000
+                median_mbps = median_t * 8 // 1_000_000
+                findings.append(
+                    Finding(
+                        level="warn",
+                        code="camera_throughput_outlier",
+                        message=(
+                            f"Camera {cam_info.serial} link throughput is "
+                            f"~{cam_mbps} Mbps vs median ~{median_mbps} Mbps "
+                            f"across the rig — likely stuck at 100 Mbps. "
+                            f"Try unplug/replug the camera's cable."
+                        ),
+                        details={
+                            "serial": cam_info.serial,
+                            "link_throughput_bytes_per_sec": cam_info.link_throughput_bytes_per_sec,
+                            "median_throughput_bytes_per_sec": median_t,
                         },
                     )
                 )

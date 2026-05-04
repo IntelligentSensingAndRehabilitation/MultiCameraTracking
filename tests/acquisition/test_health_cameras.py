@@ -179,6 +179,60 @@ class TestEnumeratorPath:
         assert report.severity == "error"
 
 
+class TestThroughputOutlier:
+    def test_one_camera_throttled_fires_outlier_finding(self) -> None:
+        """Catches the 100 Mbps stuck-link case where GevDeviceLinkSpeed may
+        misreport but DeviceLinkThroughputLimit is accurate."""
+
+        def fake_enum() -> list[DetectedCamera]:
+            return [
+                DetectedCamera(serial="A", link_speed_mbps=1000, link_throughput_bytes_per_sec=92_000_000),
+                DetectedCamera(serial="B", link_speed_mbps=1000, link_throughput_bytes_per_sec=92_000_000),
+                DetectedCamera(serial="C", link_speed_mbps=1000, link_throughput_bytes_per_sec=92_000_000),
+                DetectedCamera(serial="D", link_speed_mbps=1000, link_throughput_bytes_per_sec=12_000_000),
+            ]
+
+        report = check_camera_reachability(
+            expected_serials=["A", "B", "C", "D"],
+            recorder=None,
+            enumerator=fake_enum,
+        )
+        outliers = [f for f in report.findings if f.code == "camera_throughput_outlier"]
+        assert len(outliers) == 1
+        assert "D" in outliers[0].message
+        assert outliers[0].details["serial"] == "D"
+
+    def test_uniform_throughput_no_outlier(self) -> None:
+        def fake_enum() -> list[DetectedCamera]:
+            return [
+                DetectedCamera(serial=str(i), link_speed_mbps=1000, link_throughput_bytes_per_sec=92_000_000)
+                for i in range(4)
+            ]
+
+        report = check_camera_reachability(
+            expected_serials=[str(i) for i in range(4)],
+            recorder=None,
+            enumerator=fake_enum,
+        )
+        assert not any(f.code == "camera_throughput_outlier" for f in report.findings)
+
+    def test_below_three_cameras_skips_detector(self) -> None:
+        """Median is meaningless with only 1-2 samples — don't fire."""
+
+        def fake_enum() -> list[DetectedCamera]:
+            return [
+                DetectedCamera(serial="A", link_throughput_bytes_per_sec=92_000_000),
+                DetectedCamera(serial="B", link_throughput_bytes_per_sec=12_000_000),
+            ]
+
+        report = check_camera_reachability(
+            expected_serials=["A", "B"],
+            recorder=None,
+            enumerator=fake_enum,
+        )
+        assert not any(f.code == "camera_throughput_outlier" for f in report.findings)
+
+
 class TestShortCircuit:
     def test_no_recorder_no_expected_short_circuits(self) -> None:
         """When nothing is configured, skip PySpin enumeration entirely."""

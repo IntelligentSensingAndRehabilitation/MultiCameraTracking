@@ -77,6 +77,7 @@ const HostHealthPanel = () => {
     const { overall, dhcp, cameras, host_network, recording_state, deployment_mode, generated_at } = healthReport;
     const dhcpFindings = (dhcp && dhcp.findings) || [];
     const cameraFindings = (cameras && cameras.findings) || [];
+    const perCamera = (cameras && cameras.cameras) || [];
     const hostFindings = (host_network && host_network.findings) || [];
     const expectedList = (cameras && cameras.expected) || [];
     const detectedList = (cameras && cameras.detected) || [];
@@ -125,14 +126,42 @@ const HostHealthPanel = () => {
                     severity={maxLevel(cameraFindings)}
                     findings={cameraFindings}
                     extra={
-                        <Table size="sm" borderless className="mb-2">
-                            <tbody>
-                                <tr><td>Expected</td><td>{expectedList.length}</td></tr>
-                                <tr><td>Detected</td><td>{detectedList.length}</td></tr>
-                                <tr><td>Missing</td><td>{missingList.join(', ') || '—'}</td></tr>
-                                <tr><td>Extra</td><td>{extraList.join(', ') || '—'}</td></tr>
-                            </tbody>
-                        </Table>
+                        <>
+                            <Table size="sm" borderless className="mb-2">
+                                <tbody>
+                                    <tr><td>Expected</td><td>{expectedList.length}</td></tr>
+                                    <tr><td>Detected</td><td>{detectedList.length}</td></tr>
+                                    <tr><td>Missing</td><td>{missingList.join(', ') || '—'}</td></tr>
+                                    <tr><td>Extra</td><td>{extraList.join(', ') || '—'}</td></tr>
+                                </tbody>
+                            </Table>
+                            {perCamera.length > 0 && (
+                                <Table size="sm" striped bordered className="mb-2">
+                                    <thead>
+                                        <tr>
+                                            <th>Serial</th>
+                                            <th>IP</th>
+                                            <th>Link</th>
+                                            <th>Throughput</th>
+                                            <th>Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {perCamera.map((c) => (
+                                            <tr key={c.serial}>
+                                                <td>{c.serial}</td>
+                                                <td>{c.ip || '—'}</td>
+                                                <td>{c.link_speed_mbps != null ? `${c.link_speed_mbps} Mbps` : '—'}</td>
+                                                <td>{c.link_throughput_bytes_per_sec != null
+                                                    ? `${Math.round(c.link_throughput_bytes_per_sec * 8 / 1_000_000)} Mbps`
+                                                    : '—'}</td>
+                                                <td>{c.detected ? 'reachable' : (c.expected ? 'missing' : 'unexpected')}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </Table>
+                            )}
+                        </>
                     }
                 />
 
