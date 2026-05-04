@@ -1816,6 +1816,10 @@ class FlirRecorder:
         — clears any latched feature state (e.g. DeviceLinkThroughputLimit)
         without a hardware power-cycle.
 
+        Uses explicit PySpin nodemap calls (not simple_pyspin attribute
+        syntax) because UserSetLoad is a Command node — simple_pyspin
+        doesn't reliably expose Command-node Execute() via attribute access.
+
         Caller must guarantee no recording is in progress. The camera must be
         present in self.cams (Init'd via configure_cameras).
         """
@@ -1828,9 +1832,58 @@ class FlirRecorder:
                 f"Camera {serial} not found in self.cams "
                 f"(have: {[c.DeviceSerialNumber for c in self.cams]})"
             )
-        target.UserSetSelector = "Default"
-        target.UserSetLoad()
-        target.UserSetDefault = "Default"
+
+        nodemap = target.cam.GetNodeMap()
+
+        def _read_int(name: str):
+            node = PySpin.CIntegerPtr(nodemap.GetNode(name))
+            if not PySpin.IsAvailable(node) or not PySpin.IsReadable(node):
+                return None
+            return node.GetValue()
+
+        before_throughput = _read_int("DeviceLinkThroughputLimit")
+        print(
+            f"[restore_defaults] camera {serial} "
+            f"DeviceLinkThroughputLimit before: {before_throughput}"
+        )
+
+        # Step 1: select the 'Default' UserSet.
+        selector = PySpin.CEnumerationPtr(nodemap.GetNode("UserSetSelector"))
+        if not PySpin.IsAvailable(selector) or not PySpin.IsWritable(selector):
+            raise RuntimeError(
+                f"Camera {serial}: UserSetSelector not writable (camera busy?)"
+            )
+        default_entry = selector.GetEntryByName("Default")
+        if default_entry is None or not PySpin.IsAvailable(default_entry):
+            raise RuntimeError(
+                f"Camera {serial}: 'Default' UserSet not available on this camera"
+            )
+        selector.SetIntValue(default_entry.GetValue())
+
+        # Step 2: execute UserSetLoad — this writes Default values back.
+        load_cmd = PySpin.CCommandPtr(nodemap.GetNode("UserSetLoad"))
+        if not PySpin.IsAvailable(load_cmd) or not PySpin.IsWritable(load_cmd):
+            raise RuntimeError(
+                f"Camera {serial}: UserSetLoad command not executable"
+            )
+        load_cmd.Execute()
+        print(f"[restore_defaults] camera {serial} UserSetLoad executed")
+
+        # Step 3: pin 'Default' as the boot UserSet so this persists
+        # across power cycles (otherwise the camera could reload a
+        # different stored UserSet at next boot).
+        user_default = PySpin.CEnumerationPtr(nodemap.GetNode("UserSetDefault"))
+        if PySpin.IsAvailable(user_default) and PySpin.IsWritable(user_default):
+            user_default_entry = user_default.GetEntryByName("Default")
+            if user_default_entry is not None and PySpin.IsAvailable(user_default_entry):
+                user_default.SetIntValue(user_default_entry.GetValue())
+
+        after_throughput = _read_int("DeviceLinkThroughputLimit")
+        print(
+            f"[restore_defaults] camera {serial} "
+            f"DeviceLinkThroughputLimit after: {after_throughput} "
+            f"(delta: {None if before_throughput is None or after_throughput is None else after_throughput - before_throughput})"
+        )
 
     async def reset_cameras(self):
         """Reset all the cameras and reopen the system"""
