@@ -753,7 +753,6 @@ def check_camera_reachability(
                             "Unplug and re-plug the camera's ethernet cable at both ends to force PHY renegotiation.",
                             "If the issue returns within a session, swap the cable with a known-good one to rule out cable damage.",
                             "If a fresh cable doesn't help, move the camera to a different switch port.",
-                            "Software fixes (Restart acquisition, Restore defaults) won't help — this is a physical link issue.",
                         ],
                         details={
                             "serial": cam_info.serial,
