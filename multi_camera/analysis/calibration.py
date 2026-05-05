@@ -67,6 +67,147 @@ def run_calibration_APL(
     #db insert
 
 
+def run_calibration_and_insert(
+    vid_base,
+    *,
+    trial_video_project=None,
+    comment=None,
+    force_high_error=False,
+    **calibration_kwargs,
+):
+    """Run a calibration and insert all linked rows in one transaction.
+
+    Inserts into:
+      - ``Calibration`` (the computed parameters)
+      - ``Video`` (one row per camera, attaches the .mp4 to the localattach store)
+      - ``MultiCameraCalibration`` (session-level metadata, only for the
+        legacy/no-prior-push path; normally already there from push-to-DataJoint)
+      - ``CalibrationVideos`` (link rows: MultiCameraCalibration ↔ Video)
+
+    Calibration videos live under ``video_project="{trial_video_project}_CALIBRATION"``,
+    a dedicated per-project namespace that keeps them out of pose-pipeline analyses
+    while remaining trivially queryable per-project. Normally the calibration's
+    ``MultiCameraCalibration`` row already exists (push-to-DataJoint creates it),
+    so this function reads ``video_project`` from there. ``trial_video_project``
+    only needs to be passed for the legacy/no-prior-push path.
+
+    ArUco detection is gated by ``MultiCameraCalibration.comment`` containing the
+    substring ``"aruco"`` (see ``CalibrationArucoDetection.key_source``). For the
+    legacy/no-prior-push path, pass ``comment="...aruco..."`` to opt in.
+
+    Args:
+        vid_base: full path to the calibration video set, *without* the
+            ``.{serial}.mp4`` suffix. e.g. ``/mnt/.../calibration_20260312_151801``.
+        trial_video_project: trial-side ``video_project`` string for the session
+            this calibration belongs to. Only required when no ``MultiCameraCalibration``
+            row exists yet for this calibration (legacy / no-prior-push case).
+        comment: comment to record on the ``MultiCameraCalibration`` row when
+            this function inserts it (legacy/no-prior-push path only). If a row
+            already exists from push-to-DataJoint, its comment is preserved.
+        force_high_error: if True, suppress the reprojection-error guard. If False
+            (default) and reprojection_error > 0.3, raise rather than insert.
+        **calibration_kwargs: forwarded to ``run_calibration_APL``.
+
+    Returns:
+        ``cal_key`` dict ``{cal_timestamp, camera_config_hash}`` for chaining
+        downstream populate() calls.
+    """
+    import datajoint as dj
+
+    from multi_camera.datajoint.calibrate_cameras import Calibration
+    from multi_camera.datajoint.multi_camera_dj import (
+        CalibrationVideos,
+        MultiCameraCalibration,
+        calibration_video_project,
+    )
+    from pose_pipeline import Video
+
+    entry, board = run_calibration_APL(vid_base, **calibration_kwargs)
+
+    if np.isnan(entry["reprojection_error"]):
+        raise RuntimeError(f"Calibration failed (NaN reprojection_error): {entry}")
+    if entry["reprojection_error"] > 0.3 and not force_high_error:
+        raise RuntimeError(
+            f"Reprojection error {entry['reprojection_error']:.4f} > 0.3. "
+            "Pass force_high_error=True to insert anyway."
+        )
+
+    cal_key = {
+        "cal_timestamp": entry["cal_timestamp"],
+        "camera_config_hash": entry["camera_config_hash"],
+    }
+
+    # Resolve calibration video_project from the MultiCameraCalibration row that
+    # push_to_datajoint inserted. If absent (legacy / no prior push), derive from
+    # trial_video_project kwarg.
+    existing_capture = (MultiCameraCalibration & cal_key).fetch(as_dict=True)
+    if existing_capture:
+        cal_video_project = existing_capture[0]["video_project"]
+    else:
+        if trial_video_project is None:
+            raise RuntimeError(
+                f"No MultiCameraCalibration row for {cal_key} and no "
+                "trial_video_project= passed. Either push the session to DataJoint "
+                "first (recommended) or pass trial_video_project= explicitly."
+            )
+        cal_video_project = calibration_video_project(trial_video_project)
+
+    # Discover per-camera videos (mirrors run_AniposeLib_calibration's discovery)
+    vid_path, vid_basename = os.path.split(vid_base)
+    vids = sorted(glob.glob(os.path.join(vid_path, f"{vid_basename}.*.mp4")))
+    if not vids:
+        raise FileNotFoundError(f"No videos matching {vid_basename}.*.mp4 in {vid_path}")
+
+    discovered_serials = []
+    video_rows = []
+    cal_video_rows = []
+    for v in vids:
+        filename_no_ext = os.path.splitext(os.path.basename(v))[0]
+        serial = filename_no_ext.rsplit(".", 1)[-1]
+        discovered_serials.append(serial)
+        video_rows.append(
+            {
+                "video_project": cal_video_project,
+                "filename": filename_no_ext,
+                "video": v,
+                "start_time": entry["cal_timestamp"],
+            }
+        )
+        cal_video_rows.append(
+            {
+                **cal_key,
+                "video_project": cal_video_project,
+                "filename": filename_no_ext,
+            }
+        )
+
+    # Consistency check between videos discovered here and what calibration used
+    if set(discovered_serials) != set(entry["camera_names"]):
+        raise RuntimeError(
+            f"Camera mismatch: videos discovered {sorted(discovered_serials)} but "
+            f"calibration used {sorted(entry['camera_names'])}. "
+            "Refusing to insert inconsistent state."
+        )
+
+    # MultiCameraCalibration is normally inserted at push-to-DataJoint time. For
+    # legacy data (calibrations being added through this notebook path without a
+    # prior push) we create the row here so CalibrationVideos's FK resolves.
+    capture_row = {
+        **cal_key,
+        "video_project": cal_video_project,
+        "video_base_filename": vid_basename,
+        "comment": comment or "",
+    }
+
+    with dj.conn().transaction:
+        Calibration.insert1(entry)
+        Video.insert(video_rows, skip_duplicates=True)
+        MultiCameraCalibration.insert1(capture_row, skip_duplicates=True)
+        CalibrationVideos.insert(cal_video_rows, skip_duplicates=True)
+
+    return cal_key
+
+
 def relevel_calibration(
         entry,
         releveling_type = "stroller",

@@ -467,6 +467,118 @@ def check_datajoint_external_mounted(mount_path, sentinel_file_name=".multi_cam_
 
     print("External drive mounted and sentinel file found.")
 
+def _is_calibration_comment(comment: Optional[str]) -> bool:
+    """A recording is a calibration if its comment contains 'calibration' or 'charuco'.
+
+    Substring match (not exact) so tag-style comments like 'charuco+aruco' are
+    still recognized.
+    """
+    if not comment:
+        return False
+    return "calibration" in comment or "charuco" in comment
+
+
+def _push_calibration_videos(
+    filenames_and_comments: List[Tuple[str, str]],
+    trial_video_project: str,
+) -> None:
+    """Insert calibration videos and per-recording metadata into DataJoint.
+
+    Calibration videos for trial project ``X`` live under ``video_project="{X}_CALIBRATION"``
+    in the Video table. The dedicated suffix keeps them out of pose-pipeline
+    analyses that filter on the trial project, while remaining trivially
+    queryable per-project.
+
+    For each calibration recording:
+      - Inserts one Video row per camera.
+      - Inserts a MultiCameraCalibration row carrying the SQLite comment forward
+        so CalibrationArucoDetection.populate() can gate off the substring "aruco".
+      - Inserts one CalibrationVideos row per camera linking the new Video rows
+        to the MultiCameraCalibration session.
+
+    All inserts use skip_duplicates=True so this is idempotent. Does NOT insert
+    the Calibration row — that requires the calibration computation, which
+    still lives in the notebook.
+    """
+    import glob
+    import json
+
+    from multi_camera.datajoint.multi_camera_dj import (
+        CalibrationVideos,
+        MultiCameraCalibration,
+        calibration_video_project,
+    )
+    from pose_pipeline import Video
+
+    cal_video_project = calibration_video_project(trial_video_project)
+
+    for cal_filename, comment in filenames_and_comments:
+        vid_path, vid_basename = os.path.split(cal_filename)
+        if not os.path.isdir(vid_path):
+            print(f"  [calibration] skipping {cal_filename}: directory not found")
+            continue
+
+        vids = sorted(glob.glob(os.path.join(vid_path, f"{vid_basename}.*.mp4")))
+        if not vids:
+            print(f"  [calibration] skipping {cal_filename}: no matching .mp4 files")
+            continue
+
+        # Parse timestamp from basename like "calibration_20260312_151801"
+        try:
+            ts_str = vid_basename.split("_", 1)[1]
+            cal_timestamp = datetime.strptime(ts_str, "%Y%m%d_%H%M%S")
+        except (IndexError, ValueError):
+            print(f"  [calibration] skipping {vid_basename}: cannot parse timestamp")
+            continue
+
+        # Read camera_config_hash from JSON sidecar (same source as run_calibration_APL)
+        json_file = os.path.join(vid_path, f"{vid_basename}.json")
+        if not os.path.exists(json_file):
+            print(f"  [calibration] skipping {vid_basename}: missing JSON sidecar")
+            continue
+        with open(json_file) as f:
+            sidecar = json.load(f)
+        camera_config_hash = sidecar.get("camera_config_hash")
+        if not camera_config_hash:
+            print(f"  [calibration] skipping {vid_basename}: no camera_config_hash in JSON")
+            continue
+
+        capture_key = {
+            "cal_timestamp": cal_timestamp,
+            "camera_config_hash": camera_config_hash,
+        }
+
+        video_rows = [
+            {
+                "video_project": cal_video_project,
+                "filename": os.path.splitext(os.path.basename(v))[0],
+                "video": v,
+                "start_time": cal_timestamp,
+            }
+            for v in vids
+        ]
+        cal_video_rows = [
+            {**capture_key, "video_project": cal_video_project, "filename": r["filename"]}
+            for r in video_rows
+        ]
+
+        Video.insert(video_rows, skip_duplicates=True)
+        MultiCameraCalibration.insert1(
+            {
+                **capture_key,
+                "video_project": cal_video_project,
+                "video_base_filename": vid_basename,
+                "comment": comment or "",
+            },
+            skip_duplicates=True,
+        )
+        CalibrationVideos.insert(cal_video_rows, skip_duplicates=True)
+        print(
+            f"  [calibration] inserted {len(video_rows)} videos + capture + linkage for "
+            f"{vid_basename} (comment={comment!r})"
+        )
+
+
 def push_to_datajoint(db: Session, participant_id: str, session_date: date, video_project: str):
     from multi_camera.datajoint.sessions import import_session
 
@@ -480,18 +592,25 @@ def push_to_datajoint(db: Session, participant_id: str, session_date: date, vide
     assert len(sessions) == 1, "Did not find exactly one session for this participant and date."
     recordings: List[RecordingOut] = sessions[0].recordings
 
-    # filter out the recordings that should not be processed and retain the
-    # filename and comment
-    recordings = [
-        (rec.filename, rec.comment) for rec in recordings if rec.should_process and rec.comment != "calibration" and rec.comment != "charuco"
+    # Split into trial recordings (push to DataJoint Recording chain) and calibration
+    # recordings (push raw videos only; Calibration computation still happens in the
+    # notebook via run_calibration_and_insert, which is idempotent on Video rows).
+    trial_recordings = [
+        (rec.filename, rec.comment)
+        for rec in recordings
+        if rec.should_process and not _is_calibration_comment(rec.comment)
+    ]
+    calibration_recordings = [
+        (rec.filename, rec.comment)
+        for rec in recordings
+        if rec.should_process and _is_calibration_comment(rec.comment)
     ]
 
-    print("Processing recordings: ", recordings)
+    print("Processing trial recordings: ", trial_recordings)
+    print("Processing calibration recordings: ", calibration_recordings)
 
     datajoint_external_path = get_datajoint_external_path()
     check_datajoint_external_mounted(datajoint_external_path)
-
-    # TODO: confirm calibration has been performed
 
     participant_id = normalize_participant_id(participant_id)
 
@@ -501,7 +620,13 @@ def push_to_datajoint(db: Session, participant_id: str, session_date: date, vide
     # Pass fin to import_session() once the DataJoint schema supports it. This is also
     # the layer where proper PHI access control should be enforced.
 
-    import_session(participant_id, session_date, video_project=video_project, recordings=recordings)
+    import_session(participant_id, session_date, video_project=video_project, recordings=trial_recordings)
+
+    # Calibration videos + recording metadata are pushed so they're queryable from DataJoint.
+    # Calibration computation still happens when the user runs run_calibration_and_insert
+    # from the notebook. Downstream ArUco detection auto-fires for any calibration whose
+    # MultiCameraCalibration.comment contains "aruco" (set in the acquisition GUI).
+    _push_calibration_videos(calibration_recordings, trial_video_project=video_project)
 
     synchronize_to_datajoint(db)
 
