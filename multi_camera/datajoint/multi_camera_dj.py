@@ -7,6 +7,16 @@ from pose_pipeline import Video, VideoInfo, TopDownPerson, TopDownMethodLookup, 
 schema = dj.schema("multicamera_tracking")
 
 
+def calibration_video_project(trial_video_project: str) -> str:
+    """Derive the calibration-side video_project namespace from a trial-side one.
+
+    Calibration videos for project X live under ``"{X}_CALIBRATION"`` in the
+    Video table. Keeps calibrations out of pose-pipeline analyses that filter on
+    the trial project, while remaining trivially queryable per-project.
+    """
+    return f"{trial_video_project}_CALIBRATION"
+
+
 @schema
 class MultiCameraRecording(dj.Manual):
     definition = """
@@ -45,6 +55,28 @@ class CalibratedRecording(dj.Manual):
     # Match calibration to a recording
     -> MultiCameraRecording
     -> Calibration
+    """
+
+
+@schema
+class MultiCameraCalibration(dj.Manual):
+    definition = """
+    # Calibration recording session metadata (parallel to MultiCameraRecording for trials)
+    cal_timestamp : timestamp           # acquisition time, parsed from filename
+    camera_config_hash : varchar(50)
+    ---
+    video_project : varchar(50)
+    video_base_filename : varchar(100)  # e.g. "calibration_20260504_153438"
+    comment="" : varchar(255)           # comment from acquisition GUI
+    """
+
+
+@schema
+class CalibrationVideos(dj.Manual):
+    definition = """
+    # Per-camera videos that belong to a calibration recording session
+    -> MultiCameraCalibration
+    -> Video
     """
 
 
