@@ -212,7 +212,7 @@ def detect_markers_multi_camera(
     dictionary_id: int = cv2.aruco.DICT_4X4_250,
     frame_step: int = 1,
     max_workers: int | None = 4,
-    cv2_threads_per_worker: int = 1,
+    cv2_threads_per_worker: int | None = 1,
 ) -> dict[str, CameraDetectionResult]:
     """Run ArUco detection across multiple synchronized camera videos in parallel.
 
@@ -223,9 +223,13 @@ def detect_markers_multi_camera(
     call. Without it, each ``cv2.aruco.detectMarkers`` call fans out across
     every CPU and the outer ``max_workers`` pool stops being a meaningful
     concurrency limit. Effective core count ≈ ``max_workers * cv2_threads_per_worker``.
-    Set to 0 to keep OpenCV's default (= all cores).
+    The previous global value is restored on return so unrelated cv2 work in
+    the same process is unaffected. Pass ``None`` to leave OpenCV's thread
+    setting untouched.
     """
-    if cv2_threads_per_worker > 0:
+    prev_cv2_threads: int | None = None
+    if cv2_threads_per_worker is not None:
+        prev_cv2_threads = cv2.getNumThreads()
         cv2.setNumThreads(cv2_threads_per_worker)
 
     def _process_camera(cam_name: str, video_path: str) -> tuple[str, CameraDetectionResult]:
@@ -235,14 +239,17 @@ def detect_markers_multi_camera(
         )
         return cam_name, result
 
-    results: dict[str, CameraDetectionResult] = {}
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {executor.submit(_process_camera, name, path): name for name, path in video_paths.items()}
-        for future in concurrent.futures.as_completed(futures):
-            cam_name, result = future.result()
-            results[cam_name] = result
-
-    return results
+    try:
+        results: dict[str, CameraDetectionResult] = {}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(_process_camera, name, path): name for name, path in video_paths.items()}
+            for future in concurrent.futures.as_completed(futures):
+                cam_name, result = future.result()
+                results[cam_name] = result
+        return results
+    finally:
+        if prev_cv2_threads is not None:
+            cv2.setNumThreads(prev_cv2_threads)
 
 
 def triangulate_detected_markers_detailed(

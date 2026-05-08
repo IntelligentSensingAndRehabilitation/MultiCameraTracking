@@ -503,6 +503,8 @@ def _push_calibration_videos(
     import glob
     import json
 
+    import datajoint as dj
+
     from multi_camera.datajoint.multi_camera_dj import (
         CalibrationVideos,
         MultiCameraCalibration,
@@ -562,17 +564,21 @@ def _push_calibration_videos(
             for r in video_rows
         ]
 
-        Video.insert(video_rows, skip_duplicates=True)
-        MultiCameraCalibration.insert1(
-            {
-                **capture_key,
-                "video_project": cal_video_project,
-                "video_base_filename": vid_basename,
-                "comment": comment or "",
-            },
-            skip_duplicates=True,
-        )
-        CalibrationVideos.insert(cal_video_rows, skip_duplicates=True)
+        # All three rows for one calibration go in a single transaction so a
+        # mid-sequence failure can't leave a Video row attached without its
+        # MultiCameraCalibration / CalibrationVideos linkage.
+        with dj.conn().transaction:
+            Video.insert(video_rows, skip_duplicates=True)
+            MultiCameraCalibration.insert1(
+                {
+                    **capture_key,
+                    "video_project": cal_video_project,
+                    "video_base_filename": vid_basename,
+                    "comment": comment or "",
+                },
+                skip_duplicates=True,
+            )
+            CalibrationVideos.insert(cal_video_rows, skip_duplicates=True)
         print(
             f"  [calibration] inserted {len(video_rows)} videos + capture + linkage for "
             f"{vid_basename} (comment={comment!r})"
