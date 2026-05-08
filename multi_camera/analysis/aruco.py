@@ -212,12 +212,21 @@ def detect_markers_multi_camera(
     dictionary_id: int = cv2.aruco.DICT_4X4_250,
     frame_step: int = 1,
     max_workers: int | None = 4,
+    cv2_threads_per_worker: int = 1,
 ) -> dict[str, CameraDetectionResult]:
     """Run ArUco detection across multiple synchronized camera videos in parallel.
 
     ``expected_ids=None`` returns every marker the detector finds — appropriate
     for generic detection where the protocol isn't yet known.
+
+    ``cv2_threads_per_worker`` caps OpenCV's internal TBB threading per detect
+    call. Without it, each ``cv2.aruco.detectMarkers`` call fans out across
+    every CPU and the outer ``max_workers`` pool stops being a meaningful
+    concurrency limit. Effective core count ≈ ``max_workers * cv2_threads_per_worker``.
+    Set to 0 to keep OpenCV's default (= all cores).
     """
+    if cv2_threads_per_worker > 0:
+        cv2.setNumThreads(cv2_threads_per_worker)
 
     def _process_camera(cam_name: str, video_path: str) -> tuple[str, CameraDetectionResult]:
         detector = create_aruco_detector(dictionary_id)
