@@ -86,7 +86,6 @@ class TestHealthIdlePoller:
         poller = HealthIdlePoller(
             config=config,
             run_check=run_check,
-            is_recording=lambda: False,
             on_poll=on_poll,
         )
         poller.start()
@@ -95,29 +94,31 @@ class TestHealthIdlePoller:
         finally:
             poller.stop()
 
-    def test_pauses_while_recording(self) -> None:
+    def test_runs_unconditionally(self) -> None:
+        """The poller no longer gates on recording state — adapting is the
+        caller's job (run_check decides whether to skip camera enumeration,
+        etc.). This test pins that contract.
+        """
         config = HealthConfig(idle_poll_s=0.05)
         call_count = {"n": 0}
+        done = threading.Event()
 
         def run_check():
             call_count["n"] += 1
+            if call_count["n"] >= 2:
+                done.set()
             return _make_report("ok")
 
         poller = HealthIdlePoller(
             config=config,
             run_check=run_check,
-            is_recording=lambda: True,
             on_poll=lambda new, prev: None,
         )
         poller.start()
         try:
-            # Let the poll interval elapse a few times while "recording".
-            import time
-
-            time.sleep(0.2)
+            assert done.wait(timeout=1.0), "poller stopped firing"
         finally:
             poller.stop()
-        assert call_count["n"] == 0, "run_check fired while is_recording=True"
 
     def test_tracks_previous_report_between_polls(self) -> None:
         config = HealthConfig(idle_poll_s=0.05)
@@ -136,7 +137,6 @@ class TestHealthIdlePoller:
         poller = HealthIdlePoller(
             config=config,
             run_check=run_check,
-            is_recording=lambda: False,
             on_poll=on_poll,
         )
         poller.start()
@@ -166,7 +166,6 @@ class TestHealthIdlePoller:
         poller = HealthIdlePoller(
             config=config,
             run_check=run_check,
-            is_recording=lambda: False,
             on_poll=on_poll,
         )
         poller.start()
@@ -181,7 +180,6 @@ class TestHealthIdlePoller:
         poller = HealthIdlePoller(
             config=config,
             run_check=lambda: _make_report("ok"),
-            is_recording=lambda: False,
             on_poll=lambda new, prev: None,
         )
         poller.start()
@@ -198,7 +196,6 @@ class TestHealthIdlePoller:
         poller = HealthIdlePoller(
             config=config,
             run_check=lambda: _make_report("ok"),
-            is_recording=lambda: False,
             on_poll=lambda new, prev: None,
         )
         poller.stop()  # must not raise

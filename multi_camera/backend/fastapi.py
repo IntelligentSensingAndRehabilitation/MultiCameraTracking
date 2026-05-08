@@ -206,6 +206,22 @@ class DiagnosticsManager:
 diagnostics_manager = DiagnosticsManager()
 
 
+def _on_acquisition_diagnostic(envelope: dict) -> None:
+    """Bridge ``FlirRecorder._fire_diagnostic_once`` → ``broadcast_event``.
+
+    Called from acquisition worker threads when the recorder catches a
+    Spinnaker error per camera. Forwards the envelope to the existing
+    diagnostics WS fan-out as a ``session_insight`` event.
+    """
+    broadcast_event(
+        event_type="session_insight",
+        level=envelope.get("level", "warn"),
+        code=envelope.get("code", "acquisition_error"),
+        message=envelope.get("message", ""),
+        details=envelope.get("details", {}),
+    )
+
+
 def _on_idle_health_poll(
     new_report: HealthCheckReport,
     previous: HealthCheckReport | None,
@@ -349,7 +365,10 @@ async def lifespan(app: FastAPI):
 
     # Perform startup tasks
     acquisition_logger.info("Starting acquisition system")
-    state.acquisition = FlirRecorder(receive_status)
+    state.acquisition = FlirRecorder(
+        receive_status,
+        diagnostics_callback=_on_acquisition_diagnostic,
+    )
     state.health_config = HealthConfig.from_env()
     acquisition_logger.info(
         f"Health config: mode={state.health_config.deployment_mode} "
@@ -366,8 +385,13 @@ async def lifespan(app: FastAPI):
             expected_serials=_expected_serials(state.acquisition),
             recorder=state.acquisition,
             recording_state=state.recording_status or "Idle",
+            # During an active recording the recorder owns the camera handles;
+            # PySpin GigE enumeration would race with the worker threads and
+            # is also slow. Camera-specific issues during recording are
+            # surfaced via the recorder's diagnostics_callback instead. DHCP
+            # and host-network checks still run.
+            skip_camera_enumeration=(state.recording_status == "Recording"),
         ),
-        is_recording=lambda: state.recording_status == "Recording",
         on_poll=_on_idle_health_poll,
         logger=acquisition_logger,
     )
