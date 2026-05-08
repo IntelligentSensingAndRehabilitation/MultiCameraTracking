@@ -381,12 +381,15 @@ def run_AniposeLib_calibration(vid_base = None, charuco="charuco", checkerboard_
         config_hash = hashlib.md5(''.join(original_cam_ids).encode('utf-8')).hexdigest()[:10]
         print(f"Using generated config hash: {config_hash}")
 
-    # Convert timestamp string to datetime object
-    try:
-        trial_timestamp = vid_base[len("calibration_"):]
-        cal_timestamp = datetime.strptime(trial_timestamp, "%Y%m%d_%H%M%S")
-    except ValueError:
-        print(f"Warning: Could not parse vid_base {vid_base}")
+    # Convert timestamp string to datetime object. Fail fast on malformed
+    # basenames — silently warning leaves cal_timestamp unbound and produces
+    # a NameError two lines below, which masks the real cause.
+    if not vid_base.startswith("calibration_"):
+        raise ValueError(
+            f"Calibration video basename must start with 'calibration_', got {vid_base!r}"
+        )
+    trial_timestamp = vid_base[len("calibration_"):]
+    cal_timestamp = datetime.strptime(trial_timestamp, "%Y%m%d_%H%M%S")
     # Create the database entry
     entry = {
         "cal_timestamp": cal_timestamp,
