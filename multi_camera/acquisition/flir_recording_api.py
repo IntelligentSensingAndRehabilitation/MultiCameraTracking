@@ -1809,9 +1809,13 @@ class FlirRecorder:
                         f"{camera_serial}: Failed to get image — {err_text}",
                     )
                     if "-1002" in err_text or "no longer valid" in err_text:
-                        # Disconnect during grab — surface to the operator.
-                        # The arrival/removal event handler usually beats us
-                        # here, but we keep this path as defense-in-depth.
+                        # Disconnect during grab — surface to the operator
+                        # and bail out of this worker. Without the break
+                        # the loop would spam -1002 every few ms for the
+                        # rest of the trial (observed: x244 in a single
+                        # ~5s window during PR 4 testing). Putting None
+                        # in the acquisition_queue lets the corresponding
+                        # writer thread drain and exit cleanly.
                         self._fire_diagnostic_once(
                             camera_serial=camera_serial,
                             code="camera_disconnected",
@@ -1822,6 +1826,8 @@ class FlirRecorder:
                             ),
                             details={"spinnaker_error": err_text},
                         )
+                        self.acquisition_queue[camera_serial].put(None)
+                        break
                     elif "-1012" in err_text or "aborted" in err_text:
                         self._fire_diagnostic_once(
                             camera_serial=camera_serial,
@@ -1833,6 +1839,8 @@ class FlirRecorder:
                             ),
                             details={"spinnaker_error": err_text},
                         )
+                        self.acquisition_queue[camera_serial].put(None)
+                        break
                     else:
                         classified = classify_spinnaker_error(err_text)
                         if classified is not None:
