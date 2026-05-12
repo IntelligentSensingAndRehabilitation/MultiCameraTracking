@@ -26,13 +26,23 @@ the subject or session level that might be invalidated by a later recording.
 """
 
 import os
-from typing import List, Tuple
-from datetime import date
+from dataclasses import dataclass
+from datetime import date, datetime
+from typing import List, Optional, Tuple
 
 import datajoint as dj
 from .multi_camera_dj import import_recording, MultiCameraRecording
 
 schema = dj.schema("mocap_sessions")
+
+
+@dataclass
+class PhotoSpec:
+    saved_path: str
+    filename: str
+    original_filename: str
+    upload_timestamp: datetime
+    description: Optional[str] = None
 
 
 def get_subject_id_from_participant_id(participant_id: str) -> int:
@@ -59,7 +69,20 @@ class Session(dj.Manual):
     -> Subject
     session_date: date
     ---
+    fin=null: varchar(20)   # Hospital FIN for this session (PHI; nullable until provided)
     """
+
+    class Photo(dj.Part):
+        definition = """
+        # Patient identification photos captured at session start
+        -> master
+        filename: varchar(255)        # saved filename (timestamp-prefixed, unique within session)
+        ---
+        photo: attach@localattach     # image file copied into localattach store on insert
+        original_filename: varchar(255)
+        description=null: varchar(255)
+        upload_timestamp: datetime
+        """
 
 
 @schema
@@ -77,6 +100,8 @@ def import_session(
     session_date: date,
     video_project: str,
     recordings: List[Tuple[str, str]],
+    fin: Optional[str] = None,
+    photos: Optional[List[PhotoSpec]] = None,
 ):
     """
     Import a session with a list of recordings
@@ -86,6 +111,8 @@ def import_session(
         session_date (date): session date
         video_project (str): video project
         recordings (List[Tuple(str, str)]): list of recording tuples
+        fin (Optional[str]): hospital FIN for this session
+        photos (Optional[List[PhotoSpec]]): patient identification photos for this session
 
     """
 
@@ -99,7 +126,7 @@ def import_session(
         if not Subject & subject_key:
             Subject.insert1(subject_key)
 
-        Session.insert1(session_key)
+        Session.insert1({**session_key, "fin": fin})
 
         for recording in recordings:
             print("processing recording", recording)
@@ -115,6 +142,19 @@ def import_session(
             key["comment"] = comment
 
             Recording.insert1(key)
+
+        if photos:
+            for p in photos:
+                if not os.path.exists(p.saved_path):
+                    raise FileNotFoundError(f"Photo missing on disk: {p.saved_path}")
+                Session.Photo.insert1({
+                    **session_key,
+                    "filename": p.filename,
+                    "photo": p.saved_path,
+                    "original_filename": p.original_filename,
+                    "description": p.description,
+                    "upload_timestamp": p.upload_timestamp,
+                })
 
     except Exception as e:
         dj.conn().cancel_transaction()

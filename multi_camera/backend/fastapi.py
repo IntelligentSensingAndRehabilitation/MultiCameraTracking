@@ -701,8 +701,14 @@ async def set_session(subject_id: str, fin: Optional[str] = None, db=Depends(db_
 
     if fin and fin.strip():
         from multi_camera.backend.recording_db import store_fin
-        store_fin(db, participant_name=subject_id, fin=fin.strip())
-        print(f"FIN stored for participant {subject_id}")
+        store_fin(
+            db,
+            participant_name=subject_id,
+            session_date=date,
+            session_path=session_dir,
+            fin=fin.strip(),
+        )
+        print(f"FIN stored for session {subject_id} / {date}")
 
     return state.current_session
 
