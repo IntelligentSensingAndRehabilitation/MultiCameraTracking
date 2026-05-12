@@ -1,5 +1,5 @@
 import React, { useContext, useEffect, useState } from 'react';
-import { Container, Card, Badge, Button, ListGroup, Accordion, Table } from 'react-bootstrap';
+import { Container, Card, Badge, Button, ListGroup, Accordion, Table, Row, Col } from 'react-bootstrap';
 import { AcquisitionState } from '../AcquisitionApi';
 
 const severityVariant = {
@@ -41,17 +41,28 @@ const FindingList = ({ findings }) => {
     );
 };
 
-const SubsystemCard = ({ title, severity, findings, extra }) => (
-    <Card className="mb-3">
-        <Card.Header className="d-flex justify-content-between align-items-center">
+const SubsystemPanel = ({ title, severity, findings, extra }) => (
+    <div className="h-100">
+        <div className="d-flex justify-content-between align-items-center mb-2 pb-1 border-bottom">
             <strong>{title}</strong>
             <SeverityBadge level={severity} />
-        </Card.Header>
-        <Card.Body>
-            {extra}
-            <FindingList findings={findings} />
-        </Card.Body>
-    </Card>
+        </div>
+        {extra}
+        <FindingList findings={findings} />
+    </div>
+);
+
+// Compact 2-column definition list. Use instead of a borderless Table
+// for tight key/value summaries.
+const KvDl = ({ entries }) => (
+    <dl className="row small mb-2 gx-2">
+        {entries.map(([k, v], i) => (
+            <React.Fragment key={i}>
+                <dt className="col-5 fw-normal text-muted">{k}</dt>
+                <dd className="col-7 mb-1">{v}</dd>
+            </React.Fragment>
+        ))}
+    </dl>
 );
 
 const HostHealthPanel = () => {
@@ -110,135 +121,125 @@ const HostHealthPanel = () => {
                     Last checked: {generated_at ? new Date(generated_at).toLocaleString() : '—'}
                 </div>
 
-                <SubsystemCard
-                    title="DHCP server"
-                    severity={maxLevel(dhcpFindings)}
-                    findings={dhcpFindings}
-                    extra={
-                        dhcp && dhcp.applicable ? (
-                            <Table size="sm" borderless className="mb-2">
-                                <tbody>
-                                    <tr><td>Service</td><td>{describeBool(dhcp.service_active)}</td></tr>
-                                    <tr><td>Interface IP</td><td><code>{dhcp.interface_ip || '—'}</code></td></tr>
-                                    <tr><td>Active leases</td><td>{dhcp.lease_count}</td></tr>
-                                </tbody>
-                            </Table>
-                        ) : (
-                            <p className="text-muted small mb-2">DHCP checks skipped (laptop mode).</p>
-                        )
-                    }
-                />
+                <Row className="g-3 mb-3">
+                    <Col md={4}>
+                        <SubsystemPanel
+                            title="DHCP server"
+                            severity={maxLevel(dhcpFindings)}
+                            findings={dhcpFindings}
+                            extra={
+                                dhcp && dhcp.applicable ? (
+                                    <KvDl entries={[
+                                        ['Service', describeBool(dhcp.service_active)],
+                                        ['Interface IP', <code key="ip">{dhcp.interface_ip || '—'}</code>],
+                                        ['Active leases', dhcp.lease_count],
+                                    ]} />
+                                ) : (
+                                    <p className="text-muted small mb-2">DHCP checks skipped (laptop mode).</p>
+                                )
+                            }
+                        />
+                    </Col>
+                    <Col md={4}>
+                        <SubsystemPanel
+                            title="Cameras"
+                            severity={maxLevel(cameraFindings)}
+                            findings={cameraFindings}
+                            extra={
+                                <KvDl entries={[
+                                    ['Expected', expectedList.length],
+                                    ['Detected', detectedList.length],
+                                    ['Missing', missingList.join(', ') || '—'],
+                                    ['Extra', extraList.join(', ') || '—'],
+                                ]} />
+                            }
+                        />
+                    </Col>
+                    <Col md={4}>
+                        <SubsystemPanel
+                            title="Host network"
+                            severity={maxLevel(hostFindings)}
+                            findings={hostFindings}
+                            extra={
+                                host_network ? (
+                                    <KvDl entries={[
+                                        ['Interface', <code key="if">{host_network.interface}</code>],
+                                        ['Carrier', describeBool(host_network.carrier_up)],
+                                        ['MTU', `${host_network.mtu == null ? '—' : host_network.mtu} (expected ${host_network.expected_mtu})`],
+                                        ['rmem_max', `${host_network.rmem_max == null ? '—' : host_network.rmem_max} (expected ${host_network.expected_rmem_max})`],
+                                    ]} />
+                                ) : null
+                            }
+                        />
+                    </Col>
+                </Row>
 
-                <SubsystemCard
-                    title="Cameras"
-                    severity={maxLevel(cameraFindings)}
-                    findings={cameraFindings}
-                    extra={
-                        <>
-                            <Table size="sm" borderless className="mb-2">
-                                <tbody>
-                                    <tr><td>Expected</td><td>{expectedList.length}</td></tr>
-                                    <tr><td>Detected</td><td>{detectedList.length}</td></tr>
-                                    <tr><td>Missing</td><td>{missingList.join(', ') || '—'}</td></tr>
-                                    <tr><td>Extra</td><td>{extraList.join(', ') || '—'}</td></tr>
-                                </tbody>
-                            </Table>
-                            {wrongSubnet.length > 0 && (
-                                <Table size="sm" striped bordered className="mb-2">
-                                    <thead>
-                                        <tr>
-                                            <th colSpan={3}>Cameras on wrong subnet</th>
-                                            <th>Action</th>
-                                        </tr>
-                                        <tr>
-                                            <th>MAC</th>
-                                            <th>Current IP</th>
-                                            <th>Model</th>
-                                            <th></th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {wrongSubnet.map((c) => (
-                                            <tr key={c.mac}>
-                                                <td><code>{c.mac}</code></td>
-                                                <td>{c.current_ip || '—'}</td>
-                                                <td>{c.model || '—'}</td>
-                                                <td><ForceIpButton mac={c.mac} /></td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </Table>
-                            )}
-                            {perCamera.length > 0 && (
-                                <Table size="sm" striped bordered className="mb-2">
-                                    <thead>
-                                        <tr>
-                                            <th>Serial</th>
-                                            <th>IP</th>
-                                            <th>Link</th>
-                                            <th>Throughput</th>
-                                            <th>Status</th>
-                                            <th>Action</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {perCamera.map((c) => (
-                                            <tr key={c.serial}>
-                                                <td>{c.serial}</td>
-                                                <td>{c.ip || '—'}</td>
-                                                <td>{deriveLinkLabel(c)}</td>
-                                                <td>{c.link_throughput_bytes_per_sec != null
-                                                    ? `${Math.round(c.link_throughput_bytes_per_sec * 8 / 1000000)} Mbps`
-                                                    : '—'}</td>
-                                                <td>{c.excluded
-                                                    ? 'excluded'
-                                                    : (c.detected ? 'reachable' : (c.expected ? 'missing' : 'unexpected'))}</td>
-                                                <td>{(c.excluded || c.expected || c.detected)
-                                                    ? <ExcludeCameraButton serial={c.serial} excluded={c.excluded} />
-                                                    : null}</td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </Table>
-                            )}
-                        </>
-                    }
-                />
+                {wrongSubnet.length > 0 && (
+                    <Table size="sm" striped bordered className="mb-3">
+                        <thead>
+                            <tr>
+                                <th colSpan={3}>Cameras on wrong subnet</th>
+                                <th>Action</th>
+                            </tr>
+                            <tr>
+                                <th>MAC</th>
+                                <th>Current IP</th>
+                                <th>Model</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {wrongSubnet.map((c) => (
+                                <tr key={c.mac}>
+                                    <td><code>{c.mac}</code></td>
+                                    <td>{c.current_ip || '—'}</td>
+                                    <td>{c.model || '—'}</td>
+                                    <td><ForceIpButton mac={c.mac} /></td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </Table>
+                )}
 
-                <SubsystemCard
-                    title="Host network"
-                    severity={maxLevel(hostFindings)}
-                    findings={hostFindings}
-                    extra={
-                        host_network ? (
-                            <Table size="sm" borderless className="mb-2">
-                                <tbody>
-                                    <tr><td>Interface</td><td><code>{host_network.interface}</code></td></tr>
-                                    <tr><td>Carrier</td><td>{describeBool(host_network.carrier_up)}</td></tr>
-                                    <tr>
-                                        <td>MTU</td>
-                                        <td>
-                                            {host_network.mtu == null ? '—' : host_network.mtu} (expected {host_network.expected_mtu})
-                                        </td>
-                                    </tr>
-                                    <tr>
-                                        <td>rmem_max</td>
-                                        <td>
-                                            {host_network.rmem_max == null ? '—' : host_network.rmem_max} (expected {host_network.expected_rmem_max})
-                                        </td>
-                                    </tr>
-                                </tbody>
-                            </Table>
-                        ) : null
-                    }
-                />
+                {perCamera.length > 0 && (
+                    <Table size="sm" striped bordered className="mb-0">
+                        <thead>
+                            <tr>
+                                <th>Serial</th>
+                                <th>IP</th>
+                                <th>Link</th>
+                                <th>Throughput</th>
+                                <th>Status</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {perCamera.map((c) => (
+                                <tr key={c.serial}>
+                                    <td>{c.serial}</td>
+                                    <td>{c.ip || '—'}</td>
+                                    <td>{deriveLinkLabel(c)}</td>
+                                    <td>{c.link_throughput_bytes_per_sec != null
+                                        ? `${Math.round(c.link_throughput_bytes_per_sec * 8 / 1000000)} Mbps`
+                                        : '—'}</td>
+                                    <td>{c.excluded
+                                        ? 'excluded'
+                                        : (c.detected ? 'reachable' : (c.expected ? 'missing' : 'unexpected'))}</td>
+                                    <td>{(c.excluded || c.expected || c.detected)
+                                        ? <ExcludeCameraButton serial={c.serial} excluded={c.excluded} />
+                                        : null}</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </Table>
+                )}
             </Card.Body>
         </Card>
     );
 };
 
 const CurrentSessionPanel = () => {
-    const { sessionSummary, sessionInsights, fetchSessionSummary } = useContext(AcquisitionState);
+    const { sessionSummary, fetchSessionSummary } = useContext(AcquisitionState);
     const [refreshing, setRefreshing] = useState(false);
 
     useEffect(() => {
@@ -265,7 +266,7 @@ const CurrentSessionPanel = () => {
             </Card.Header>
             <Card.Body>
                 {!sessionSummary && (
-                    <p className="text-muted">No active session, or no trials yet.</p>
+                    <p className="text-muted mb-0">No active session, or no trials yet.</p>
                 )}
 
                 {sessionSummary && (
@@ -305,38 +306,40 @@ const CurrentSessionPanel = () => {
                         </Accordion>
                     </>
                 )}
-
-                {sessionInsights && sessionInsights.length > 0 && (
-                    <Card className="mt-3">
-                        <Card.Header><strong>Live trial events</strong></Card.Header>
-                        <Card.Body>
-                            <ListGroup variant="flush">
-                                {sessionInsights.map((ev, i) => {
-                                    const steps = (ev.details && ev.details.remediation) || null;
-                                    return (
-                                        <ListGroup.Item key={i} className="d-flex justify-content-between align-items-start">
-                                            <div className="ms-2 me-auto">
-                                                <div className="fw-bold">{ev.message}</div>
-                                                {steps && steps.length > 0 && (
-                                                    <ol className="small mb-1 mt-1 ps-3">
-                                                        {steps.map((step, j) => (
-                                                            <li key={j}>{step}</li>
-                                                        ))}
-                                                    </ol>
-                                                )}
-                                                <small className="text-muted">
-                                                    {ev.code}{ev.ts ? ` · ${new Date(ev.ts).toLocaleTimeString()}` : ''}
-                                                </small>
-                                            </div>
-                                            <SeverityBadge level={ev.level} />
-                                        </ListGroup.Item>
-                                    );
-                                })}
-                            </ListGroup>
-                        </Card.Body>
-                    </Card>
-                )}
             </Card.Body>
+        </Card>
+    );
+};
+
+const LiveTrialEventsPanel = () => {
+    const { sessionInsights } = useContext(AcquisitionState);
+    if (!sessionInsights || sessionInsights.length === 0) return null;
+    return (
+        <Card className="mb-4">
+            <Card.Header><strong>Live trial events</strong></Card.Header>
+            <ListGroup variant="flush">
+                {sessionInsights.map((ev, i) => {
+                    const steps = (ev.details && ev.details.remediation) || null;
+                    return (
+                        <ListGroup.Item key={i} className="d-flex justify-content-between align-items-start">
+                            <div className="ms-2 me-auto">
+                                <div className="fw-bold">{ev.message}</div>
+                                {steps && steps.length > 0 && (
+                                    <ol className="small mb-1 mt-1 ps-3">
+                                        {steps.map((step, j) => (
+                                            <li key={j}>{step}</li>
+                                        ))}
+                                    </ol>
+                                )}
+                                <small className="text-muted">
+                                    {ev.code}{ev.ts ? ` · ${new Date(ev.ts).toLocaleTimeString()}` : ''}
+                                </small>
+                            </div>
+                            <SeverityBadge level={ev.level} />
+                        </ListGroup.Item>
+                    );
+                })}
+            </ListGroup>
         </Card>
     );
 };
@@ -511,6 +514,7 @@ const DiagnosticsPage = () => (
             </div>
         </div>
         <HostHealthPanel />
+        <LiveTrialEventsPanel />
         <CurrentSessionPanel />
     </Container>
 );
