@@ -958,31 +958,6 @@ class FlirRecorder:
                 print(f"[event_handler] failed to unregister: {e}")
         self._event_handlers = []
 
-    def _drop_dead_handles(self, cams: list) -> list:
-        """Return ``cams`` minus any handles that no longer respond to a
-        basic read. Probes ``DeviceSerialNumber`` because it's available on
-        un-Init'd cameras and is the cheapest reachability check the SDK
-        supports. Fires a ``camera_handle_invalid`` envelope per dropped
-        camera.
-        """
-        alive = []
-        for c in cams:
-            try:
-                serial = c.DeviceSerialNumber
-            except Exception as e:  # noqa: BLE001
-                self._fire_diagnostic_once(
-                    camera_serial="?",
-                    code="camera_handle_invalid",
-                    level="warn",
-                    message=(
-                        "A camera handle was invalid before init "
-                        f"(skipping it for this session): {e}"
-                    ),
-                )
-                continue
-            alive.append(c)
-        return alive
-
     def check_queue_sizes(self, queue_dict):
         for name, q in queue_dict.items():
             print(name, q.qsize())
@@ -1122,19 +1097,6 @@ class FlirRecorder:
             "chunk_data": self.chunk_data,
             "camera_info": self.camera_info,
         }
-
-        # Probe each handle for liveness before submitting to init_camera.
-        # A handle for a camera that was unplugged before configure_cameras
-        # ran will raise AccessException on the first node write inside
-        # init_camera (e.g. LineMode = "Output"), which leaves the system
-        # in a half-state. Drop dead handles up-front and fire a structured
-        # finding so the operator knows which camera went missing.
-        self.cams = self._drop_dead_handles(self.cams)
-        if not self.cams:
-            raise RuntimeError(
-                "No usable camera handles after pre-Init validation; "
-                "all configured cameras appear unreachable."
-            )
 
         with concurrent.futures.ThreadPoolExecutor(
             max_workers=len(self.cams)
