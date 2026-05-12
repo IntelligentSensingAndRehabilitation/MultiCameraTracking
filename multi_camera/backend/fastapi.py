@@ -932,11 +932,17 @@ async def new_trial(data: NewTrialData, db: Session = Depends(db_dependency)):
         except Exception as e:
             import traceback
             acquisition_logger.error(f"Trial failed: {e}", exc_info=True)
-            # If start_acquisition raised before its set_status("Recording")
-            # ran, status is still "Starting" — clear it so recovery
-            # endpoints aren't blocked.
-            if state.recording_status == "Starting":
-                state.recording_status = "Idle"
+            # The trial died (could be before or after set_status("Recording")
+            # ran on the worker). Reset to Idle unconditionally — leaving
+            # status at "Starting" or "Recording" would lock the operator
+            # out of the recovery endpoints (Restart acquisition, Restore
+            # defaults, Force IP, etc.) since they 409 in busy states.
+            # set_status pushes to the frontend WS so buttons re-enable.
+            if (
+                state.recording_status in _BUSY_RECORDING_STATES
+                and state.acquisition is not None
+            ):
+                state.acquisition.set_status("Idle")
             broadcast_event(
                 event_type="error",
                 level="error",
@@ -1340,29 +1346,33 @@ async def restore_camera_defaults(serial: str):
     return {"status": "success", "serial": serial, "config": saved_config}
 
 
-@api_router.post("/cameras/{serial}/bumped")
-async def mark_camera_bumped(serial: str):
-    """Operator hit/bumped a camera; subsequent trials in this session need
-    a fresh camera_config_hash so DataJoint creates a separate calibration
-    entry. Rotates a salt inside FlirRecorder.get_config_hash — no
-    reconfigure needed (the cameras themselves are unchanged, just their
-    physical pose). Returns the new hash.
+@api_router.post("/rig/recalibrate")
+async def mark_rig_recalibrate():
+    """Operator bumped/moved at least one camera; subsequent trials in this
+    session need a fresh camera_config_hash so DataJoint creates a separate
+    calibration entry. Rig-level (not per-camera) because the calibration
+    is a joint estimate of all cameras' relative poses — moving one
+    invalidates the whole rig's extrinsics.
+
+    Rotates a salt inside FlirRecorder.get_config_hash — no reconfigure
+    needed (the cameras themselves are unchanged, just their physical
+    pose). Returns the new hash.
     """
     state: GlobalState = get_global_state()
     new_hash = await run_in_threadpool(
-        state.acquisition.bump_config_hash, f"bumped {serial}"
+        state.acquisition.bump_config_hash, "rig recalibrate"
     )
     broadcast_event(
         event_type="session_insight",
         level="warn",
-        code="camera_bumped",
+        code="rig_recalibrate",
         message=(
-            f"Camera {serial} marked as bumped. Future trials will record under "
-            f"a new camera_config_hash ({new_hash}) — capture a new calibration "
-            "before the next trial."
+            "Rig marked for recalibration. Future trials will record under "
+            f"a new camera_config_hash ({new_hash}) — capture a new "
+            "calibration recording before the next trial."
         ),
     )
-    return {"status": "success", "serial": serial, "new_config_hash": new_hash}
+    return {"status": "success", "new_config_hash": new_hash}
 
 
 class ForceIpData(BaseModel):

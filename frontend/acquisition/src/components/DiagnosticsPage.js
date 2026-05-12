@@ -425,6 +425,47 @@ const ForceIpButton = ({ mac }) => {
     );
 };
 
+const RecalibrateRigButton = () => {
+    const { markRigRecalibrate } = useContext(AcquisitionState);
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState(null);
+
+    const handleClick = async () => {
+        const ok = window.confirm(
+            'Mark the rig for recalibration? Subsequent trials in this session ' +
+            'will record under a new camera_config_hash, so DataJoint will ' +
+            'treat them as a new calibration setup. Capture a new calibration ' +
+            'recording before your next trial.'
+        );
+        if (!ok) return;
+        setBusy(true);
+        setError(null);
+        try {
+            await markRigRecalibrate();
+        } catch (e) {
+            const msg = (e && e.response && e.response.data && e.response.data.detail) || e.message;
+            setError(msg || 'Mark failed.');
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    return (
+        <div>
+            <Button
+                onClick={handleClick}
+                disabled={busy}
+                size="sm"
+                variant="outline-info"
+                title="Force a new camera_config_hash for subsequent trials (after a camera was bumped/moved)"
+            >
+                {busy ? '…' : 'Camera moved'}
+            </Button>
+            {error && <div className="text-danger small mt-1">{error}</div>}
+        </div>
+    );
+};
+
 const RestartAcquisitionButton = () => {
     const { restartAcquisition, recordingSystemStatus } = useContext(AcquisitionState);
     const [busy, setBusy] = useState(false);
@@ -464,7 +505,10 @@ const DiagnosticsPage = () => (
     <Container className="mt-3">
         <div className="d-flex justify-content-between align-items-center mb-3">
             <h3 className="mb-0">Diagnostics</h3>
-            <RestartAcquisitionButton />
+            <div className="d-flex gap-2">
+                <RecalibrateRigButton />
+                <RestartAcquisitionButton />
+            </div>
         </div>
         <HostHealthPanel />
         <CurrentSessionPanel />

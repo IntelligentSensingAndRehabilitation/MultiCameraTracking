@@ -443,9 +443,8 @@ export const AcquisitionApi = (props) => {
         return response.data;
     };
 
-    const markCameraBumped = async (serial) => {
-        const response = await axios.post(`${API_BASE_URL}/cameras/${serial}/bumped`);
-        await fetchCameraStatus();
+    const markRigRecalibrate = async () => {
+        const response = await axios.post(`${API_BASE_URL}/rig/recalibrate`);
         return response.data;
     };
 
@@ -585,7 +584,7 @@ export const AcquisitionApi = (props) => {
         restoreCameraDefaults,
         setCameraExcluded,
         forceIpCamera,
-        markCameraBumped,
+        markRigRecalibrate,
         newSession,
         newTrial,
         previewVideo,
