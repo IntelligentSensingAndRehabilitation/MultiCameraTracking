@@ -460,6 +460,11 @@ export const AcquisitionApi = (props) => {
         return response.data;
     };
 
+    const markRigRecalibrate = async () => {
+        const response = await axios.post(`${API_BASE_URL}/rig/recalibrate`);
+        return response.data;
+    };
+
     const forceIpCamera = async (mac, ip, mask, gateway) => {
         const body = {};
         if (ip) body.ip = ip;
@@ -596,6 +601,7 @@ export const AcquisitionApi = (props) => {
         restoreCameraDefaults,
         setCameraExcluded,
         forceIpCamera,
+        markRigRecalibrate,
         newSession,
         newTrial,
         previewVideo,
