@@ -95,6 +95,23 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    # Gate to laptop deployment mode. In network mode the operator owns
+    # the upstream DHCP fix; this CLI's volatile ForceIP rescue would
+    # mask the real problem and require re-running on every camera
+    # power-cycle. Lift this gate once we've designed a deliberate
+    # network-mode ForceIP policy (target-subnet validation, lease-pool
+    # collision avoidance against the upstream DHCP server, etc.).
+    deployment_mode = os.environ.get("DEPLOYMENT_MODE", "laptop").strip().lower()
+    if deployment_mode != "laptop":
+        print(
+            f"Force IP is only available in laptop deployment mode "
+            f"(current DEPLOYMENT_MODE={deployment_mode!r}). In network "
+            f"mode, fix the upstream DHCP server so cameras receive leases "
+            f"on the correct subnet on their own.",
+            file=sys.stderr,
+        )
+        return 4
+
     try:
         import PySpin  # type: ignore[import-untyped]
     except ImportError:

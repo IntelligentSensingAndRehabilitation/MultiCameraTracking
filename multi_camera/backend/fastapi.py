@@ -1370,6 +1370,99 @@ async def restore_camera_defaults(serial: str):
     return {"status": "success", "serial": serial, "config": saved_config}
 
 
+class ForceIpData(BaseModel):
+    ip: Optional[str] = None
+    mask: Optional[str] = None
+    gateway: Optional[str] = None
+
+
+@api_router.post("/cameras/{mac}/force_ip")
+async def force_camera_ip(mac: str, data: ForceIpData):
+    """Force a camera that's on the wrong subnet to a target IP via PySpin's
+    GigE Vision ForceIP. Identified by MAC because the serial isn't readable
+    until the camera is on a reachable subnet.
+
+    Body fields are optional. With no body, an IP is auto-picked from the
+    first free address at or above .240 on the host NIC's subnet. Pass
+    ``ip`` / ``mask`` / ``gateway`` to override.
+
+    Returns 409 in network mode (deferred — the operator owns the upstream
+    DHCP fix in that case), 409 if the system is busy (configuring,
+    recording, etc.), and 404 if no camera with that MAC is on the wrong
+    subnet right now.
+    """
+    state: GlobalState = get_global_state()
+    health_config = getattr(state, "health_config", None)
+    if health_config is not None and health_config.deployment_mode != "laptop":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Force IP is only available in laptop deployment mode "
+                f"(current: {health_config.deployment_mode}). In network "
+                f"mode, fix the upstream DHCP server so the camera receives "
+                f"a lease on its own subnet."
+            ),
+        )
+    if state.recording_status in _BUSY_PYSPIN_STATES:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Cannot Force IP while the system is busy "
+                f"(status={state.recording_status})."
+            ),
+        )
+
+    broadcast_event(
+        event_type="session_insight",
+        level="warn",
+        code="force_ip_started",
+        message=f"Forcing IP on camera {mac}…",
+    )
+
+    kwargs: dict = {"mac": mac}
+    if data.ip is not None:
+        kwargs["ip"] = data.ip
+    if data.mask is not None:
+        kwargs["mask"] = data.mask
+    if data.gateway is not None:
+        kwargs["gateway"] = data.gateway
+
+    try:
+        result = await run_in_threadpool(
+            lambda: state.acquisition.force_camera_ip(**kwargs)
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:  # noqa: BLE001
+        broadcast_event(
+            event_type="session_insight",
+            level="error",
+            code="force_ip_failed",
+            message=f"Force IP on {mac} failed: {e}",
+            details={
+                "remediation": [
+                    "Check that the camera is on a directly-connected interface.",
+                    "Run `make reset` to power-cycle the camera.",
+                ],
+            },
+        )
+        raise HTTPException(status_code=500, detail=str(e))
+
+    await _refresh_health_after_configure()
+
+    broadcast_event(
+        event_type="session_insight",
+        level="ok",
+        code="force_ip_complete",
+        message=(
+            f"Camera {mac} is being re-IP'd; it should reappear in the "
+            "Diagnostics tab within a few seconds."
+        ),
+    )
+
+    return {"status": "success", **result}
+
+
 @api_router.post("/restart_acquisition")
 async def restart_acquisition():
     """Tear down the PySpin system and reinitialize from the saved config.
