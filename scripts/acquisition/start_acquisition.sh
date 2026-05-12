@@ -405,9 +405,10 @@ start_acquisition() {
     print_success "Docker is ready"
     echo ""
 
-    # Check if mocap image exists
-    if ! docker images | grep -q mocap; then
-        print_warning "mocap Docker image not found"
+    # The docker-compose mocap service tags the image as `isr/mct_acquisition`
+    # (see docker-compose.yml). `docker image inspect` exits 0 iff present.
+    if ! docker image inspect isr/mct_acquisition >/dev/null 2>&1; then
+        print_warning "mocap Docker image (isr/mct_acquisition) not found"
         print_info "Building Docker image (this may take several minutes)..."
         echo ""
         make build-mocap
