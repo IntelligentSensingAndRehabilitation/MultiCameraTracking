@@ -20,6 +20,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 from pathlib import Path
 from typing import Any, Callable, Literal, Protocol
 
@@ -318,11 +319,15 @@ def check_dhcp_server(
             elif interface_ip != expected_interface_ip:
                 findings.append(
                     Finding(
-                        level="warn",
+                        level="error",
                         code="dhcp_interface_ip_unexpected",
                         message=(
                             f"Network interface {interface} has IP {interface_ip} "
-                            f"(expected {expected_interface_ip})."
+                            f"(expected {expected_interface_ip}). The DHCP server "
+                            "won't bind to the camera subnet at this address — "
+                            "cameras will not receive leases. Activate the "
+                            "DHCP-Server nmcli profile, or check that the cable is "
+                            "in the configured network port."
                         ),
                         details={
                             "actual": interface_ip,
@@ -621,7 +626,7 @@ def check_camera_reachability(
     for serial in missing:
         findings.append(
             Finding(
-                level="error",
+                level="warn",
                 code="camera_unreachable",
                 message=f"Camera {serial} is not reachable. Check its ethernet cable and power.",
                 details={"serial": serial},
@@ -874,6 +879,7 @@ def run_health_check(
     recorder: RecorderLike | None = None,
     recording_state: str = "Idle",
     include_unexpected_cameras: bool = False,
+    skip_camera_enumeration: bool = False,
     dhcp_runner: SystemctlRunner | None = None,
     ip_addr_runner: IpAddrRunner | None = None,
     camera_enumerator: CameraEnumerator | None = None,
@@ -886,6 +892,13 @@ def run_health_check(
     network-mode deployments other lab setups share the subnet and produce
     routine "extras" that aren't actionable. Operators can opt in via the
     CLI's ``--show-all-cameras`` flag.
+
+    ``skip_camera_enumeration`` short-circuits the PySpin GigE-broadcast
+    camera reachability check. Used by the idle poller during an active
+    recording — the recorder owns the camera handles, GigE enumeration is
+    both slow and thread-unsafe in that state, and per-camera issues are
+    surfaced via the recorder's diagnostics_callback instead. DHCP and
+    host-network checks still run.
     """
     now = now or datetime.datetime.now(datetime.timezone.utc)
 
@@ -906,14 +919,16 @@ def run_health_check(
             ip_addr_runner=ip_addr_runner or _default_ip_addr_runner,
             now=now,
         )
-        camera_future = executor.submit(
-            check_camera_reachability,
-            expected_serials=expected_serials,
-            recorder=recorder,
-            minimum_link_speed_mbps=config.minimum_link_speed_mbps,
-            include_unexpected=include_unexpected_cameras,
-            enumerator=camera_enumerator or _default_camera_enumerator,
-        )
+        camera_future = None
+        if not skip_camera_enumeration:
+            camera_future = executor.submit(
+                check_camera_reachability,
+                expected_serials=expected_serials,
+                recorder=recorder,
+                minimum_link_speed_mbps=config.minimum_link_speed_mbps,
+                include_unexpected=include_unexpected_cameras,
+                enumerator=camera_enumerator or _default_camera_enumerator,
+            )
         host_future = executor.submit(
             check_host_network,
             interface=config.network_interface,
@@ -934,27 +949,38 @@ def run_health_check(
                 ],
             )
 
-        try:
-            cameras = camera_future.result(timeout=config.camera_timeout_s)
-        except concurrent.futures.TimeoutError:
+        if camera_future is None:
             cameras = CameraReachabilityReport(
                 expected=list(expected_serials),
-                detected=[],
-                missing=list(expected_serials),
+                detected=list(expected_serials),
+                missing=[],
                 extra=[],
                 cameras=[],
-                enumerated=recorder is None,
-                findings=[
-                    Finding(
-                        level="warn",
-                        code="camera_check_timeout",
-                        message=(
-                            f"Camera reachability check timed out after "
-                            f"{config.camera_timeout_s}s."
-                        ),
-                    )
-                ],
+                enumerated=False,
+                findings=[],
             )
+        else:
+            try:
+                cameras = camera_future.result(timeout=config.camera_timeout_s)
+            except concurrent.futures.TimeoutError:
+                cameras = CameraReachabilityReport(
+                    expected=list(expected_serials),
+                    detected=[],
+                    missing=list(expected_serials),
+                    extra=[],
+                    cameras=[],
+                    enumerated=recorder is None,
+                    findings=[
+                        Finding(
+                            level="warn",
+                            code="camera_check_timeout",
+                            message=(
+                                f"Camera reachability check timed out after "
+                                f"{config.camera_timeout_s}s."
+                            ),
+                        )
+                    ],
+                )
 
         try:
             host_network = host_future.result(timeout=config.host_network_timeout_s)
@@ -999,12 +1025,80 @@ def _prioritize_findings(findings: list[Finding]) -> list[Finding]:
     return sorted(findings, key=lambda f: -_SEVERITY_ORDER[f.level])
 
 
-class CameraUnreachableError(RuntimeError):
-    """Raised when a preflight reachability check finds expected cameras missing."""
+# ---------------------------------------------------------------------------
+# Background idle poller
+# ---------------------------------------------------------------------------
 
-    def __init__(self, missing: list[str], message: str | None = None):
-        self.missing = list(missing)
-        super().__init__(message or f"Cameras unreachable: {', '.join(self.missing)}")
+
+class HealthIdlePoller:
+    """Background daemon thread that periodically runs ``run_health_check``.
+
+    Calls ``on_poll(new_report, previous_report)`` after every completed
+    check — consumers decide whether to broadcast based on severity changes,
+    new findings, etc. The ``run_check`` callable is responsible for
+    adapting to recording state (e.g. by passing
+    ``skip_camera_enumeration=True`` to ``run_health_check`` while a
+    recording is active).
+    """
+
+    def __init__(
+        self,
+        config: HealthConfig,
+        run_check: Callable[[], HealthCheckReport],
+        on_poll: Callable[[HealthCheckReport, HealthCheckReport | None], None],
+        logger: logging.Logger | None = None,
+    ):
+        self._config = config
+        self._run_check = run_check
+        self._on_poll = on_poll
+        self._logger = logger or logging.getLogger(__name__)
+
+        self._stop_event = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._last_report: HealthCheckReport | None = None
+
+    @property
+    def last_report(self) -> HealthCheckReport | None:
+        return self._last_report
+
+    def start(self) -> None:
+        if self._thread is not None:
+            return
+        self._stop_event.clear()
+        self._thread = threading.Thread(
+            target=self._loop, name="health_idle_poller", daemon=True
+        )
+        self._thread.start()
+
+    def stop(self) -> None:
+        if self._thread is None:
+            return
+        self._stop_event.set()
+        self._thread.join(timeout=self._config.idle_poll_s + 2)
+        self._thread = None
+
+    def _loop(self) -> None:
+        while not self._stop_event.wait(self._config.idle_poll_s):
+            try:
+                new_report = self._run_check()
+            except Exception as e:  # noqa: BLE001 — log and keep the loop alive
+                self._logger.error(f"Idle health check failed: {e}", exc_info=True)
+                continue
+            previous = self._last_report
+            self._last_report = new_report
+            try:
+                self._on_poll(new_report, previous)
+            except Exception as e:  # noqa: BLE001
+                self._logger.error(f"on_poll callback raised: {e}", exc_info=True)
+
+
+def severity_changed(
+    new_report: HealthCheckReport, previous: HealthCheckReport | None
+) -> bool:
+    """Return True iff overall severity differs between new and previous report."""
+    if previous is None:
+        return new_report.overall != "ok"
+    return new_report.overall != previous.overall
 
 
 # ---------------------------------------------------------------------------
@@ -1141,12 +1235,12 @@ __all__ = [
     "CameraEnumerator",
     "CameraReachability",
     "CameraReachabilityReport",
-    "CameraUnreachableError",
     "DetectedCamera",
     "DhcpServerStatus",
     "Finding",
     "HealthCheckReport",
     "HealthConfig",
+    "HealthIdlePoller",
     "HostNetworkStatus",
     "IpAddrRunner",
     "RecorderLike",
@@ -1161,6 +1255,7 @@ __all__ = [
     "max_severity",
     "run_health_check",
     "run_host_remediation",
+    "severity_changed",
 ]
 
 

@@ -637,6 +637,7 @@ class FlirRecorder:
     def __init__(
         self,
         status_callback: Callable[[str], None] = None,
+        diagnostics_callback: Callable[[dict], None] | None = None,
     ):
         self._get_pyspin_system()
 
@@ -654,6 +655,16 @@ class FlirRecorder:
         self.config_file = None
         self.iface = None
         self.status_callback = status_callback
+
+        # Edge-fired diagnostic envelopes from the acquisition workers. Each
+        # (camera_serial, error_code) tuple fires the callback exactly once
+        # per session — re-occurrences are collapsed into the existing
+        # rate-limited tqdm.write so the GUI doesn't get flooded but the
+        # operator still sees something on the very first failure.
+        self.diagnostics_callback = diagnostics_callback
+        self._diagnostics_fired: set[tuple[str, str]] = set()
+        self._diagnostics_fired_lock = threading.Lock()
+
         self.set_status("Uninitialized")
 
         self.pixel_format_conversion = {
@@ -713,6 +724,40 @@ class FlirRecorder:
     def set_progress(self, progress):
         if self.status_callback is not None:
             self.status_callback(self.status, progress=progress)
+
+    def _fire_diagnostic_once(
+        self,
+        camera_serial: str,
+        code: str,
+        level: str,
+        message: str,
+        details: dict | None = None,
+    ) -> None:
+        """Fire ``diagnostics_callback`` exactly once per (camera, code) per
+        session, then suppress subsequent calls. The acquisition workers
+        call this from a tight error loop — without dedup, the callback
+        would flood the asyncio queue. The throttled tqdm.write print is
+        unaffected and continues to summarize re-occurrences.
+        """
+        if self.diagnostics_callback is None:
+            return
+        key = (camera_serial, code)
+        with self._diagnostics_fired_lock:
+            if key in self._diagnostics_fired:
+                return
+            self._diagnostics_fired.add(key)
+        try:
+            self.diagnostics_callback(
+                {
+                    "level": level,
+                    "code": code,
+                    "message": message,
+                    "details": {"serial": camera_serial, **(details or {})},
+                }
+            )
+        except Exception as e:  # noqa: BLE001
+            # The callback is best-effort: it must not break acquisition.
+            print(f"[diagnostics_callback] {camera_serial}/{code} raised: {e}")
 
     def check_queue_sizes(self, queue_dict):
         for name, q in queue_dict.items():
@@ -1068,6 +1113,8 @@ class FlirRecorder:
         frame_skip_recovery: bool = True,
     ):
         self.set_status("Recording")
+        with self._diagnostics_fired_lock:
+            self._diagnostics_fired.clear()
         self._diagnostics_level = diagnostics_level
         self._timespread_alert_threshold_ms = timespread_alert_threshold_ms
         self._sync_timeout_s = sync_timeout_s
@@ -1380,9 +1427,42 @@ class FlirRecorder:
 
                 except Exception as e:
                     error_counters["exceptions"] += 1
+                    err_text = str(e)
                     throttled_print(
-                        "exceptions", f"{camera_serial}: Failed to get image — {e}"
+                        "exceptions", f"{camera_serial}: Failed to get image — {err_text}"
                     )
+                    if "-1002" in err_text or "no longer valid" in err_text:
+                        self._fire_diagnostic_once(
+                            camera_serial=camera_serial,
+                            code="camera_disconnected",
+                            level="error",
+                            message=(
+                                f"Camera {camera_serial} disconnected during recording. "
+                                "Check the cable and power."
+                            ),
+                            details={"spinnaker_error": err_text},
+                        )
+                    elif "-1012" in err_text or "aborted" in err_text:
+                        self._fire_diagnostic_once(
+                            camera_serial=camera_serial,
+                            code="stream_aborted",
+                            level="error",
+                            message=(
+                                f"Camera {camera_serial} stream was aborted. "
+                                "The camera may have lost link or been reset."
+                            ),
+                            details={"spinnaker_error": err_text},
+                        )
+                    else:
+                        self._fire_diagnostic_once(
+                            camera_serial=camera_serial,
+                            code="camera_grab_error",
+                            level="warn",
+                            message=(
+                                f"Camera {camera_serial} failed to deliver a frame: {err_text}"
+                            ),
+                            details={"spinnaker_error": err_text},
+                        )
                     time.sleep(0.1)
                     continue
 

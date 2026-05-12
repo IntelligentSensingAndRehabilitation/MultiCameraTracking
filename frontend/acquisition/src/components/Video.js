@@ -9,6 +9,9 @@ const Video = () => {
     const { videoUrl, isPreview, selectedCamera, selectCamera, cameraStatusList } = useContext(AcquisitionState);
     const [imageSrc, setImageSrc] = useState("");
     const ws = useRef(null);
+    const lastUrl = useRef("");
+    const pendingUrl = useRef("");
+    const rafId = useRef(0);
 
     useEffectOnce(() => {
 
@@ -20,17 +23,27 @@ const Video = () => {
             console.log("Video WebSocket connected");
         };
 
+        // Coalesce 30+ Hz frames to one React render per refresh; without
+        // this the per-frame fiber-tree walk drowns the page in allocations.
         ws.current.onmessage = (event) => {
-            console.log("new image")
-            const data = event.data;
-
-            if (imageSrc) {
-                URL.revokeObjectURL(imageSrc);
-            }
-
-            const blob = new Blob([data], { type: "image/jpeg" });
+            const blob = new Blob([event.data], { type: "image/jpeg" });
             const url = URL.createObjectURL(blob);
-            setImageSrc(url);
+            if (pendingUrl.current) {
+                URL.revokeObjectURL(pendingUrl.current);
+            }
+            pendingUrl.current = url;
+            if (rafId.current === 0) {
+                rafId.current = requestAnimationFrame(() => {
+                    rafId.current = 0;
+                    const next = pendingUrl.current;
+                    pendingUrl.current = "";
+                    if (lastUrl.current) {
+                        URL.revokeObjectURL(lastUrl.current);
+                    }
+                    lastUrl.current = next;
+                    setImageSrc(next);
+                });
+            }
         };
 
         ws.current.onclose = () => {
@@ -42,11 +55,20 @@ const Video = () => {
         }
 
         return () => {
+            if (rafId.current !== 0) {
+                cancelAnimationFrame(rafId.current);
+                rafId.current = 0;
+            }
+            if (pendingUrl.current) {
+                URL.revokeObjectURL(pendingUrl.current);
+                pendingUrl.current = "";
+            }
             if (ws.current) {
                 ws.current.close();
             }
-            if (imageSrc) {
-                URL.revokeObjectURL(imageSrc);
+            if (lastUrl.current) {
+                URL.revokeObjectURL(lastUrl.current);
+                lastUrl.current = "";
             }
         };
     }, []);

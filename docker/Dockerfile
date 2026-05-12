@@ -40,6 +40,12 @@ RUN npm install
 
 COPY frontend/acquisition /Mocap/frontend/acquisition
 
+# Pre-build the production bundle with default env vars so the operator-mode
+# container starts instantly. The entrypoint compares the runtime env-var
+# fingerprint against this one and only rebuilds if they differ (e.g. when
+# REACT_APP_TEST_MODE=true on the mocap-test compose service).
+RUN npm run build && echo "localhost|" > build/.env-fingerprint
+
 ### Installing extra things (curl, screen, netstat) (can be removed after image is in stable state)
 RUN apt-get install -y net-tools
 

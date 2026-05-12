@@ -109,7 +109,9 @@ class TestEnumeratorPath:
         )
         assert report.missing == ["222"]
         assert any(f.code == "camera_unreachable" for f in report.findings)
-        assert report.severity == "error"
+        # Missing cameras warn but don't escalate to error — the recorder
+        # gracefully proceeds with whatever cameras are reachable.
+        assert report.severity == "warn"
         missing_cam = next(c for c in report.cameras if c.serial == "222")
         assert missing_cam.detected is False
         assert missing_cam.expected is True
@@ -357,6 +359,42 @@ class TestRunHealthCheck:
         elapsed = time.monotonic() - start
         assert elapsed < 0.2, f"run_health_check took {elapsed:.3f}s, expected <0.2s"
         assert report.cameras.enumerated is False
+
+    def test_skip_camera_enumeration_does_not_call_enumerator(self, tmp_path: Path) -> None:
+        """During recording, run_health_check must skip the PySpin enum
+        (recorder owns the handles) but still run DHCP / host-network checks.
+        """
+        lease_file = tmp_path / "dhcpd.leases"
+        lease_file.write_text("")
+        config = HealthConfig(
+            deployment_mode="laptop",
+            dhcp_lease_file=lease_file,
+        )
+
+        enum_calls = {"n": 0}
+
+        def fake_enum() -> list[DetectedCamera]:
+            enum_calls["n"] += 1
+            return []
+
+        report = run_health_check(
+            config=config,
+            expected_serials=["111", "222"],
+            recorder=None,
+            recording_state="Recording",
+            skip_camera_enumeration=True,
+            dhcp_runner=lambda service, timeout_s=1.0: ("inactive", 1),
+            ip_addr_runner=lambda iface, timeout_s=1.0: "    inet 192.168.1.1/24",
+            camera_enumerator=fake_enum,
+            now=datetime.datetime(2026, 4, 22, 12, 0, 0, tzinfo=UTC),
+        )
+
+        assert enum_calls["n"] == 0
+        assert report.cameras.enumerated is False
+        assert report.cameras.findings == []
+        # DHCP arm still ran and surfaced the inactive service.
+        assert any(f.code == "dhcp_service_down" for f in report.dhcp.findings)
+        assert report.dhcp.severity == "error"
 
 
 class TestHealthConfigFromEnv:

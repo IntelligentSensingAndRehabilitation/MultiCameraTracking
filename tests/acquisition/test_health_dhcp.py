@@ -170,7 +170,7 @@ class TestLaptopModeFailures:
         )
         assert status.interface_ip == "10.0.0.5"
         assert any(f.code == "dhcp_interface_ip_unexpected" for f in status.findings)
-        assert status.severity == "warn"
+        assert status.severity == "error"
 
     def test_interface_has_no_ip(self, tmp_path: Path) -> None:
         lease_file = tmp_path / "dhcpd.leases"

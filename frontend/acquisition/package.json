@@ -22,6 +22,7 @@
     "react-router-dom": "^6.10.0",
     "react-scripts": "^2.1.8",
     "sass": "^1.60.0",
+    "serve": "^14.2.1",
     "three": "^0.151.3",
     "three-js": "^79.0.0",
     "three-orbitcontrols": "^2.110.3",
@@ -29,7 +30,8 @@
   },
   "scripts": {
     "start": "export SET NODE_OPTIONS=--openssl-legacy-provider && react-scripts start --host 0.0.0.0",
-    "build": "react-scripts build",
+    "build": "NODE_OPTIONS=--openssl-legacy-provider react-scripts build",
+    "serve": "serve -s build -l 3000 --no-clipboard",
     "test": "react-scripts test",
     "eject": "react-scripts eject"
   },

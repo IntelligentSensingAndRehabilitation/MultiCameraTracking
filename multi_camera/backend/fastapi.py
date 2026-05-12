@@ -31,8 +31,26 @@ import os
 import asyncio
 import shutil
 import re
+import time
+from pathlib import Path
 
 from multi_camera.acquisition.flir_recording_api import FlirRecorder, CameraStatus
+from multi_camera.acquisition.diagnostics.json_parser import (
+    diagnose_session_issues,
+    diagnose_sync_issues,
+    load_session,
+)
+from multi_camera.acquisition.health import (
+    CameraReachabilityReport,
+    DhcpServerStatus,
+    HealthCheckReport,
+    HealthConfig,
+    HealthIdlePoller,
+    HostNetworkStatus,
+    check_camera_reachability,
+    run_health_check,
+    severity_changed,
+)
 from multi_camera.backend.recording_db import (
     get_db,
     add_recording,
@@ -89,6 +107,12 @@ class GlobalState:
     recording_status: str = ""
     acquisition = None
     selected_camera: int | None = None
+    health_config: HealthConfig = field(default_factory=HealthConfig)
+    _health_cache: HealthCheckReport | None = None
+    _health_cache_ts: float = 0.0
+    _health_cache_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    _health_poller: HealthIdlePoller | None = None
+    last_session_insights: set[str] = field(default_factory=set)
 
 
 _global_state = GlobalState()
@@ -126,6 +150,128 @@ class ConnectionManager:
 
 
 manager = ConnectionManager()
+
+
+class DiagnosticsManager:
+    """WebSocket fan-out for structured diagnostic envelopes.
+
+    Separate from :class:`ConnectionManager` so bursty diagnostic broadcasts
+    can't delay the recording status writer on ``/api/v1/ws``. Per-connection
+    asyncio.Lock serializes writes to avoid racing the websockets keepalive
+    ping; failed sends drop the connection instead of leaving stale entries.
+    """
+
+    def __init__(self):
+        self.active_connections: list[WebSocket] = []
+        self._locks: dict[WebSocket, asyncio.Lock] = {}
+
+    async def connect(self, websocket: WebSocket) -> None:
+        await websocket.accept()
+        self.active_connections.append(websocket)
+        self._locks[websocket] = asyncio.Lock()
+        logger.debug("Diagnostics websocket connected")
+
+    def disconnect(self, websocket: WebSocket) -> None:
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+        self._locks.pop(websocket, None)
+        logger.debug("Diagnostics websocket disconnected")
+
+    async def _send_one(self, websocket: WebSocket, message: dict) -> bool:
+        lock = self._locks.get(websocket)
+        if lock is None:
+            return False
+        async with lock:
+            try:
+                await websocket.send_json(message)
+                return True
+            except Exception as e:  # noqa: BLE001
+                acquisition_logger.warning(
+                    f"Diagnostics WS send failed, dropping connection: {e}"
+                )
+                return False
+
+    async def broadcast(self, message: dict) -> None:
+        if not self.active_connections:
+            return
+        results = await asyncio.gather(
+            *(self._send_one(c, message) for c in list(self.active_connections)),
+            return_exceptions=False,
+        )
+        for connection, ok in zip(list(self.active_connections), results):
+            if not ok:
+                self.disconnect(connection)
+
+
+diagnostics_manager = DiagnosticsManager()
+
+
+def _on_acquisition_diagnostic(envelope: dict) -> None:
+    """Bridge ``FlirRecorder._fire_diagnostic_once`` → ``broadcast_event``.
+
+    Called from acquisition worker threads when the recorder catches a
+    Spinnaker error per camera. Forwards the envelope to the existing
+    diagnostics WS fan-out as a ``session_insight`` event.
+    """
+    broadcast_event(
+        event_type="session_insight",
+        level=envelope.get("level", "warn"),
+        code=envelope.get("code", "acquisition_error"),
+        message=envelope.get("message", ""),
+        details=envelope.get("details", {}),
+    )
+
+
+def _on_idle_health_poll(
+    new_report: HealthCheckReport,
+    previous: HealthCheckReport | None,
+) -> None:
+    """Broadcast a ``health_report`` envelope when overall severity changes.
+
+    Called from the :class:`HealthIdlePoller` daemon thread after each poll.
+    Avoids spamming clients — if severity didn't change since the last poll,
+    nothing is broadcast.
+    """
+    if not severity_changed(new_report, previous):
+        return
+    top = new_report.findings[0] if new_report.findings else None
+    msg = top.message if top else f"Health is now {new_report.overall}"
+    broadcast_event(
+        event_type="health_report",
+        level=new_report.overall,
+        code=top.code if top else "health_status_change",
+        message=msg,
+        details={
+            "overall": new_report.overall,
+            "missing_cameras": list(new_report.cameras.missing),
+            "dhcp_applicable": new_report.dhcp.applicable,
+            "dhcp_service_active": new_report.dhcp.service_active,
+        },
+    )
+
+
+def broadcast_event(
+    event_type: str,
+    level: str,
+    code: str,
+    message: str,
+    details: dict | None = None,
+) -> None:
+    """Dispatch a structured diagnostic envelope. Safe from any thread."""
+    envelope = {
+        "type": event_type,
+        "level": level,
+        "code": code,
+        "message": message,
+        "details": details or {},
+        "ts": datetime.datetime.utcnow().isoformat() + "Z",
+    }
+    coro = diagnostics_manager.broadcast(envelope)
+    try:
+        asyncio.get_running_loop()
+        asyncio.create_task(coro)
+    except RuntimeError:
+        asyncio.run_coroutine_threadsafe(coro, loop)
 
 RECORDING_BASE = "data"
 CONFIG_PATH = "/configs/"
@@ -204,15 +350,52 @@ def receive_status(status, progress=None):
     loop.create_task(manager.broadcast(update))
 
 
+def _expected_serials(recorder: FlirRecorder | None) -> list[str]:
+    """Pull the list of expected cameras from the currently-loaded YAML config."""
+    if recorder is None:
+        return []
+    config = getattr(recorder, "camera_config", None) or {}
+    camera_info = config.get("camera-info", {}) if isinstance(config, dict) else {}
+    return [str(s) for s in camera_info.keys()]
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     state: GlobalState = get_global_state()
 
     # Perform startup tasks
     acquisition_logger.info("Starting acquisition system")
-    state.acquisition = FlirRecorder(receive_status)
+    state.acquisition = FlirRecorder(
+        receive_status,
+        diagnostics_callback=_on_acquisition_diagnostic,
+    )
+    state.health_config = HealthConfig.from_env()
+    acquisition_logger.info(
+        f"Health config: mode={state.health_config.deployment_mode} "
+        f"iface={state.health_config.network_interface} "
+        f"idle_poll={state.health_config.idle_poll_s}s"
+    )
 
     state = get_global_state()
+
+    state._health_poller = HealthIdlePoller(
+        config=state.health_config,
+        run_check=lambda: run_health_check(
+            config=state.health_config,
+            expected_serials=_expected_serials(state.acquisition),
+            recorder=state.acquisition,
+            recording_state=state.recording_status or "Idle",
+            # During an active recording the recorder owns the camera handles;
+            # PySpin GigE enumeration would race with the worker threads and
+            # is also slow. Camera-specific issues during recording are
+            # surfaced via the recorder's diagnostics_callback instead. DHCP
+            # and host-network checks still run.
+            skip_camera_enumeration=(state.recording_status == "Recording"),
+        ),
+        on_poll=_on_idle_health_poll,
+        logger=acquisition_logger,
+    )
+    state._health_poller.start()
 
     db = get_db()
 
@@ -226,6 +409,9 @@ async def lifespan(app: FastAPI):
     yield
 
     # Perform shutdown tasks
+    if state._health_poller is not None:
+        state._health_poller.stop()
+        state._health_poller = None
     state.acquisition.close()
     acquisition_logger.info("Acquisition system closed")
 
@@ -319,6 +505,168 @@ async def get_camera_status() -> List[CameraStatus]:
     return camera_status
 
 
+async def _get_health_report(force_refresh: bool = False) -> HealthCheckReport:
+    """Return a HealthCheckReport, using a short TTL cache on GlobalState.
+
+    Camera reachability via PySpin GigE broadcast is the slow part (multiple
+    seconds in network mode). Caching the full report behind a TTL means
+    REST polling from the GUI is cheap.
+    """
+    state = get_global_state()
+    async with state._health_cache_lock:
+        now_mono = time.monotonic()
+        if (
+            not force_refresh
+            and state._health_cache is not None
+            and now_mono - state._health_cache_ts < state.health_config.cache_ttl_s
+        ):
+            return state._health_cache
+
+        expected = _expected_serials(state.acquisition)
+        recording_state = state.recording_status or "Idle"
+        report = await run_in_threadpool(
+            run_health_check,
+            config=state.health_config,
+            expected_serials=expected,
+            recorder=state.acquisition,
+            recording_state=recording_state,
+        )
+        state._health_cache = report
+        state._health_cache_ts = now_mono
+        return report
+
+
+@api_router.get("/health", response_model=HealthCheckReport)
+async def get_health() -> HealthCheckReport:
+    """Structured health snapshot: DHCP + camera + host network."""
+    return await _get_health_report(force_refresh=False)
+
+
+@api_router.get("/health/dhcp", response_model=DhcpServerStatus)
+async def get_health_dhcp() -> DhcpServerStatus:
+    report = await _get_health_report(force_refresh=False)
+    return report.dhcp
+
+
+@api_router.get("/health/cameras", response_model=CameraReachabilityReport)
+async def get_health_cameras() -> CameraReachabilityReport:
+    report = await _get_health_report(force_refresh=False)
+    return report.cameras
+
+
+@api_router.get("/health/host_network", response_model=HostNetworkStatus)
+async def get_health_host_network() -> HostNetworkStatus:
+    report = await _get_health_report(force_refresh=False)
+    return report.host_network
+
+
+@api_router.post("/health/refresh", response_model=HealthCheckReport)
+async def refresh_health() -> HealthCheckReport:
+    """Force a fresh health check, bypassing the TTL cache."""
+    return await _get_health_report(force_refresh=True)
+
+
+class SessionSummaryReport(BaseModel):
+    n_trials: int
+    insights: List[str]
+    recommendations: List[str]
+    trial_findings: List[str] = []
+    generated_at: datetime.datetime
+
+
+def _build_session_summary(session_dir: str) -> SessionSummaryReport:
+    """Run all diagnostic detectors over the JSON sidecars in ``session_dir``.
+
+    Combines session-level synthesizers (``diagnose_session_issues``) with
+    per-trial detectors (``diagnose_sync_issues``).
+    """
+    now = datetime.datetime.now(datetime.timezone.utc)
+    path = Path(session_dir)
+    try:
+        report = load_session(path)
+    except FileNotFoundError:
+        return SessionSummaryReport(
+            n_trials=0,
+            insights=[],
+            recommendations=[],
+            trial_findings=[],
+            generated_at=now,
+        )
+    insights, recommendations = diagnose_session_issues(report)
+    trial_findings = diagnose_sync_issues(report)
+    return SessionSummaryReport(
+        n_trials=len(report.trials),
+        insights=insights,
+        recommendations=recommendations,
+        trial_findings=trial_findings,
+        generated_at=now,
+    )
+
+
+def _broadcast_new_session_insights() -> None:
+    """Run session-level + per-trial detectors, broadcast only NEW findings.
+
+    Called after each trial completes. Diffs against
+    ``state.last_session_insights`` (updated in-place) so the same finding
+    doesn't re-broadcast when a later trial includes earlier trials in its
+    sidecar set. Per-trial detectors typically embed trial identifiers in
+    the finding string, so they dedup naturally.
+
+    Failures inside the synthesizers are caught and logged — the trial has
+    already finished, so we never want this to raise back into the
+    task_done_callback path.
+    """
+    state = get_global_state()
+    if state.current_session is None:
+        return
+    try:
+        report = load_session(Path(state.current_session.recording_path))
+        session_insights, _recommendations = diagnose_session_issues(report)
+        per_trial_insights = diagnose_sync_issues(report)
+        n_trials = len(report.trials)
+    except Exception as e:  # noqa: BLE001
+        acquisition_logger.error(f"Could not run diagnostics: {e}", exc_info=True)
+        return
+
+    session_set = set(session_insights)
+    per_trial_set = set(per_trial_insights)
+    current = session_set | per_trial_set
+    new_insights = current - state.last_session_insights
+    state.last_session_insights = current
+
+    for insight in new_insights:
+        is_per_trial = insight in per_trial_set and insight not in session_set
+        broadcast_event(
+            event_type="session_insight",
+            level="warn",
+            code=(
+                "trial_symptom_detected"
+                if is_per_trial
+                else "session_pattern_detected"
+            ),
+            message=insight,
+            details={
+                "n_trials": n_trials,
+                "scope": "trial" if is_per_trial else "session",
+            },
+        )
+
+
+@api_router.get("/health/session_summary", response_model=SessionSummaryReport)
+async def get_session_summary() -> SessionSummaryReport:
+    """Run session-level synthesizers over the current session's recordings.
+
+    Returns plain-English insights and recommendations for the diagnostics
+    tab. Requires an active session; returns 404 if none is set.
+    """
+    state = get_global_state()
+    if state.current_session is None:
+        raise HTTPException(status_code=404, detail="No current session")
+    return await run_in_threadpool(
+        _build_session_summary, state.current_session.recording_path
+    )
+
+
 @api_router.post("/stop")
 async def stop_recording():
     state: GlobalState = get_global_state()
@@ -348,6 +696,7 @@ async def set_session(subject_id: str, fin: Optional[str] = None, db=Depends(db_
     state.current_session = Session(
         participant_name=subject_id, session_date=date, recording_path=session_dir
     )
+    state.last_session_insights = set()
     print("New session: ", state.current_session)
 
     if fin and fin.strip():
@@ -499,6 +848,27 @@ async def new_trial(data: NewTrialData, db: Session = Depends(db_dependency)):
     state.selected_camera = None
     current_session = state.current_session
 
+    expected = _expected_serials(state.acquisition)
+    if expected:
+        preflight = await run_in_threadpool(
+            check_camera_reachability,
+            expected_serials=expected,
+            recorder=state.acquisition,
+        )
+        if preflight.missing:
+            # FlirRecorder skips missing cameras and continues; warn the
+            # operator without blocking the take.
+            broadcast_event(
+                event_type="session_insight",
+                level="warn",
+                code="camera_missing",
+                message=(
+                    f"Recording started without camera(s) "
+                    f"{', '.join(preflight.missing)} — check cables and power."
+                ),
+                details={"missing": preflight.missing},
+            )
+
     def receive_frames_wrapper(frames):
         loop.create_task(receive_frames(frames))
 
@@ -532,8 +902,20 @@ async def new_trial(data: NewTrialData, db: Session = Depends(db_dependency)):
                     comment=comment,
                     timestamp_spread=record["timestamp_spread"],
                 )
+            _broadcast_new_session_insights()
         except Exception as e:
+            import traceback
             acquisition_logger.error(f"Trial failed: {e}", exc_info=True)
+            broadcast_event(
+                event_type="error",
+                level="error",
+                code="trial_failed",
+                message=f"Recording failed: {e}",
+                details={
+                    "exception_type": type(e).__name__,
+                    "traceback": traceback.format_exc(),
+                },
+            )
 
     task.add_done_callback(task_done_callback)
 
@@ -781,6 +1163,28 @@ async def websocket_endpoint(websocket: WebSocket):
     manager.disconnect(websocket)
 
     logger.info("Regular websocket exited")
+
+
+@api_router.websocket("/ws/diagnostics")
+async def diagnostics_websocket_endpoint(websocket: WebSocket):
+    """Push channel for structured diagnostic envelopes.
+
+    Separate from /api/v1/ws (which carries recording {status, progress})
+    so a bursty diagnostic broadcast cannot delay the recording status writer.
+    """
+    await diagnostics_manager.connect(websocket)
+    try:
+        while not AppStatus.should_exit:
+            try:
+                await asyncio.wait_for(websocket.receive(), timeout=0.5)
+            except asyncio.TimeoutError:
+                pass
+    except WebSocketDisconnect as e:
+        logger.debug("Diagnostics websocket disconnected: %s", e)
+    except RuntimeError as e:
+        logger.debug("Diagnostics websocket disconnected (RuntimeError): %s", e)
+    finally:
+        diagnostics_manager.disconnect(websocket)
 
 
 class SelectCameraData(BaseModel):
