@@ -1040,10 +1040,13 @@ class FlirRecorder:
 
         self.trigger = trigger
 
-        # Subscribe to device arrival/removal events on this interface so a
-        # cable unplug gets surfaced immediately via session_insight, instead
-        # of waiting for the acquire_frames loop to start producing -1002.
-        self._register_interface_events()
+        # NOTE: PySpin InterfaceEventHandler registration was disabled in
+        # PR 4 testing — registering a handler appears to leak a C++ ref to
+        # the interface that survives UnregisterEventHandler, causing
+        # `terminate called ... [-1004] Can't clear interface` on
+        # subsequent reset_cameras. Camera-disconnect detection now relies
+        # on acquire_frames' -1002/-1012 catch path. Tracked in a bead.
+        # self._register_interface_events()
 
         self.iface.TLInterface.GevActionDeviceKey.SetValue(0)
         self.iface.TLInterface.GevActionGroupKey.SetValue(1)
@@ -1361,6 +1364,36 @@ class FlirRecorder:
         self.set_status("Recording")
         with self._diagnostics_fired_lock:
             self._diagnostics_fired.clear()
+
+        # Drop any camera handles that went dead between configure_cameras
+        # and now (e.g. operator unplugged a camera while the system was
+        # idle). Cameras are Init'd at this point, so DeviceSerialNumber
+        # is readable on live ones and raises CameraError on dead ones.
+        # Without this filter, the image_queue_dict comprehension below
+        # crashes start_acquisition with no clean recovery.
+        live_cams = []
+        for c in self.cams:
+            try:
+                serial = c.DeviceSerialNumber
+            except Exception as e:  # noqa: BLE001
+                self._fire_diagnostic_once(
+                    camera_serial="?",
+                    code="camera_handle_invalid",
+                    level="warn",
+                    message=(
+                        f"A camera handle was dead at start of trial "
+                        f"(skipping it): {e}. Click Restart acquisition "
+                        "to bring it back in."
+                    ),
+                )
+                continue
+            live_cams.append(c)
+        if not live_cams:
+            raise RuntimeError(
+                "No live camera handles at start of trial — every "
+                "configured camera appears disconnected."
+            )
+        self.cams = live_cams
         self._diagnostics_level = diagnostics_level
         self._timespread_alert_threshold_ms = timespread_alert_threshold_ms
         self._sync_timeout_s = sync_timeout_s
@@ -2295,15 +2328,33 @@ class FlirRecorder:
         if len(self.cams) > 0:
 
             def close_cam(c):
-                print("Closing camera", c.DeviceSerialNumber)
-                c.cam.DeInit()
-                c.close()
+                # Every read off c can raise CameraError if the camera was
+                # unplugged. Guard each step independently so one dead
+                # handle doesn't prevent the rest of the cameras (and the
+                # system release) from being cleaned up.
+                serial = "?"
+                try:
+                    serial = c.DeviceSerialNumber
+                except Exception:  # noqa: BLE001
+                    pass
+                print("Closing camera", serial)
+                try:
+                    c.cam.DeInit()
+                except Exception as e:  # noqa: BLE001
+                    print(f"DeInit on {serial} raised (continuing): {e}")
+                try:
+                    c.close()
+                except Exception as e:  # noqa: BLE001
+                    print(f"close on {serial} raised (continuing): {e}")
                 del c
 
+            # Use list() to force materialization of all futures, so any
+            # exception that DID slip past the inner guards is collected
+            # rather than swallowed by the executor's iterator.
             with concurrent.futures.ThreadPoolExecutor(
                 max_workers=len(self.cams)
             ) as executor:
-                executor.map(close_cam, self.cams)
+                list(executor.map(close_cam, self.cams))
 
         self.cams = []
 
