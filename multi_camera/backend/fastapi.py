@@ -831,6 +831,18 @@ async def get_status() -> Dict:
 
 @api_router.post("/new_trial")
 async def new_trial(data: NewTrialData, db: Session = Depends(db_dependency)):
+    state: GlobalState = get_global_state()
+    if state.recording_status in _BUSY_RECORDING_STATES:
+        raise HTTPException(
+            status_code=409,
+            detail="Recording already in progress.",
+        )
+    if not getattr(state.acquisition, "cams", None):
+        raise HTTPException(
+            status_code=409,
+            detail="No cameras configured — select a config before starting a trial.",
+        )
+
     recording_dir = data.recording_dir
     recording_filename = data.recording_filename
     comment = data.comment
@@ -943,12 +955,23 @@ async def new_trial(data: NewTrialData, db: Session = Depends(db_dependency)):
 
 @api_router.post("/preview")
 async def preview(data: PreviewData):
+    state: GlobalState = get_global_state()
+    if state.recording_status in _BUSY_RECORDING_STATES:
+        raise HTTPException(
+            status_code=409,
+            detail="Recording already in progress.",
+        )
+    if not getattr(state.acquisition, "cams", None):
+        raise HTTPException(
+            status_code=409,
+            detail="No cameras configured — select a config before previewing.",
+        )
+
     max_frames = data.max_frames
 
     def receive_frames_wrapper(frames):
         loop.create_task(receive_frames(frames))
 
-    state: GlobalState = get_global_state()
     state.selected_camera = None
     await run_in_threadpool(
         state.acquisition.start_acquisition,
