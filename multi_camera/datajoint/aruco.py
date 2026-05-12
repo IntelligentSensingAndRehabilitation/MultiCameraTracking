@@ -42,7 +42,8 @@ class CalibrationArucoDetection(dj.Computed):
         # Only attempt detection on calibrations whose recording comment
         # mentions aruco markers — set in the acquisition GUI at record time
         # and propagated through MultiCameraCalibration on push to DataJoint.
-        return Calibration & (MultiCameraCalibration & 'comment LIKE "%aruco%"')
+        # LOWER(...) so operator-typed comments like "ChArUco" or "ArUco" match.
+        return Calibration & (MultiCameraCalibration & 'LOWER(comment) LIKE "%aruco%"')
 
     def make(self, key):
         from multi_camera.analysis.aruco import (

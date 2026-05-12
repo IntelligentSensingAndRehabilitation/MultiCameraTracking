@@ -471,11 +471,13 @@ def _is_calibration_comment(comment: Optional[str]) -> bool:
     """A recording is a calibration if its comment contains 'calibration' or 'charuco'.
 
     Substring match (not exact) so tag-style comments like 'charuco+aruco' are
-    still recognized.
+    still recognized. Case-insensitive — operators type free-form comments and
+    "Calibration" or "ChArUco" must work the same as the lowercase form.
     """
     if not comment:
         return False
-    return "calibration" in comment or "charuco" in comment
+    lowered = comment.lower()
+    return "calibration" in lowered or "charuco" in lowered
 
 
 def _push_calibration_videos(
@@ -525,11 +527,16 @@ def _push_calibration_videos(
             print(f"  [calibration] skipping {cal_filename}: no matching .mp4 files")
             continue
 
-        # Parse timestamp from basename like "calibration_20260312_151801"
+        # Parse timestamp from basename like "calibration_20260312_151801".
+        # Mirror the strict prefix check from run_AniposeLib_calibration so
+        # accidental misnames (e.g. "session_20260312_...") don't slip through.
+        if not vid_basename.startswith("calibration_"):
+            print(f"  [calibration] skipping {vid_basename}: basename must start with 'calibration_'")
+            continue
         try:
-            ts_str = vid_basename.split("_", 1)[1]
+            ts_str = vid_basename[len("calibration_"):]
             cal_timestamp = datetime.strptime(ts_str, "%Y%m%d_%H%M%S")
-        except (IndexError, ValueError):
+        except ValueError:
             print(f"  [calibration] skipping {vid_basename}: cannot parse timestamp")
             continue
 

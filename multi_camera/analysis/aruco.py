@@ -123,15 +123,23 @@ def detect_markers_in_frame(
     frame: np.ndarray,
     detector: cv2.aruco.ArucoDetector,
     expected_ids: set[int] | None = None,
+    clahe: cv2.CLAHE | None = None,
 ) -> list[MarkerDetection]:
     """Detect ArUco markers in a frame.
 
     If ``expected_ids`` is provided, only markers with matching IDs are returned;
     pass ``None`` to return every marker the detector finds.
+
+    ``clahe`` is a reusable CLAHE object — pass one in to avoid the allocator
+    cost of building a new one per frame. Pass ``None`` to skip CLAHE entirely
+    (appropriate for well-lit calibration footage).
     """
-    lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
-    lab[:, :, 0] = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8)).apply(lab[:, :, 0])
-    enhanced = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
+    if clahe is not None:
+        lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
+        lab[:, :, 0] = clahe.apply(lab[:, :, 0])
+        enhanced = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
+    else:
+        enhanced = frame
 
     corners, ids, _ = detector.detectMarkers(enhanced)
     detections: list[MarkerDetection] = []
@@ -166,6 +174,7 @@ def detect_markers_in_video(
     expected_ids: list[int] | None = None,
     camera_name: str = "",
     frame_step: int = 1,
+    use_clahe: bool = True,
 ) -> CameraDetectionResult:
     cap = cv2.VideoCapture(video_path)
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -175,17 +184,26 @@ def detect_markers_in_video(
 
     expected_set = set(expected_ids) if expected_ids is not None else None
     frame_detections: list[FrameDetections] = []
+    # Build CLAHE once per video — it's a stateless reusable, allocating per
+    # frame is wasted work. ``None`` skips CLAHE entirely.
+    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8)) if use_clahe else None
 
     frame_idx = 0
     while frame_idx < total_frames:
-        if frame_step > 1:
-            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+        # cap.read() decodes the current frame; cap.grab() advances without
+        # decoding, which is the right way to skip on H.264 — calling
+        # cap.set(CAP_PROP_POS_FRAMES, ...) forces a keyframe seek per step
+        # and is dramatically slower for moderate frame_step values.
         ret, frame = cap.read()
         if not ret or frame is None:
             break
 
-        detections = detect_markers_in_frame(frame, detector, expected_set)
+        detections = detect_markers_in_frame(frame, detector, expected_set, clahe=clahe)
         frame_detections.append(FrameDetections(frame_idx=frame_idx, detections=detections))
+
+        for _ in range(frame_step - 1):
+            if not cap.grab():
+                break
         frame_idx += frame_step
 
     cap.release()
@@ -217,9 +235,11 @@ def detect_markers_multi_camera(
     call. Without it, each ``cv2.aruco.detectMarkers`` call fans out across
     every CPU and the outer ``max_workers`` pool stops being a meaningful
     concurrency limit. Effective core count ≈ ``max_workers * cv2_threads_per_worker``.
-    The previous global value is restored on return so unrelated cv2 work in
-    the same process is unaffected. Pass ``None`` to leave OpenCV's thread
-    setting untouched.
+    The previous global value is restored on return, so subsequent cv2 work
+    in the same process is unaffected — note this is a process-global setting
+    while we hold it, so concurrent unrelated cv2 work in other threads shares
+    the cap until this function returns. Pass ``None`` to leave OpenCV's
+    thread setting untouched.
     """
     prev_cv2_threads: int | None = None
     if cv2_threads_per_worker is not None:
@@ -308,13 +328,20 @@ def triangulate_detected_markers_detailed(
                     pts2d[cam_i, fi, :] = centers[frame_idx]
 
         pts3d = cgroup.triangulate(pts2d)  # (N, 3)
-        median_pos = np.median(pts3d, axis=0)
+        # Drop any rows where triangulation failed (degenerate geometry, all
+        # cameras too coplanar, etc.). nan-medians silently propagate NaN and
+        # make spread_mm "nan" in the QA report.
+        finite_rows = np.all(np.isfinite(pts3d), axis=1)
+        pts3d_finite = pts3d[finite_rows]
+        if len(pts3d_finite) == 0:
+            continue
+        median_pos = np.median(pts3d_finite, axis=0)
         # Median absolute deviation from the consensus position — robust to outliers
-        spread_mm = float(np.median(np.linalg.norm(pts3d - median_pos, axis=1)))
+        spread_mm = float(np.median(np.linalg.norm(pts3d_finite - median_pos, axis=1)))
         out[marker_id] = {
             "position": median_pos,
             "spread_mm": spread_mm,
-            "n_frames": len(valid_frames),
+            "n_frames": int(len(pts3d_finite)),
         }
 
     return out
@@ -383,7 +410,7 @@ def draw_aruco_overlay(
     a mapping are drawn white.
     """
     color_for_id = color_for_id or {}
-    _, w = frame.shape[:2]
+    w = frame.shape[1]
     scale = max(1, w / 640)
 
     for det in detections:
@@ -452,15 +479,15 @@ def make_aruco_grid_video(
             cam_lookup[fd.frame_idx] = fd.detections
         detection_lookup[cam_name] = cam_lookup
 
-    def images_to_grid(images: list[np.ndarray], n_cols: int = n_cols) -> np.ndarray:
-        n_rows = int(np.ceil(len(images) / n_cols))
+    def images_to_grid(images: list[np.ndarray], cols: int) -> np.ndarray:
+        rows = int(np.ceil(len(images) / cols))
         grid = np.zeros(
-            (n_rows * images[0].shape[0], n_cols * images[0].shape[1], 3),
+            (rows * images[0].shape[0], cols * images[0].shape[1], 3),
             dtype=np.uint8,
         )
         for i, img in enumerate(images):
-            row = i // n_cols
-            col = i % n_cols
+            row = i // cols
+            col = i % cols
             grid[
                 row * img.shape[0] : (row + 1) * img.shape[0],
                 col * img.shape[1] : (col + 1) * img.shape[1],
@@ -514,7 +541,7 @@ def make_aruco_grid_video(
             )
             frames.append(frame)
 
-        grid = images_to_grid(frames, n_cols=actual_cols)
+        grid = images_to_grid(frames, cols=actual_cols)
         writer.write(grid)
 
     writer.release()
