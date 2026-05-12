@@ -849,6 +849,31 @@ class FlirRecorder:
                 print(f"[event_handler] failed to unregister: {e}")
         self._event_handlers = []
 
+    def _drop_dead_handles(self, cams: list) -> list:
+        """Return ``cams`` minus any handles that no longer respond to a
+        basic read. Probes ``DeviceSerialNumber`` because it's available on
+        un-Init'd cameras and is the cheapest reachability check the SDK
+        supports. Fires a ``camera_handle_invalid`` envelope per dropped
+        camera.
+        """
+        alive = []
+        for c in cams:
+            try:
+                serial = c.DeviceSerialNumber
+            except Exception as e:  # noqa: BLE001
+                self._fire_diagnostic_once(
+                    camera_serial="?",
+                    code="camera_handle_invalid",
+                    level="warn",
+                    message=(
+                        "A camera handle was invalid before init "
+                        f"(skipping it for this session): {e}"
+                    ),
+                )
+                continue
+            alive.append(c)
+        return alive
+
     def check_queue_sizes(self, queue_dict):
         for name, q in queue_dict.items():
             print(name, q.qsize())
@@ -989,6 +1014,19 @@ class FlirRecorder:
             "camera_info": self.camera_info,
         }
 
+        # Probe each handle for liveness before submitting to init_camera.
+        # A handle for a camera that was unplugged before configure_cameras
+        # ran will raise AccessException on the first node write inside
+        # init_camera (e.g. LineMode = "Output"), which leaves the system
+        # in a half-state. Drop dead handles up-front and fire a structured
+        # finding so the operator knows which camera went missing.
+        self.cams = self._drop_dead_handles(self.cams)
+        if not self.cams:
+            raise RuntimeError(
+                "No usable camera handles after pre-Init validation; "
+                "all configured cameras appear unreachable."
+            )
+
         with concurrent.futures.ThreadPoolExecutor(
             max_workers=len(self.cams)
         ) as executor:
@@ -1010,31 +1048,46 @@ class FlirRecorder:
         self.set_status("Idle")
 
     async def get_camera_status(self) -> List[CameraStatus]:
-        status = [
-            CameraStatus(
-                SerialNumber=c.DeviceSerialNumber,
-                Status="Initialized",
-                # PixelSize=c.PixelSize,
-                PixelFormat=c.PixelFormat,
-                BinningHorizontal=c.BinningHorizontal,
-                BinningVertical=c.BinningVertical,
-                Width=c.Width,
-                Height=c.Height,
-            )
-            for c in self.cams
-        ]
+        # Per-camera try/except so one dead handle (e.g. wrong-subnet camera
+        # whose DeviceSerialNumber isn't readable) doesn't crash the entire
+        # status endpoint with a 500. The arrival/removal event handler
+        # should normally have already dropped the camera; this is the
+        # defense-in-depth path for cases the handler can't observe.
+        status: List[CameraStatus] = []
+        for c in self.cams:
+            try:
+                cs = CameraStatus(
+                    SerialNumber=c.DeviceSerialNumber,
+                    Status="Initialized",
+                    PixelFormat=c.PixelFormat,
+                    BinningHorizontal=c.BinningHorizontal,
+                    BinningVertical=c.BinningVertical,
+                    Width=c.Width,
+                    Height=c.Height,
+                )
+            except Exception as e:  # noqa: BLE001
+                self._fire_diagnostic_once(
+                    camera_serial="?",
+                    code="camera_status_unreadable",
+                    level="warn",
+                    message=(
+                        "A camera handle did not respond to a basic status "
+                        f"read: {e}. Try Restart acquisition."
+                    ),
+                )
+                continue
+            status.append(cs)
 
         for c in self.cams:
-            c.GevIEEE1588DataSetLatch()
-            # print(
-            #    "Primary" if c.GevIEEE1588StatusLatched == "Master" else "Secondary",
-            #    c.GevIEEE1588OffsetFromMasterLatched,
-            # )
-
-            # set the corresponding camera status
+            try:
+                c.GevIEEE1588DataSetLatch()
+                offset = c.GevIEEE1588OffsetFromMasterLatched
+                serial = c.DeviceSerialNumber
+            except Exception:  # noqa: BLE001
+                continue
             for cs in status:
-                if cs.SerialNumber == c.DeviceSerialNumber:
-                    cs.SyncOffset = c.GevIEEE1588OffsetFromMasterLatched
+                if cs.SerialNumber == serial:
+                    cs.SyncOffset = offset
 
         status.sort(key=lambda x: x.SerialNumber)
 
