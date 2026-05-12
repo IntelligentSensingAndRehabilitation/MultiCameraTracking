@@ -1,9 +1,4 @@
-"""Generic ArUco marker detection in multi-camera videos.
-
-Detection / triangulation primitives used by calibration-time ArUco workflows.
-Protocol-specific interpretation (e.g. walkway goalposts) lives downstream
-(see gait_analytics for the 10MWT walkway interpretation).
-"""
+"""Generic ArUco marker detection and triangulation in multi-camera videos."""
 
 from __future__ import annotations
 
@@ -216,8 +211,7 @@ def detect_markers_multi_camera(
 ) -> dict[str, CameraDetectionResult]:
     """Run ArUco detection across multiple synchronized camera videos in parallel.
 
-    ``expected_ids=None`` returns every marker the detector finds — appropriate
-    for generic detection where the protocol isn't yet known.
+    ``expected_ids=None`` returns every marker the detector finds.
 
     ``cv2_threads_per_worker`` caps OpenCV's internal TBB threading per detect
     call. Without it, each ``cv2.aruco.detectMarkers`` call fans out across

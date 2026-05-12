@@ -1,15 +1,11 @@
 """ArUco-marker DataJoint tables for multi-camera calibration.
 
 ``CalibrationArucoDetection`` stores per-camera pixel detections of ArUco
-markers in the calibration videos. Detection is generic — every marker the
-detector finds is kept, no protocol-specific filtering. Detection
-auto-populates for any calibration whose recording comment contains the
-substring ``"aruco"`` (set in the acquisition GUI and propagated through
+markers in the calibration videos. Every marker the detector finds is kept;
+no marker-set filtering is applied at this layer. Detection auto-populates for
+any calibration whose recording comment contains the substring ``"aruco"``
+(set in the acquisition GUI and propagated through
 ``MultiCameraCalibration.comment``).
-
-Protocol-specific interpretation (e.g. 10MWT walkway goalposts) lives
-downstream in consumer packages, which own their own per-protocol flag tables
-keyed off ``Calibration``.
 """
 
 import cv2
@@ -90,8 +86,7 @@ class CalibrationArucoDetection(dj.Computed):
         # Triangulate every detected marker, recording per-marker spatial spread.
         # Stable markers (physically fixed) have low spread; transient markers
         # (e.g. someone walking past with a marker, equipment moving in/out of
-        # frame) have high spread. Downstream protocol-specific tables apply
-        # their own spread threshold over the markers they care about.
+        # frame) have high spread.
         detailed = triangulate_detected_markers_detailed(pixel_detections, cgroup)
 
         marker_ids_found = sorted(detailed.keys())

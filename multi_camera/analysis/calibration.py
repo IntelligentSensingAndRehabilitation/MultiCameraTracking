@@ -109,8 +109,7 @@ def run_calibration_and_insert(
         **calibration_kwargs: forwarded to ``run_calibration_APL``.
 
     Returns:
-        ``cal_key`` dict ``{cal_timestamp, camera_config_hash}`` for chaining
-        downstream populate() calls.
+        ``cal_key`` dict ``{cal_timestamp, camera_config_hash}``.
     """
     import datajoint as dj
 
