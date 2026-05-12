@@ -390,7 +390,7 @@ async def lifespan(app: FastAPI):
             # is also slow. Camera-specific issues during recording are
             # surfaced via the recorder's diagnostics_callback instead. DHCP
             # and host-network checks still run.
-            skip_camera_enumeration=(state.recording_status == "Recording"),
+            skip_camera_enumeration=(state.recording_status in _BUSY_RECORDING_STATES),
         ),
         on_poll=_on_idle_health_poll,
         logger=acquisition_logger,
