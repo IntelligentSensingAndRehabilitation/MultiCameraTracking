@@ -284,17 +284,27 @@ const CurrentSessionPanel = () => {
                         <Card.Header><strong>Live trial events</strong></Card.Header>
                         <Card.Body>
                             <ListGroup variant="flush">
-                                {sessionInsights.map((ev, i) => (
-                                    <ListGroup.Item key={i} className="d-flex justify-content-between align-items-start">
-                                        <div className="ms-2 me-auto">
-                                            <div className="fw-bold">{ev.message}</div>
-                                            <small className="text-muted">
-                                                {ev.code}{ev.ts ? ` · ${new Date(ev.ts).toLocaleTimeString()}` : ''}
-                                            </small>
-                                        </div>
-                                        <SeverityBadge level={ev.level} />
-                                    </ListGroup.Item>
-                                ))}
+                                {sessionInsights.map((ev, i) => {
+                                    const steps = (ev.details && ev.details.remediation) || null;
+                                    return (
+                                        <ListGroup.Item key={i} className="d-flex justify-content-between align-items-start">
+                                            <div className="ms-2 me-auto">
+                                                <div className="fw-bold">{ev.message}</div>
+                                                {steps && steps.length > 0 && (
+                                                    <ol className="small mb-1 mt-1 ps-3">
+                                                        {steps.map((step, j) => (
+                                                            <li key={j}>{step}</li>
+                                                        ))}
+                                                    </ol>
+                                                )}
+                                                <small className="text-muted">
+                                                    {ev.code}{ev.ts ? ` · ${new Date(ev.ts).toLocaleTimeString()}` : ''}
+                                                </small>
+                                            </div>
+                                            <SeverityBadge level={ev.level} />
+                                        </ListGroup.Item>
+                                    );
+                                })}
                             </ListGroup>
                         </Card.Body>
                     </Card>

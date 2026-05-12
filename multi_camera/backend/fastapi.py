@@ -211,14 +211,21 @@ def _on_acquisition_diagnostic(envelope: dict) -> None:
 
     Called from acquisition worker threads when the recorder catches a
     Spinnaker error per camera. Forwards the envelope to the existing
-    diagnostics WS fan-out as a ``session_insight`` event.
+    diagnostics WS fan-out as a ``session_insight`` event. If the
+    recorder attached a ``remediation`` list (from
+    ``classify_spinnaker_error``), the steps are passed through in
+    ``details`` so the Diagnostics tab renders them as a numbered list.
     """
+    details = dict(envelope.get("details", {}))
+    remediation = envelope.get("remediation")
+    if remediation:
+        details["remediation"] = remediation
     broadcast_event(
         event_type="session_insight",
         level=envelope.get("level", "warn"),
         code=envelope.get("code", "acquisition_error"),
         message=envelope.get("message", ""),
-        details=envelope.get("details", {}),
+        details=details,
     )
 
 

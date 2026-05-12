@@ -472,3 +472,60 @@ class TestHealthConfigFromEnv:
         cfg = HealthConfig.from_env({})
         assert cfg.deployment_mode == "laptop"
         assert cfg.network_interface == "enp5s0"
+
+
+class TestClassifySpinnakerError:
+    """The classifier translates Spinnaker exception strings into
+    structured operator-facing envelopes. Pure-logic test, no PySpin
+    runtime needed beyond the stub installed by conftest.
+    """
+
+    def _classify(self, text: str):
+        from multi_camera.acquisition.flir_recording_api import classify_spinnaker_error
+        return classify_spinnaker_error(text)
+
+    def test_ptp_node_not_writable(self) -> None:
+        env = self._classify(
+            "AccessException — Node is not writable, GevIEEE1588DataSetLatch.Execute()"
+        )
+        assert env is not None
+        assert env["code"] == "ptp_node_not_writable"
+        assert env["level"] == "error"
+        assert any("Reset Cameras" in step for step in env["remediation"])
+
+    def test_linemode_rejected(self) -> None:
+        env = self._classify(
+            "Failed to write enumeration value. Enum entry is not writable, node 'LineMode'"
+        )
+        assert env is not None
+        assert env["code"] == "gpio_linemode_rejected"
+        assert any("Reset Cameras" in step for step in env["remediation"])
+
+    def test_wrong_subnet(self) -> None:
+        env = self._classify("camera on wrong subnet detected")
+        assert env is not None
+        assert env["code"] == "camera_wrong_subnet"
+        assert any("Force IP" in step for step in env["remediation"])
+
+    def test_device_serial_not_readable(self) -> None:
+        env = self._classify("Camera property 'DeviceSerialNumber' is not readable")
+        assert env is not None
+        assert env["code"] == "camera_handle_invalid"
+
+    def test_pyspin_system_uninitialized(self) -> None:
+        env = self._classify(
+            "AttributeError: 'NoneType' object has no attribute 'GetInterfaces'"
+        )
+        assert env is not None
+        assert env["code"] == "pyspin_system_uninitialized"
+        # Tiered remediation: try Restart first, then container restart, then reboot.
+        assert len(env["remediation"]) >= 3
+
+    def test_unrecognized_returns_none(self) -> None:
+        assert self._classify("totally unrelated error message") is None
+
+    def test_accepts_exception_object(self) -> None:
+        """Classifier should work on Exception objects too, not just strings."""
+        env = self._classify(RuntimeError("LineMode is not writable"))
+        assert env is not None
+        assert env["code"] == "gpio_linemode_rejected"

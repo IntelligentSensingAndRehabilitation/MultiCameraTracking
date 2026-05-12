@@ -99,6 +99,74 @@ def select_interface(interface, cameras):
     return retval
 
 
+def classify_spinnaker_error(err) -> dict | None:
+    """Translate a Spinnaker/PySpin exception (or its string repr) into a
+    structured envelope ``{code, level, message, remediation}`` the GUI can
+    render. Returns ``None`` for unrecognized errors so the caller can fall
+    back to a generic message.
+
+    Mapping comes from operator-observed failure modes
+    (MultiCameraTracking-0dg). The remediation steps reference the
+    existing in-GUI buttons rather than raw Linux commands.
+    """
+    text = str(err)
+    lower = text.lower()
+
+    if "gevieee1588datasetlatch" in lower:
+        return {
+            "code": "ptp_node_not_writable",
+            "level": "error",
+            "message": "PTP/IEEE1588 sync node is not writable on a camera.",
+            "remediation": [
+                "This typically happens if a camera was unplugged after init.",
+                "Click 'Reset Cameras' on the main page.",
+                "If the issue persists, unplug and re-plug the affected camera, then click Restart acquisition.",
+            ],
+        }
+    if "linemode" in lower and "not writable" in lower:
+        return {
+            "code": "gpio_linemode_rejected",
+            "level": "error",
+            "message": "Camera rejected the GPIO line-mode configuration.",
+            "remediation": [
+                "Click 'Reset Cameras' on the main page.",
+                "If the issue persists, click Restart acquisition.",
+            ],
+        }
+    if "wrong subnet" in lower or "incompatible" in lower:
+        return {
+            "code": "camera_wrong_subnet",
+            "level": "error",
+            "message": "A camera is on the wrong subnet.",
+            "remediation": [
+                "Click 'Force IP' on the camera row in Diagnostics.",
+                "If the camera doesn't appear in Diagnostics, run `make reset`.",
+            ],
+        }
+    if "deviceserialnumber" in lower and "not readable" in lower:
+        return {
+            "code": "camera_handle_invalid",
+            "level": "error",
+            "message": "A camera handle stopped responding to basic reads.",
+            "remediation": [
+                "Click 'Restart acquisition' on the Diagnostics tab.",
+                "If the issue persists, click 'Reset Cameras' on the main page.",
+            ],
+        }
+    if "nonetype" in lower and "getinterfaces" in lower:
+        return {
+            "code": "pyspin_system_uninitialized",
+            "level": "error",
+            "message": "The Spinnaker system handle is uninitialized.",
+            "remediation": [
+                "Click 'Restart acquisition' on the Diagnostics tab.",
+                "If the issue persists, restart the acquisition application (`make run`).",
+                "If still failing after that, reboot the acquisition laptop.",
+            ],
+        }
+    return None
+
+
 class _RecorderInterfaceEventHandler(PySpin.InterfaceEventHandler):
     """Fires diagnostic envelopes when a camera arrives or is removed from
     the GigE interface the recorder is using.
@@ -793,6 +861,7 @@ class FlirRecorder:
         level: str,
         message: str,
         details: dict | None = None,
+        remediation: list[str] | None = None,
     ) -> None:
         """Fire ``diagnostics_callback`` exactly once per (camera, code) per
         session, then suppress subsequent calls. The acquisition workers
@@ -807,15 +876,16 @@ class FlirRecorder:
             if key in self._diagnostics_fired:
                 return
             self._diagnostics_fired.add(key)
+        envelope = {
+            "level": level,
+            "code": code,
+            "message": message,
+            "details": {"serial": camera_serial, **(details or {})},
+        }
+        if remediation:
+            envelope["remediation"] = remediation
         try:
-            self.diagnostics_callback(
-                {
-                    "level": level,
-                    "code": code,
-                    "message": message,
-                    "details": {"serial": camera_serial, **(details or {})},
-                }
-            )
+            self.diagnostics_callback(envelope)
         except Exception as e:  # noqa: BLE001
             # The callback is best-effort: it must not break acquisition.
             print(f"[diagnostics_callback] {camera_serial}/{code} raised: {e}")
@@ -1030,7 +1100,24 @@ class FlirRecorder:
         with concurrent.futures.ThreadPoolExecutor(
             max_workers=len(self.cams)
         ) as executor:
-            list(executor.map(lambda c: init_camera(c, **config_params), self.cams))
+            try:
+                list(executor.map(lambda c: init_camera(c, **config_params), self.cams))
+            except Exception as init_err:
+                # Classify before re-raising so the GUI sees the right
+                # remediation steps. Backend's _reset_and_configure
+                # catches the re-raised exception and broadcasts a
+                # generic reconfigure_failed envelope as a fallback.
+                classified = classify_spinnaker_error(init_err)
+                if classified is not None:
+                    self._fire_diagnostic_once(
+                        camera_serial="?",
+                        code=classified["code"],
+                        level=classified["level"],
+                        message=classified["message"],
+                        remediation=classified["remediation"],
+                        details={"spinnaker_error": str(init_err)},
+                    )
+                raise
 
         await self.synchronize_cameras()
 
@@ -1590,6 +1677,9 @@ class FlirRecorder:
                         "exceptions", f"{camera_serial}: Failed to get image — {err_text}"
                     )
                     if "-1002" in err_text or "no longer valid" in err_text:
+                        # Disconnect during grab — surface to the operator.
+                        # The arrival/removal event handler usually beats us
+                        # here, but we keep this path as defense-in-depth.
                         self._fire_diagnostic_once(
                             camera_serial=camera_serial,
                             code="camera_disconnected",
@@ -1612,15 +1702,26 @@ class FlirRecorder:
                             details={"spinnaker_error": err_text},
                         )
                     else:
-                        self._fire_diagnostic_once(
-                            camera_serial=camera_serial,
-                            code="camera_grab_error",
-                            level="warn",
-                            message=(
-                                f"Camera {camera_serial} failed to deliver a frame: {err_text}"
-                            ),
-                            details={"spinnaker_error": err_text},
-                        )
+                        classified = classify_spinnaker_error(err_text)
+                        if classified is not None:
+                            self._fire_diagnostic_once(
+                                camera_serial=camera_serial,
+                                code=classified["code"],
+                                level=classified["level"],
+                                message=classified["message"],
+                                remediation=classified["remediation"],
+                                details={"spinnaker_error": err_text},
+                            )
+                        else:
+                            self._fire_diagnostic_once(
+                                camera_serial=camera_serial,
+                                code="camera_grab_error",
+                                level="warn",
+                                message=(
+                                    f"Camera {camera_serial} failed to deliver a frame: {err_text}"
+                                ),
+                                details={"spinnaker_error": err_text},
+                            )
                     time.sleep(0.1)
                     continue
 
