@@ -13,6 +13,7 @@ from pathlib import Path
 from multi_camera.acquisition.health import (
     DetectedCamera,
     HealthConfig,
+    WrongSubnetCamera,
     _int_to_ipv4,
     _snapshot_from_recorder,
     check_camera_reachability,
@@ -472,6 +473,75 @@ class TestHealthConfigFromEnv:
         cfg = HealthConfig.from_env({})
         assert cfg.deployment_mode == "laptop"
         assert cfg.network_interface == "enp5s0"
+
+
+class TestWrongSubnetDetection:
+    def test_wrong_subnet_camera_emits_finding(self) -> None:
+        """An incompatible device on the GigE interface surfaces as an
+        error-level finding with structured remediation, and lands in the
+        report's wrong_subnet list with MAC + current IP.
+        """
+
+        def fake_enum() -> list[DetectedCamera]:
+            return []
+
+        def fake_wrong_subnet() -> list[WrongSubnetCamera]:
+            return [
+                WrongSubnetCamera(
+                    mac="aa:bb:cc:dd:ee:ff",
+                    current_ip="10.0.0.42",
+                    model="Blackfly S",
+                )
+            ]
+
+        report = check_camera_reachability(
+            expected_serials=[],
+            recorder=None,
+            enumerator=fake_enum,
+            wrong_subnet_enumerator=fake_wrong_subnet,
+        )
+
+        assert len(report.wrong_subnet) == 1
+        assert report.wrong_subnet[0].mac == "aa:bb:cc:dd:ee:ff"
+        wrong = [f for f in report.findings if f.code == "camera_wrong_subnet"]
+        assert len(wrong) == 1
+        assert wrong[0].level == "error"
+        assert wrong[0].remediation and any("Force IP" in s for s in wrong[0].remediation)
+
+    def test_no_wrong_subnet_no_finding(self) -> None:
+        def fake_enum() -> list[DetectedCamera]:
+            return [DetectedCamera(serial="111", link_speed_mbps=1000)]
+
+        def fake_wrong_subnet() -> list[WrongSubnetCamera]:
+            return []
+
+        report = check_camera_reachability(
+            expected_serials=["111"],
+            recorder=None,
+            enumerator=fake_enum,
+            wrong_subnet_enumerator=fake_wrong_subnet,
+        )
+        assert report.wrong_subnet == []
+        assert not any(f.code == "camera_wrong_subnet" for f in report.findings)
+
+    def test_enumerator_raising_does_not_break_check(self) -> None:
+        """A failing wrong-subnet enumerator must not crash the rest of
+        the reachability check — fall back to empty list.
+        """
+
+        def fake_enum() -> list[DetectedCamera]:
+            return [DetectedCamera(serial="111", link_speed_mbps=1000)]
+
+        def boom() -> list[WrongSubnetCamera]:
+            raise RuntimeError("PySpin exploded")
+
+        report = check_camera_reachability(
+            expected_serials=["111"],
+            recorder=None,
+            enumerator=fake_enum,
+            wrong_subnet_enumerator=boom,
+        )
+        assert report.wrong_subnet == []
 
 
 class TestClassifySpinnakerError:

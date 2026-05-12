@@ -443,6 +443,19 @@ export const AcquisitionApi = (props) => {
         return response.data;
     };
 
+    const forceIpCamera = async (mac, ip, mask, gateway) => {
+        const body = {};
+        if (ip) body.ip = ip;
+        if (mask) body.mask = mask;
+        if (gateway) body.gateway = gateway;
+        const response = await axios.post(
+            `${API_BASE_URL}/cameras/${encodeURIComponent(mac)}/force_ip`,
+            body
+        );
+        await fetchHealth(true);
+        return response.data;
+    };
+
     /* Code for editing recording database */
 
     const getMatchingPriorRecordings = async (participant, filename) => {
@@ -565,6 +578,7 @@ export const AcquisitionApi = (props) => {
         restartAcquisition,
         restoreCameraDefaults,
         setCameraExcluded,
+        forceIpCamera,
         newSession,
         newTrial,
         previewVideo,

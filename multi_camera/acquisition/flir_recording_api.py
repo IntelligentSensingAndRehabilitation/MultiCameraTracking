@@ -99,6 +99,18 @@ def select_interface(interface, cameras):
     return retval
 
 
+def _mac_str_to_int(mac: str) -> int:
+    """``aa:bb:cc:dd:ee:ff`` → integer, matches PySpin's MAC node format."""
+    return int(mac.replace(":", "").replace("-", ""), 16)
+
+
+def _ipv4_to_int(ip: str) -> int:
+    parts = [int(p) for p in ip.split(".")]
+    if len(parts) != 4:
+        raise ValueError(f"Invalid IPv4 address: {ip}")
+    return (parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]
+
+
 def classify_spinnaker_error(err) -> dict | None:
     """Translate a Spinnaker/PySpin exception (or its string repr) into a
     structured envelope ``{code, level, message, remediation}`` the GUI can
@@ -2149,6 +2161,93 @@ class FlirRecorder:
             f"[restore_defaults] camera {serial} "
             f"DeviceLinkThroughputLimit after: {after_throughput} "
             f"(delta: {None if before_throughput is None or after_throughput is None else after_throughput - before_throughput})"
+        )
+
+    def force_camera_ip(
+        self,
+        mac: str,
+        ip: str | None = None,
+        mask: str = "255.255.255.0",
+        gateway: str = "0.0.0.0",
+    ) -> dict:
+        """Force a camera that's on the wrong subnet to a target IP.
+
+        Walks ``system.GetInterfaces()`` looking for an incompatible device
+        whose MAC matches ``mac``. Sets the force fields on the interface's
+        TransportLayer node map and executes ``GevDeviceForceIP``.
+
+        If ``ip`` is None, uses Spinnaker's ``GevDeviceAutoForceIP`` to pick
+        the next free address on the configured subnet — avoids the operator
+        having to choose. After the command fires the camera takes 2–5 s to
+        re-enumerate; caller should refresh discovery / reconfigure after.
+
+        Caller must guarantee no recording is in progress.
+        """
+        target_mac_int = _mac_str_to_int(mac)
+        for i in range(self.system.GetInterfaces().GetSize()):
+            iface = self.system.GetInterfaces().GetByIndex(i)
+            try:
+                node_map = iface.GetTLNodeMap()
+                count_node = PySpin.CIntegerPtr(
+                    node_map.GetNode("IncompatibleDeviceCount")
+                )
+                if not (
+                    PySpin.IsAvailable(count_node) and PySpin.IsReadable(count_node)
+                ):
+                    continue
+                count = count_node.GetValue()
+                if count <= 0:
+                    continue
+                selector = PySpin.CIntegerPtr(
+                    node_map.GetNode("IncompatibleDeviceSelector")
+                )
+                if not (
+                    PySpin.IsAvailable(selector) and PySpin.IsWritable(selector)
+                ):
+                    continue
+                for idx in range(count):
+                    selector.SetValue(idx)
+                    mac_node = PySpin.CIntegerPtr(
+                        node_map.GetNode("IncompatibleGevDeviceMACAddress")
+                    )
+                    if not (
+                        PySpin.IsAvailable(mac_node) and PySpin.IsReadable(mac_node)
+                    ):
+                        continue
+                    if mac_node.GetValue() != target_mac_int:
+                        continue
+                    if ip is None:
+                        auto = PySpin.CCommandPtr(node_map.GetNode("GevDeviceAutoForceIP"))
+                        if not (
+                            PySpin.IsAvailable(auto) and PySpin.IsWritable(auto)
+                        ):
+                            raise RuntimeError(
+                                "GevDeviceAutoForceIP not executable on this interface"
+                            )
+                        auto.Execute()
+                    else:
+                        ip_node = PySpin.CIntegerPtr(
+                            node_map.GetNode("GevDeviceForceIPAddress")
+                        )
+                        mask_node = PySpin.CIntegerPtr(
+                            node_map.GetNode("GevDeviceForceSubnetMask")
+                        )
+                        gw_node = PySpin.CIntegerPtr(
+                            node_map.GetNode("GevDeviceForceGateway")
+                        )
+                        force = PySpin.CCommandPtr(
+                            node_map.GetNode("GevDeviceForceIP")
+                        )
+                        ip_node.SetValue(_ipv4_to_int(ip))
+                        mask_node.SetValue(_ipv4_to_int(mask))
+                        gw_node.SetValue(_ipv4_to_int(gateway))
+                        force.Execute()
+                    return {"mac": mac, "ip": ip or "auto"}
+            finally:
+                del iface
+
+        raise ValueError(
+            f"No incompatible device with MAC {mac} on any interface"
         )
 
     async def reset_cameras(self):
