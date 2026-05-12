@@ -443,6 +443,12 @@ export const AcquisitionApi = (props) => {
         return response.data;
     };
 
+    const markCameraBumped = async (serial) => {
+        const response = await axios.post(`${API_BASE_URL}/cameras/${serial}/bumped`);
+        await fetchCameraStatus();
+        return response.data;
+    };
+
     const forceIpCamera = async (mac, ip, mask, gateway) => {
         const body = {};
         if (ip) body.ip = ip;
@@ -579,6 +585,7 @@ export const AcquisitionApi = (props) => {
         restoreCameraDefaults,
         setCameraExcluded,
         forceIpCamera,
+        markCameraBumped,
         newSession,
         newTrial,
         previewVideo,

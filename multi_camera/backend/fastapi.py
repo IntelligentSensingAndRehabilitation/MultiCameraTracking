@@ -1317,6 +1317,31 @@ async def restore_camera_defaults(serial: str):
     return {"status": "success", "serial": serial, "config": saved_config}
 
 
+@api_router.post("/cameras/{serial}/bumped")
+async def mark_camera_bumped(serial: str):
+    """Operator hit/bumped a camera; subsequent trials in this session need
+    a fresh camera_config_hash so DataJoint creates a separate calibration
+    entry. Rotates a salt inside FlirRecorder.get_config_hash — no
+    reconfigure needed (the cameras themselves are unchanged, just their
+    physical pose). Returns the new hash.
+    """
+    state: GlobalState = get_global_state()
+    new_hash = await run_in_threadpool(
+        state.acquisition.bump_config_hash, f"bumped {serial}"
+    )
+    broadcast_event(
+        event_type="session_insight",
+        level="warn",
+        code="camera_bumped",
+        message=(
+            f"Camera {serial} marked as bumped. Future trials will record under "
+            f"a new camera_config_hash ({new_hash}) — capture a new calibration "
+            "before the next trial."
+        ),
+    )
+    return {"status": "success", "serial": serial, "new_config_hash": new_hash}
+
+
 class ForceIpData(BaseModel):
     ip: Optional[str] = None
     mask: Optional[str] = None

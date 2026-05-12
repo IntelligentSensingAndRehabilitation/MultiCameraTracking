@@ -806,6 +806,11 @@ class FlirRecorder:
         # the handler gets GC'd and the callbacks silently stop firing.
         self._event_handlers: list = []
 
+        # Salt mixed into get_config_hash. Empty until the operator clicks
+        # 'Camera bumped' mid-session; setting it forces a fresh
+        # camera_config_hash on subsequent trials.
+        self._config_hash_salt: str = ""
+
         self.set_status("Uninitialized")
 
         self.pixel_format_conversion = {
@@ -815,12 +820,34 @@ class FlirRecorder:
         }
 
     def get_config_hash(self, yaml_content, hash_len=10):
-        # Sorting keys to ensure consistent hashing
+        # Sorting keys to ensure consistent hashing. ``self._config_hash_salt``
+        # is mutated by bump_config_hash() when the operator clicks 'Camera
+        # bumped' — that produces a fresh hash without re-loading the YAML,
+        # so DataJoint treats subsequent trials as a new calibration setup.
         file_str = json.dumps(yaml_content, sort_keys=True)
+        if self._config_hash_salt:
+            file_str = f"{file_str}\nsalt={self._config_hash_salt}"
         encoded_config = file_str.encode("utf-8")
 
         # Create hash of encoded config file and return
         return hashlib.sha256(encoded_config).hexdigest()[:hash_len]
+
+    def bump_config_hash(self, reason: str | None = None) -> str:
+        """Rotate ``self._config_hash_salt`` so the next ``get_config_hash``
+        returns a different value. Used when the operator reports a camera
+        was physically bumped mid-session — future trials need to record
+        under a fresh ``camera_config_hash`` so DataJoint creates a separate
+        calibration entry. Returns the new effective hash for confirmation.
+        """
+        import secrets
+        self._config_hash_salt = secrets.token_hex(8)
+        new_hash = (
+            self.get_config_hash(self.camera_config) if self.camera_config else "?"
+        )
+        print(
+            f"[config_hash] bumped salt (reason={reason!r}); new hash={new_hash}"
+        )
+        return new_hash
 
     def get_detailed_processor_info(self):
         cpu_info = ""

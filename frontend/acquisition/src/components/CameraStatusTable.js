@@ -43,6 +43,47 @@ const RestoreDefaultsButton = ({ serial }) => {
     );
 };
 
+const BumpedButton = ({ serial }) => {
+    const { markCameraBumped } = useContext(AcquisitionState);
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState(null);
+
+    const handleClick = async () => {
+        const ok = window.confirm(
+            `Mark camera ${serial} as bumped? Subsequent trials will record under ` +
+            `a new camera_config_hash, so DataJoint will treat them as a new ` +
+            `calibration setup. You should capture a new calibration recording ` +
+            `before the next trial.`
+        );
+        if (!ok) return;
+        setBusy(true);
+        setError(null);
+        try {
+            await markCameraBumped(serial);
+        } catch (e) {
+            const msg = (e && e.response && e.response.data && e.response.data.detail) || e.message;
+            setError(msg || 'Mark bumped failed.');
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    return (
+        <div>
+            <Button
+                onClick={handleClick}
+                disabled={busy}
+                size="sm"
+                variant="outline-info"
+                title="Force a new camera_config_hash for subsequent trials"
+            >
+                {busy ? '…' : 'Bumped'}
+            </Button>
+            {error && <div className="text-danger small mt-1">{error}</div>}
+        </div>
+    );
+};
+
 const CameraStatusTable = ({ api }) => {
 
     const { cameraStatusList } = useContext(AcquisitionState);
@@ -77,7 +118,12 @@ const CameraStatusTable = ({ api }) => {
                                     <td>{cameraStatus.Width}</td>
                                     <td>{cameraStatus.Height}</td>
                                     <td>{cameraStatus.SyncOffset}</td>
-                                    <td><RestoreDefaultsButton serial={cameraStatus.SerialNumber} /></td>
+                                    <td>
+                                        <div className="d-flex gap-2">
+                                            <RestoreDefaultsButton serial={cameraStatus.SerialNumber} />
+                                            <BumpedButton serial={cameraStatus.SerialNumber} />
+                                        </div>
+                                    </td>
                                 </tr>
                             ))}
                         </tbody>

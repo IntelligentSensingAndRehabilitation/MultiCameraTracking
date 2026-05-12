@@ -544,6 +544,50 @@ class TestWrongSubnetDetection:
         assert report.wrong_subnet == []
 
 
+class TestBumpConfigHash:
+    """get_config_hash mixes in self._config_hash_salt so bump_config_hash
+    can force a new hash without changing the YAML config — used when the
+    operator reports a camera was physically bumped mid-session.
+    """
+
+    def _make_recorder(self):
+        from multi_camera.acquisition.flir_recording_api import FlirRecorder
+        # __init__ calls _get_pyspin_system which we can't run in dev container,
+        # so build a bare instance bypassing __init__ and seed the required
+        # fields directly.
+        rec = FlirRecorder.__new__(FlirRecorder)
+        rec._config_hash_salt = ""
+        rec.camera_config = {"camera-info": {"111": {}}, "meta": "x"}
+        return rec
+
+    def test_bump_changes_hash(self) -> None:
+        rec = self._make_recorder()
+        before = rec.get_config_hash(rec.camera_config)
+        bumped = rec.bump_config_hash(reason="test")
+        after = rec.get_config_hash(rec.camera_config)
+        assert before != after
+        assert bumped == after
+
+    def test_consecutive_bumps_keep_changing(self) -> None:
+        rec = self._make_recorder()
+        h1 = rec.bump_config_hash()
+        h2 = rec.bump_config_hash()
+        assert h1 != h2
+
+    def test_unsalted_hash_is_unchanged_from_pre_bump(self) -> None:
+        """A fresh recorder with empty salt should hash to the same value as
+        the historical (pre-PR-4) implementation. This protects existing
+        recordings' hashes from drifting on upgrade.
+        """
+        import hashlib
+        import json
+        rec = self._make_recorder()
+        expected = hashlib.sha256(
+            json.dumps(rec.camera_config, sort_keys=True).encode("utf-8")
+        ).hexdigest()[:10]
+        assert rec.get_config_hash(rec.camera_config) == expected
+
+
 class TestClassifySpinnakerError:
     """The classifier translates Spinnaker exception strings into
     structured operator-facing envelopes. Pure-logic test, no PySpin
