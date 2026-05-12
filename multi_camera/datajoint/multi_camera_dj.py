@@ -178,7 +178,77 @@ class PersonKeypointReconstruction(dj.Computed):
                     ("LShoulder", "LElbow"),
                     ("LElbow", "LWrist")
                 ]
-            
+        
+        elif top_down_method_name == "Sam3dBody_kinematic_nodes_127":
+            joints = TopDownPerson.joint_names("Sam3dBody_kinematic_nodes_127")
+            pairs = [
+                ("root", "c_spine0"),
+                ("c_spine0", "c_spine1"),
+                ("c_spine1", "c_spine2"),
+                ("c_spine2", "c_spine3"),
+                ("c_spine3", "c_neck"),
+                ("c_neck", "c_head"),
+                ("c_head", "c_jaw"),
+                ("c_head", "r_eye"),
+                ("c_head", "l_eye"),
+                ("root", "l_upleg"),
+                ("root", "r_upleg"),
+                ("l_upleg", "l_lowleg"),
+                ("l_lowleg", "l_foot"),
+                ("l_foot", "l_talocrural"),
+                ("l_talocrural", "l_subtalar"),
+                ("l_subtalar", "l_transversetarsal"),
+                ("l_transversetarsal", "l_ball"),
+                ("r_upleg", "r_lowleg"),
+                ("r_lowleg", "r_foot"),
+                ("r_foot", "r_talocrural"),
+                ("r_talocrural", "r_subtalar"),
+                ("r_subtalar", "r_transversetarsal"),
+                ("r_transversetarsal", "r_ball"),
+                ("c_spine3", "l_clavicle"),
+                ("l_clavicle", "l_uparm"),
+                ("l_uparm", "l_lowarm"),
+                ("l_lowarm", "l_wrist"),
+                ("c_spine3", "r_clavicle"),
+                ("r_clavicle", "r_uparm"),
+                ("r_uparm", "r_lowarm"),
+                ("r_lowarm", "r_wrist"),
+                ("l_wrist", "l_pinky0"),
+                ("l_pinky0", "l_pinky1"),
+                ("l_pinky1", "l_pinky2"),
+                ("l_pinky2", "l_pinky3"),
+                ("l_wrist", "l_ring1"),
+                ("l_ring1", "l_ring2"),
+                ("l_ring2", "l_ring3"),
+                ("l_wrist", "l_middle1"),
+                ("l_middle1", "l_middle2"),
+                ("l_middle2", "l_middle3"),
+                ("l_wrist", "l_index1"),
+                ("l_index1", "l_index2"),
+                ("l_index2", "l_index3"),
+                ("l_wrist", "l_thumb0"),
+                ("l_thumb0", "l_thumb1"),
+                ("l_thumb1", "l_thumb2"),
+                ("l_thumb2", "l_thumb3"),
+                ("r_wrist", "r_pinky0"),
+                ("r_pinky0", "r_pinky1"),
+                ("r_pinky1", "r_pinky2"),
+                ("r_pinky2", "r_pinky3"),
+                ("r_wrist", "r_ring1"),
+                ("r_ring1", "r_ring2"),
+                ("r_ring2", "r_ring3"),
+                ("r_wrist", "r_middle1"),
+                ("r_middle1", "r_middle2"),
+                ("r_middle2", "r_middle3"),
+                ("r_wrist", "r_index1"),
+                ("r_index1", "r_index2"),
+                ("r_index2", "r_index3"),
+                ("r_wrist", "r_thumb0"),
+                ("r_thumb0", "r_thumb1"),
+                ("r_thumb1", "r_thumb2"),
+                ("r_thumb2", "r_thumb3"),
+                ]
+
         else:
             joints = TopDownPerson.joint_names(top_down_method_name)
             pairs = [
@@ -199,6 +269,7 @@ class PersonKeypointReconstruction(dj.Computed):
                 ("Left Shoulder", "Left Elbow"),
                 ("Left Elbow", "Left Wrist"),
             ]
+        
         skeleton = np.array([(joints.index(p[0]), joints.index(p[1])) for p in pairs])
 
         # select method for reconstruction
