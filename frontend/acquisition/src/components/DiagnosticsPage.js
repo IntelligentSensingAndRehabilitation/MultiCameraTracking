@@ -25,6 +25,13 @@ const FindingList = ({ findings }) => {
                 <ListGroup.Item key={`${f.code}-${i}`} className="d-flex justify-content-between align-items-start">
                     <div className="ms-2 me-auto">
                         <div className="fw-bold">{f.message}</div>
+                        {f.remediation && f.remediation.length > 0 && (
+                            <ol className="small mb-1 mt-1 ps-3">
+                                {f.remediation.map((step, j) => (
+                                    <li key={j}>{step}</li>
+                                ))}
+                            </ol>
+                        )}
                         <small className="text-muted">{f.code}</small>
                     </div>
                     <SeverityBadge level={f.level} />
@@ -77,6 +84,7 @@ const HostHealthPanel = () => {
     const { overall, dhcp, cameras, host_network, recording_state, deployment_mode, generated_at } = healthReport;
     const dhcpFindings = (dhcp && dhcp.findings) || [];
     const cameraFindings = (cameras && cameras.findings) || [];
+    const perCamera = (cameras && cameras.cameras) || [];
     const hostFindings = (host_network && host_network.findings) || [];
     const expectedList = (cameras && cameras.expected) || [];
     const detectedList = (cameras && cameras.detected) || [];
@@ -125,14 +133,48 @@ const HostHealthPanel = () => {
                     severity={maxLevel(cameraFindings)}
                     findings={cameraFindings}
                     extra={
-                        <Table size="sm" borderless className="mb-2">
-                            <tbody>
-                                <tr><td>Expected</td><td>{expectedList.length}</td></tr>
-                                <tr><td>Detected</td><td>{detectedList.length}</td></tr>
-                                <tr><td>Missing</td><td>{missingList.join(', ') || '—'}</td></tr>
-                                <tr><td>Extra</td><td>{extraList.join(', ') || '—'}</td></tr>
-                            </tbody>
-                        </Table>
+                        <>
+                            <Table size="sm" borderless className="mb-2">
+                                <tbody>
+                                    <tr><td>Expected</td><td>{expectedList.length}</td></tr>
+                                    <tr><td>Detected</td><td>{detectedList.length}</td></tr>
+                                    <tr><td>Missing</td><td>{missingList.join(', ') || '—'}</td></tr>
+                                    <tr><td>Extra</td><td>{extraList.join(', ') || '—'}</td></tr>
+                                </tbody>
+                            </Table>
+                            {perCamera.length > 0 && (
+                                <Table size="sm" striped bordered className="mb-2">
+                                    <thead>
+                                        <tr>
+                                            <th>Serial</th>
+                                            <th>IP</th>
+                                            <th>Link</th>
+                                            <th>Throughput</th>
+                                            <th>Status</th>
+                                            <th>Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {perCamera.map((c) => (
+                                            <tr key={c.serial}>
+                                                <td>{c.serial}</td>
+                                                <td>{c.ip || '—'}</td>
+                                                <td>{deriveLinkLabel(c)}</td>
+                                                <td>{c.link_throughput_bytes_per_sec != null
+                                                    ? `${Math.round(c.link_throughput_bytes_per_sec * 8 / 1000000)} Mbps`
+                                                    : '—'}</td>
+                                                <td>{c.excluded
+                                                    ? 'excluded'
+                                                    : (c.detected ? 'reachable' : (c.expected ? 'missing' : 'unexpected'))}</td>
+                                                <td>{(c.excluded || c.expected || c.detected)
+                                                    ? <ExcludeCameraButton serial={c.serial} excluded={c.excluded} />
+                                                    : null}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </Table>
+                            )}
+                        </>
                     }
                 />
 
@@ -262,15 +304,114 @@ const CurrentSessionPanel = () => {
     );
 };
 
+const ExcludeCameraButton = ({ serial, excluded }) => {
+    const { setCameraExcluded, recordingSystemStatus } = useContext(AcquisitionState);
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState(null);
+    const isRecording = recordingSystemStatus === 'Recording';
+
+    const handleClick = async () => {
+        const target = !excluded;
+        const verb = target ? 'Exclude' : 'Include';
+        const ok = window.confirm(
+            target
+                ? `Exclude camera ${serial} from this session? The system will reconfigure ` +
+                  `with one fewer camera. You can re-include it later.`
+                : `Re-include camera ${serial}? The system will reconfigure with this camera back in the recording.`
+        );
+        if (!ok) return;
+        setBusy(true);
+        setError(null);
+        try {
+            await setCameraExcluded(serial, target);
+        } catch (e) {
+            const msg = (e && e.response && e.response.data && e.response.data.detail) || e.message;
+            setError(msg || `${verb} failed.`);
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    return (
+        <div>
+            <Button
+                onClick={handleClick}
+                disabled={busy || isRecording}
+                size="sm"
+                variant={excluded ? 'outline-success' : 'outline-secondary'}
+                title={isRecording ? 'Stop the recording first' : (excluded ? 'Re-include this camera in the recording' : 'Skip this camera in this session')}
+            >
+                {busy ? '…' : (excluded ? 'Include' : 'Exclude')}
+            </Button>
+            {error && <div className="text-danger small mt-1">{error}</div>}
+        </div>
+    );
+};
+
+const RestartAcquisitionButton = () => {
+    const { restartAcquisition, recordingSystemStatus } = useContext(AcquisitionState);
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState(null);
+    const isRecording = recordingSystemStatus === 'Recording';
+
+    const handleClick = async () => {
+        setBusy(true);
+        setError(null);
+        try {
+            await restartAcquisition();
+        } catch (e) {
+            const msg = (e && e.response && e.response.data && e.response.data.detail) || e.message;
+            setError(msg || 'Restart failed.');
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    return (
+        <div>
+            <Button
+                onClick={handleClick}
+                disabled={busy || isRecording}
+                size="sm"
+                variant="outline-warning"
+                title={isRecording ? 'Stop the recording before restarting' : 'Re-init PySpin and re-run PTP sync'}
+            >
+                {busy ? 'Restarting…' : 'Restart acquisition'}
+            </Button>
+            {error && <div className="text-danger small mt-1">{error}</div>}
+        </div>
+    );
+};
+
 const DiagnosticsPage = () => (
     <Container className="mt-3">
-        <h3 className="mb-3">Diagnostics</h3>
+        <div className="d-flex justify-content-between align-items-center mb-3">
+            <h3 className="mb-0">Diagnostics</h3>
+            <RestartAcquisitionButton />
+        </div>
         <HostHealthPanel />
         <CurrentSessionPanel />
     </Container>
 );
 
 const describeBool = (b) => (b === true ? 'OK' : b === false ? 'down' : '—');
+
+// Derive a human-readable link rating. Some Blackfly firmware doesn't populate
+// GevLinkSpeed via the held-recorder snapshot path, so we fall back to the
+// observed payload throughput. A 1 Gbps link tops out around 700-750 Mbps
+// payload (jumbo frames at 30 fps); a 100 Mbps link tops out around 95-100.
+const deriveLinkLabel = (c) => {
+    if (c.link_speed_mbps != null && c.link_speed_mbps > 0) {
+        return `${c.link_speed_mbps} Mbps`;
+    }
+    if (c.link_throughput_bytes_per_sec != null) {
+        const mbps = c.link_throughput_bytes_per_sec * 8 / 1000000;
+        if (mbps > 200) return '1 Gbps';
+        if (mbps > 20) return '100 Mbps';
+        if (mbps > 0) return '10 Mbps';
+    }
+    return '—';
+};
 
 const SEVERITY_RANK = { unknown: 0, ok: 1, warn: 2, error: 3 };
 const maxLevel = (findings) => {

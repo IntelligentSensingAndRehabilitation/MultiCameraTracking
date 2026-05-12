@@ -1,13 +1,9 @@
-"""Tests for ``DiagnosticsManager`` — the WS fan-out used by PR 2's diagnostic
-envelope channel (``/api/v1/ws/diagnostics``).
+"""Tests for ``DiagnosticsManager`` — the WS fan-out behind
+``/api/v1/ws/diagnostics``.
 
-Failure modes the tests cover, all of which broke the v2 implementation that
-shared a single connection list with the recording-status WS:
-
-- Per-connection lock serializes concurrent broadcasts
-- A failing send_json drops the connection instead of leaving a stale entry
-- A dead connection does not block other connections from receiving
-- Disconnect clears the per-connection lock entry (no leak)
+Covers: per-connection lock serializes concurrent broadcasts, a failing
+send_json drops the connection, a dead connection doesn't block others,
+disconnect clears the per-connection lock entry.
 """
 
 from __future__ import annotations
