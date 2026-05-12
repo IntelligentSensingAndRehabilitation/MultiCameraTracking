@@ -89,48 +89,60 @@ export const AcquisitionApi = (props) => {
     }, []);
 
     useEffectOnce(() => {
-
+        // Persist a single socket ref across reconnect attempts and a flag
+        // so the cleanup function knows we're intentionally closing.
         const url = `${WS_BASE_URL}`;
-        const socket = new WebSocket(url);
+        const state = { socket: null, closed: false, backoffMs: 500 };
 
-        console.log("Connecting to websocket..." + url)
+        const connect = () => {
+            console.log("Connecting to websocket..." + url);
+            const socket = new WebSocket(url);
+            state.socket = socket;
 
-        socket.onopen = (event) => {
-            console.log("WebSocket connection established" + url, event);
+            socket.onopen = () => {
+                console.log("WebSocket connection established " + url);
+                state.backoffMs = 500;
+                // Re-fetch the authoritative status on every (re)open so
+                // the GUI never sits with stale recordingSystemStatus if
+                // a broadcast was missed while disconnected (MCT-e8o).
+                fetchRecordingStatus();
+            };
+
+            socket.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                if (data.status !== undefined) {
+                    setRecordingSystemStatus(data.status);
+                }
+                if (data.progress !== undefined) {
+                    setRecordingProgress(Math.ceil(data.progress * 100));
+                }
+            };
+
+            socket.onclose = (event) => {
+                console.log("WebSocket connection closed " + url, event);
+                if (state.closed) return;
+                // Backoff: 0.5s → 1s → 2s → 4s → cap at 5s
+                const delay = state.backoffMs;
+                state.backoffMs = Math.min(state.backoffMs * 2, 5000);
+                setTimeout(connect, delay);
+            };
+
+            socket.onerror = (event) => {
+                console.log("WebSocket error observed " + url + ":", event);
+            };
         };
 
-        socket.onmessage = (event) => {
-            const data = JSON.parse(event.data);
-            if (data.status !== undefined) {
-                setRecordingSystemStatus(data.status);
-            }
-            if (data.progress !== undefined) {
-                setRecordingProgress(Math.ceil(data.progress * 100));
-            }
-        };
+        connect();
 
-        socket.onclose = (event) => {
-            console.log("WebSocket connection closed" + url, event);
-        };
-
-        socket.onerror = (event) => {
-            console.log("WebSocket error observed" + url + ":", event);
-        }
-
-        //clean up function when we close page
         return () => {
-            console.log("Closing WebSocket " + url + " ...")
-            socket.close();
-        }
+            state.closed = true;
+            console.log("Closing WebSocket " + url + " ...");
+            if (state.socket) state.socket.close();
+        };
     }, []);
 
     useEffectOnce(() => {
-        const socket = new WebSocket(WS_DIAGNOSTICS_URL);
-        console.log("Connecting to diagnostics websocket...", WS_DIAGNOSTICS_URL);
-
-        socket.onopen = () => {
-            console.log("Diagnostics WebSocket connection established");
-        };
+        const state = { socket: null, closed: false, backoffMs: 500 };
 
         const appendInsight = (env, dedupKey) => {
             setSessionInsights(prev => {
@@ -142,33 +154,56 @@ export const AcquisitionApi = (props) => {
             });
         };
 
-        socket.onmessage = (event) => {
-            const env = JSON.parse(event.data);
-            switch (env.type) {
-                case "health_report":
-                    fetchHealth();
-                    break;
-                case "session_insight":
-                    appendInsight(env, (i) => i.message);
-                    break;
-                case "error":
-                    fetchHealth();
-                    appendInsight(env, (i) => `${i.code}::${i.message}`);
-                    break;
-                default:
-                    break;
-            }
+        const connect = () => {
+            const socket = new WebSocket(WS_DIAGNOSTICS_URL);
+            state.socket = socket;
+            console.log("Connecting to diagnostics websocket...", WS_DIAGNOSTICS_URL);
+
+            socket.onopen = () => {
+                console.log("Diagnostics WebSocket connection established");
+                state.backoffMs = 500;
+                // Re-fetch health on every (re)open so a dropped health_report
+                // broadcast doesn't leave the GUI stuck on a stale banner.
+                fetchHealth();
+            };
+
+            socket.onmessage = (event) => {
+                const env = JSON.parse(event.data);
+                switch (env.type) {
+                    case "health_report":
+                        fetchHealth();
+                        break;
+                    case "session_insight":
+                        appendInsight(env, (i) => i.message);
+                        break;
+                    case "error":
+                        fetchHealth();
+                        appendInsight(env, (i) => `${i.code}::${i.message}`);
+                        break;
+                    default:
+                        break;
+                }
+            };
+
+            socket.onclose = () => {
+                console.log("Diagnostics WebSocket closed");
+                if (state.closed) return;
+                const delay = state.backoffMs;
+                state.backoffMs = Math.min(state.backoffMs * 2, 5000);
+                setTimeout(connect, delay);
+            };
+
+            socket.onerror = (event) => {
+                console.log("Diagnostics WebSocket error:", event);
+            };
         };
 
-        socket.onclose = () => {
-            console.log("Diagnostics WebSocket closed");
-        };
+        connect();
 
-        socket.onerror = (event) => {
-            console.log("Diagnostics WebSocket error:", event);
+        return () => {
+            state.closed = true;
+            if (state.socket) state.socket.close();
         };
-
-        return () => socket.close();
     }, []);
 
     useEffect(() => {
