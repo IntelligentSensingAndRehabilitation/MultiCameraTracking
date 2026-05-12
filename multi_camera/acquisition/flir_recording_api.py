@@ -99,6 +99,62 @@ def select_interface(interface, cameras):
     return retval
 
 
+class _RecorderInterfaceEventHandler(PySpin.InterfaceEventHandler):
+    """Fires diagnostic envelopes when a camera arrives or is removed from
+    the GigE interface the recorder is using.
+
+    Cleaner primary signal than the reactive ``-1002`` error catch in
+    ``acquire_frames``: the SDK calls these methods immediately on cable
+    disconnect/reconnect, before the dead handle starts spamming errors.
+    """
+
+    def __init__(self, recorder: "FlirRecorder", interface_id: str):
+        super().__init__()
+        self._recorder = recorder
+        self._interface_id = interface_id
+
+    @staticmethod
+    def _read_serial(camera) -> str:
+        try:
+            nodemap = camera.GetTLDeviceNodeMap()
+            node = PySpin.CStringPtr(nodemap.GetNode("DeviceSerialNumber"))
+            if PySpin.IsReadable(node):
+                return node.GetValue()
+        except Exception:  # noqa: BLE001
+            pass
+        return ""
+
+    def OnDeviceArrival(self, camera) -> None:
+        serial = self._read_serial(camera)
+        if not serial:
+            return
+        self._recorder._fire_diagnostic_once(
+            camera_serial=serial,
+            code="camera_reconnected",
+            level="ok",
+            message=(
+                f"Camera {serial} reconnected on {self._interface_id}. "
+                "Click Restart acquisition to bring it back into the rig."
+            ),
+            details={"interface": self._interface_id},
+        )
+
+    def OnDeviceRemoval(self, camera) -> None:
+        serial = self._read_serial(camera)
+        if not serial:
+            return
+        self._recorder._fire_diagnostic_once(
+            camera_serial=serial,
+            code="camera_disconnected",
+            level="error",
+            message=(
+                f"Camera {serial} was removed from {self._interface_id}. "
+                "Check the cable and power."
+            ),
+            details={"interface": self._interface_id},
+        )
+
+
 def init_camera(
     c: Camera,
     jumbo_packet: bool = True,
@@ -666,6 +722,10 @@ class FlirRecorder:
         self._diagnostics_fired: set[tuple[str, str]] = set()
         self._diagnostics_fired_lock = threading.Lock()
 
+        # PySpin requires us to hold refs to event handlers — without these
+        # the handler gets GC'd and the callbacks silently stop firing.
+        self._event_handlers: list = []
+
         self.set_status("Uninitialized")
 
         self.pixel_format_conversion = {
@@ -760,6 +820,35 @@ class FlirRecorder:
             # The callback is best-effort: it must not break acquisition.
             print(f"[diagnostics_callback] {camera_serial}/{code} raised: {e}")
 
+    def _register_interface_events(self) -> None:
+        """Subscribe to PySpin device arrival/removal on the active interface."""
+        if self.iface is None:
+            return
+        try:
+            interface_id = (
+                self.iface.TLInterface.InterfaceID.GetValue()
+                if PySpin.IsReadable(self.iface.TLInterface.InterfaceID)
+                else "unknown"
+            )
+        except Exception:  # noqa: BLE001
+            interface_id = "unknown"
+        handler = _RecorderInterfaceEventHandler(self, interface_id)
+        try:
+            self.iface.RegisterEventHandler(handler)
+        except Exception as e:  # noqa: BLE001
+            print(f"[event_handler] failed to register on {interface_id}: {e}")
+            return
+        self._event_handlers.append((self.iface, handler))
+
+    def _unregister_interface_events(self) -> None:
+        """Detach all registered handlers. Called from close()."""
+        for iface, handler in self._event_handlers:
+            try:
+                iface.UnregisterEventHandler(handler)
+            except Exception as e:  # noqa: BLE001
+                print(f"[event_handler] failed to unregister: {e}")
+        self._event_handlers = []
+
     def check_queue_sizes(self, queue_dict):
         for name, q in queue_dict.items():
             print(name, q.qsize())
@@ -841,6 +930,11 @@ class FlirRecorder:
         self.iface_cameras = selected_cams
 
         self.trigger = trigger
+
+        # Subscribe to device arrival/removal events on this interface so a
+        # cable unplug gets surfaced immediately via session_insight, instead
+        # of waiting for the acquire_frames loop to start producing -1002.
+        self._register_interface_events()
 
         self.iface.TLInterface.GevActionDeviceKey.SetValue(0)
         self.iface.TLInterface.GevActionGroupKey.SetValue(1)
@@ -1953,6 +2047,8 @@ class FlirRecorder:
 
     def close(self):
         """Close all the cameras and release the system"""
+
+        self._unregister_interface_events()
 
         if len(self.cams) > 0:
 
