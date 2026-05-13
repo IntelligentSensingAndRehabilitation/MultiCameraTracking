@@ -197,10 +197,10 @@ DHCP_LEASE_FILE_RECENT_S = 300
 def _default_ip_addr_runner(interface: str, timeout_s: float = 1.0) -> str:
     """Return a fragment of ``ip -4 addr show <iface>`` output for parsing.
 
-    Uses the ``SIOCGIFADDR`` ioctl so the probe works in containers that
-    ship ``net-tools`` (ifconfig) but not ``iproute2`` (ip). Falls back
-    to the ``ip`` subprocess on platforms where the ioctl path raises
-    (non-Linux, sandboxed containers without /proc/net).
+    Uses the Linux ``SIOCGIFADDR`` ioctl so the probe works in containers
+    that ship ``net-tools`` (ifconfig) but not ``iproute2`` (ip). Falls
+    back to the ``ip`` subprocess when the ioctl path raises, which
+    covers the no-IPv4-assigned and non-Linux cases.
     """
     try:
         import fcntl

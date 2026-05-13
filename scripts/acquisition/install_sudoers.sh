@@ -86,8 +86,8 @@ echo -e "${CYAN}=== sudoers content to install ===${NC}"
 cat "$TMP_FILE"
 echo ""
 
-# Validate before touching /etc/sudoers.d. A broken file there can lock
-# everyone out of sudo, so this check is non-negotiable.
+# Validate before touching /etc/sudoers.d. A syntactically broken file
+# there will lock everyone out of sudo on this host.
 if ! visudo -cf "$TMP_FILE" >/dev/null; then
     print_error "visudo rejected the generated file — refusing to install"
     visudo -cf "$TMP_FILE" || true
@@ -99,8 +99,9 @@ install -m 0440 -o root -g root "$TMP_FILE" "$SUDOERS_PATH"
 print_success "Installed $SUDOERS_PATH for user '$TARGET_USER'"
 echo ""
 
-# Quick verification that the user can actually exercise one of the rules
-# without a password. Skip on RHEL/CentOS where 'sudo -l -U' needs root.
+# Confirm the user can actually exercise one of the rules without a
+# password. `sudo -l` lists permitted commands for the current effective
+# user; under `sudo -u $TARGET_USER` that's the target.
 if sudo -u "$TARGET_USER" -n -l "$SYSTEMCTL_BIN" start isc-dhcp-server >/dev/null 2>&1; then
     print_success "Verified passwordless sudo for systemctl start isc-dhcp-server"
 else

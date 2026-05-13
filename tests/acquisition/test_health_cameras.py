@@ -7,6 +7,7 @@ no real cameras, no live DHCP server.
 from __future__ import annotations
 
 import datetime
+import os
 from pathlib import Path
 
 
@@ -420,8 +421,7 @@ class TestRunHealthCheck:
         lease_file.write_text("")
         now = datetime.datetime(2026, 4, 22, 12, 0, 0, tzinfo=UTC)
         stale = (now - datetime.timedelta(hours=1)).timestamp()
-        import os as _os
-        _os.utime(lease_file, (stale, stale))
+        os.utime(lease_file, (stale, stale))
         config = HealthConfig(
             deployment_mode="laptop",
             dhcp_lease_file=lease_file,
