@@ -327,7 +327,6 @@ class TestRunHealthCheck:
             expected_serials=["111"],
             recorder=None,
             recording_state="Idle",
-            dhcp_runner=lambda service, timeout_s=1.0: ("active", 0),
             ip_addr_runner=lambda iface, timeout_s=1.0: "    inet 192.168.1.1/24",
             camera_enumerator=fake_enum,
             now=datetime.datetime(2026, 4, 22, 12, 0, 0, tzinfo=UTC),
@@ -358,7 +357,6 @@ class TestRunHealthCheck:
             config=config,
             expected_serials=["111"],
             recorder=None,
-            dhcp_runner=lambda service, timeout_s=1.0: ("active", 0),
             ip_addr_runner=lambda iface, timeout_s=1.0: "    inet 192.168.1.1/24",
             camera_enumerator=fake_enum,
             now=datetime.datetime(2026, 4, 22, 12, 0, 0, tzinfo=UTC),
@@ -407,7 +405,6 @@ class TestRunHealthCheck:
             config=config,
             expected_serials=["111"],
             recorder=recorder,
-            dhcp_runner=lambda service, timeout_s=1.0: ("active", 0),
             ip_addr_runner=lambda iface, timeout_s=1.0: "    inet 192.168.1.1/24",
         )
         elapsed = time.monotonic() - start
@@ -418,8 +415,13 @@ class TestRunHealthCheck:
         """During recording, run_health_check must skip the PySpin enum
         (recorder owns the handles) but still run DHCP / host-network checks.
         """
+        # Empty lease file with a stale mtime simulates a downed dhcpd.
         lease_file = tmp_path / "dhcpd.leases"
         lease_file.write_text("")
+        now = datetime.datetime(2026, 4, 22, 12, 0, 0, tzinfo=UTC)
+        stale = (now - datetime.timedelta(hours=1)).timestamp()
+        import os as _os
+        _os.utime(lease_file, (stale, stale))
         config = HealthConfig(
             deployment_mode="laptop",
             dhcp_lease_file=lease_file,
@@ -437,16 +439,15 @@ class TestRunHealthCheck:
             recorder=None,
             recording_state="Recording",
             skip_camera_enumeration=True,
-            dhcp_runner=lambda service, timeout_s=1.0: ("inactive", 1),
             ip_addr_runner=lambda iface, timeout_s=1.0: "    inet 192.168.1.1/24",
             camera_enumerator=fake_enum,
-            now=datetime.datetime(2026, 4, 22, 12, 0, 0, tzinfo=UTC),
+            now=now,
         )
 
         assert enum_calls["n"] == 0
         assert report.cameras.enumerated is False
         assert report.cameras.findings == []
-        # DHCP arm still ran and surfaced the inactive service.
+        # DHCP arm still ran and surfaced the downed service from lease evidence.
         assert any(f.code == "dhcp_service_down" for f in report.dhcp.findings)
         assert report.dhcp.severity == "error"
 

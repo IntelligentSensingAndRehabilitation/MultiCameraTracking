@@ -164,7 +164,6 @@ def configured_backend(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     ]
 
     def fake_run_health_check(*args, **kwargs):
-        kwargs.setdefault("dhcp_runner", lambda svc, timeout_s=1.0: ("active", 0))
         kwargs.setdefault(
             "ip_addr_runner", lambda iface, timeout_s=1.0: "    inet 192.168.1.1/24"
         )

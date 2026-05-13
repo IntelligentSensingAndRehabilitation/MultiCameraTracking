@@ -1,12 +1,13 @@
 """Tests for ``health.check_dhcp_server`` and related parsing helpers.
 
-All tests use temporary lease files and injected subprocess runners — no
-actual DHCP server or systemctl call required.
+All tests use temporary lease files (the in-container service-up probe is
+based on lease activity + lease-file mtime, not on systemctl).
 """
 
 from __future__ import annotations
 
 import datetime
+import os
 from pathlib import Path
 
 
@@ -21,18 +22,16 @@ from multi_camera.acquisition.health import (
 UTC = datetime.timezone.utc
 
 
-def _make_runner(stdout: str, returncode: int = 0):
-    def runner(service: str, timeout_s: float = 1.0) -> tuple[str, int]:
-        return stdout, returncode
-
-    return runner
-
-
 def _make_ip_runner(stdout: str):
     def runner(interface: str, timeout_s: float = 1.0) -> str:
         return stdout
 
     return runner
+
+
+def _set_mtime(path: Path, when: datetime.datetime) -> None:
+    ts = when.timestamp()
+    os.utime(path, (ts, ts))
 
 
 class TestLeaseFileParsing:
@@ -101,7 +100,6 @@ class TestInterfaceIpParsing:
 
 class TestNetworkMode:
     def test_short_circuits_in_network_mode(self) -> None:
-        # Even if runners would fail, network mode should not call them.
         def boom(*args, **kwargs):  # noqa: ARG001
             raise AssertionError("should not be called in network mode")
 
@@ -109,7 +107,6 @@ class TestNetworkMode:
             mode="network",
             lease_file=Path("/nonexistent"),
             interface="fake",
-            systemctl_runner=boom,
             ip_addr_runner=boom,
         )
         assert status.applicable is False
@@ -118,19 +115,20 @@ class TestNetworkMode:
 
 
 class TestLaptopModeHappyPath:
-    def test_all_green(self, tmp_path: Path) -> None:
+    def test_all_green_with_active_lease(self, tmp_path: Path) -> None:
+        # A current lease means dhcpd is alive — regardless of mtime.
         lease_file = tmp_path / "dhcpd.leases"
         lease_file.write_text(
             "lease 192.168.1.50 {\n  ends 1 2099/01/01 12:00:00;\n}\n"
         )
+        now = datetime.datetime(2026, 4, 22, 12, 0, 0, tzinfo=UTC)
         status = check_dhcp_server(
             mode="laptop",
             lease_file=lease_file,
             interface="enp5s0",
             expected_interface_ip="192.168.1.1",
-            systemctl_runner=_make_runner("active", 0),
             ip_addr_runner=_make_ip_runner("    inet 192.168.1.1/24 brd 192.168.1.255"),
-            now=datetime.datetime(2026, 4, 22, 12, 0, 0, tzinfo=UTC),
+            now=now,
         )
         assert status.applicable is True
         assert status.service_active is True
@@ -141,15 +139,18 @@ class TestLaptopModeHappyPath:
 
 
 class TestLaptopModeFailures:
-    def test_service_down(self, tmp_path: Path) -> None:
+    def test_service_down_stale_empty_lease_file(self, tmp_path: Path) -> None:
+        # Empty lease file with an mtime older than the freshness window → down.
         lease_file = tmp_path / "dhcpd.leases"
         lease_file.write_text("")
+        now = datetime.datetime(2026, 4, 22, 12, 0, 0, tzinfo=UTC)
+        _set_mtime(lease_file, now - datetime.timedelta(hours=1))
         status = check_dhcp_server(
             mode="laptop",
             lease_file=lease_file,
             interface="enp5s0",
-            systemctl_runner=_make_runner("inactive", 3),
             ip_addr_runner=_make_ip_runner("    inet 192.168.1.1/24"),
+            now=now,
         )
         assert status.service_active is False
         assert status.severity == "error"
@@ -165,7 +166,6 @@ class TestLaptopModeFailures:
             lease_file=lease_file,
             interface="enp5s0",
             expected_interface_ip="192.168.1.1",
-            systemctl_runner=_make_runner("active", 0),
             ip_addr_runner=_make_ip_runner("    inet 10.0.0.5/24"),
         )
         assert status.interface_ip == "10.0.0.5"
@@ -173,13 +173,15 @@ class TestLaptopModeFailures:
         assert status.severity == "error"
 
     def test_interface_has_no_ip(self, tmp_path: Path) -> None:
+        # Lease activity present so service is up; interface still flagged.
         lease_file = tmp_path / "dhcpd.leases"
-        lease_file.write_text("")
+        lease_file.write_text(
+            "lease 192.168.1.50 {\n  ends 1 2099/01/01 12:00:00;\n}\n"
+        )
         status = check_dhcp_server(
             mode="laptop",
             lease_file=lease_file,
             interface="enp5s0",
-            systemctl_runner=_make_runner("active", 0),
             ip_addr_runner=_make_ip_runner(""),
         )
         assert status.interface_ip is None
@@ -191,41 +193,27 @@ class TestLaptopModeFailures:
             mode="laptop",
             lease_file=tmp_path / "does_not_exist.leases",
             interface=None,
-            systemctl_runner=_make_runner("active", 0),
             ip_addr_runner=_make_ip_runner(""),
         )
         assert any(f.code == "dhcp_lease_file_missing" for f in status.findings)
+        assert status.service_active is None
 
     def test_active_but_no_leases(self, tmp_path: Path) -> None:
+        # Empty file with FRESH mtime → service is up but waiting on cameras.
         lease_file = tmp_path / "dhcpd.leases"
         lease_file.write_text("")
+        now = datetime.datetime(2026, 4, 22, 12, 0, 0, tzinfo=UTC)
+        _set_mtime(lease_file, now - datetime.timedelta(seconds=30))
         status = check_dhcp_server(
             mode="laptop",
             lease_file=lease_file,
             interface=None,
-            systemctl_runner=_make_runner("active", 0),
             ip_addr_runner=_make_ip_runner(""),
+            now=now,
         )
         codes = [f.code for f in status.findings]
         assert "dhcp_no_leases" in codes
-        assert status.severity == "warn"
-
-    def test_systemctl_subprocess_error_is_warn_not_error(self, tmp_path: Path) -> None:
-        import subprocess
-
-        def raising_runner(service: str, timeout_s: float = 1.0):
-            raise subprocess.TimeoutExpired(["systemctl"], timeout_s)
-
-        lease_file = tmp_path / "dhcpd.leases"
-        lease_file.write_text("")
-        status = check_dhcp_server(
-            mode="laptop",
-            lease_file=lease_file,
-            systemctl_runner=raising_runner,
-            ip_addr_runner=_make_ip_runner(""),
-        )
-        codes = [f.code for f in status.findings]
-        assert "dhcp_service_check_failed" in codes
+        assert status.service_active is True
         assert status.severity == "warn"
 
 
@@ -237,7 +225,6 @@ class TestDhcpServerStatusShape:
             mode="network",
             lease_file=lease_file,
             interface=None,
-            systemctl_runner=_make_runner("active", 0),
             ip_addr_runner=_make_ip_runner(""),
         )
         dumped = status.model_dump(mode="json")

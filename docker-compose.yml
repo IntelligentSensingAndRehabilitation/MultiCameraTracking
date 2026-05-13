@@ -18,6 +18,7 @@ services:
       - ${DATA_VOLUME:-/data}:/data
       - ${CAMERA_CONFIGS:-/camera_configs}:/configs
       - /etc/localtime:/etc/localtime:ro
+      - /var/lib/dhcp:/var/lib/dhcp:ro
       - ${DATAJOINT_EXTERNAL:-/mnt/datajoint_external}:/datajoint_external
     network_mode: host
     command: /Mocap/entrypoints/start_acquisition_gui.sh
@@ -42,6 +43,7 @@ services:
       - ${TEST_DATA_VOLUME:-/data-test}:/data
       - ${CAMERA_CONFIGS:-/camera_configs}:/configs
       - /etc/localtime:/etc/localtime:ro
+      - /var/lib/dhcp:/var/lib/dhcp:ro
       - ${DATAJOINT_EXTERNAL:-/mnt/datajoint_external}:/datajoint_external
     network_mode: host
     command: /Mocap/entrypoints/start_acquisition_gui.sh
@@ -60,6 +62,7 @@ services:
       - ${DATA_VOLUME:-/data}:/data
       - ${CAMERA_CONFIGS:-/camera_configs}:/configs
       - /etc/localtime:/etc/localtime:ro
+      - /var/lib/dhcp:/var/lib/dhcp:ro
       - ${DATAJOINT_EXTERNAL:-/mnt/datajoint_external}:/datajoint_external
       - ./tests:/Mocap/tests
       - ./tests/testdata:/Mocap/tests/testdata
