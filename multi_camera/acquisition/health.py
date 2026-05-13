@@ -195,6 +195,30 @@ DHCP_LEASE_FILE_RECENT_S = 300
 
 
 def _default_ip_addr_runner(interface: str, timeout_s: float = 1.0) -> str:
+    """Return a fragment of ``ip -4 addr show <iface>`` output for parsing.
+
+    Uses the ``SIOCGIFADDR`` ioctl so the probe works in containers that
+    ship ``net-tools`` (ifconfig) but not ``iproute2`` (ip). Falls back
+    to the ``ip`` subprocess on platforms where the ioctl path raises
+    (non-Linux, sandboxed containers without /proc/net).
+    """
+    try:
+        import fcntl
+        import socket
+        import struct
+
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            packed = struct.pack("256s", interface[:15].encode("ascii"))
+            # SIOCGIFADDR = 0x8915. Returns 16-byte sockaddr_in starting
+            # at offset 16; the 4-byte in_addr is at offset 20..24.
+            ip_bytes = fcntl.ioctl(s.fileno(), 0x8915, packed)[20:24]
+        return f"    inet {socket.inet_ntoa(ip_bytes)}/0"
+    except OSError:
+        # Interface unknown, no IPv4 assigned, or ioctl unsupported.
+        # Fall through to the `ip` subprocess which yields the same
+        # parseable form (and raises FileNotFoundError if `ip` is missing,
+        # which the caller surfaces as dhcp_interface_check_failed).
+        pass
     result = subprocess.run(
         ["ip", "-4", "addr", "show", interface],
         capture_output=True,

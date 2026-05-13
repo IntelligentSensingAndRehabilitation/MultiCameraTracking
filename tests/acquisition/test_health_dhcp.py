@@ -13,6 +13,7 @@ from pathlib import Path
 
 from multi_camera.acquisition.health import (
     DhcpServerStatus,
+    _default_ip_addr_runner,
     _parse_interface_ipv4,
     _parse_lease_file,
     check_dhcp_server,
@@ -96,6 +97,19 @@ class TestInterfaceIpParsing:
     def test_returns_none_if_no_ipv4(self) -> None:
         text = "3: enp5s0: <...> mtu 9000 ...\n"
         assert _parse_interface_ipv4(text) is None
+
+
+class TestDefaultIpAddrRunner:
+    """Lock in that the default runner works without `ip` being installed.
+
+    Production runs this inside a Docker image that ships net-tools but
+    not iproute2, so the stdlib ioctl path must succeed on its own.
+    """
+
+    def test_resolves_loopback_via_ioctl(self) -> None:
+        # Every Linux box has lo bound to 127.0.0.1.
+        text = _default_ip_addr_runner("lo")
+        assert _parse_interface_ipv4(text) == "127.0.0.1"
 
 
 class TestNetworkMode:
