@@ -701,6 +701,28 @@ apply_persistence() {
 }
 
 ################################################################################
+# Step 8b: Install passwordless-sudo rules for auto-remediation
+################################################################################
+
+install_sudoers() {
+    print_header "Step 8b: Passwordless-sudo Rules"
+
+    print_info "Without these rules, start_acquisition.sh's auto-remediation"
+    print_info "(MTU/rmem fix, isc-dhcp-server start, nmcli profile activation)"
+    print_info "falls back to printing manual commands instead of actually fixing."
+    echo ""
+
+    if ask_yes_no "Install /etc/sudoers.d/mocap-acquisition now?" "y"; then
+        ./scripts/acquisition/install_sudoers.sh "$ACTUAL_USER"
+    else
+        print_warning "Skipped sudoers install"
+        print_info "You can run it later with: make install-sudoers"
+    fi
+
+    echo ""
+}
+
+################################################################################
 # Step 9: Download FLIR SDK
 ################################################################################
 
@@ -837,6 +859,7 @@ main() {
     create_directories
     create_env_file
     apply_persistence
+    install_sudoers
     download_flir_sdk
     build_docker_image
     show_summary
