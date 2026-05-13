@@ -257,11 +257,27 @@ activate_network() {
         print_success "DHCP-Server profile already active"
     else
         print_step "1/2" "Activating DHCP-Server network profile"
-        if nmcli con up "DHCP-Server" &>/dev/null; then
+        # System nmcli profiles usually need root to activate. Try
+        # unprivileged first; on failure, fall back to passwordless sudo
+        # (same pattern as the isc-dhcp-server start below). Capture stderr
+        # so the operator sees the real nmcli error, not a silent failure.
+        local nmcli_out nmcli_rc
+        nmcli_out=$(nmcli con up "DHCP-Server" 2>&1)
+        nmcli_rc=$?
+        if [ $nmcli_rc -ne 0 ]; then
+            nmcli_out=$(sudo -n nmcli con up "DHCP-Server" 2>&1)
+            nmcli_rc=$?
+        fi
+        if [ $nmcli_rc -eq 0 ]; then
             print_success "DHCP-Server profile activated"
         else
             print_error "Failed to activate DHCP-Server profile"
-            print_info "Try manually: nmcli con up DHCP-Server"
+            if [ -n "$nmcli_out" ]; then
+                # Indent the nmcli error so it lines up under the print_error.
+                echo "  nmcli output: ${nmcli_out//$'\n'/$'\n'    }"
+            fi
+            print_info "Run scripts/acquisition/setup_acquisition_system.sh to (re)install the profile,"
+            print_info "or pick 'DHCP-Server' in the GNOME wired-network menu and re-run 'make run'."
             return 1
         fi
     fi

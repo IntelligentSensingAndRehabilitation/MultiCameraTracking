@@ -1,7 +1,7 @@
 # This is the build file for the docker. Note this should be run from the
 # parent directory for the necessary files to be available
 
-.PHONY: clean build run run-no-checks _docker-run run-mocap-test test test-matrix test-diagnostics validate-sync diag-recording diag-analyze health health-fix setup-env
+.PHONY: clean build run run-no-checks _docker-run run-mocap-test test test-matrix test-diagnostics validate-sync diag-recording diag-analyze health health-fix setup-env install-sudoers
 
 DIR := ${CURDIR}
 
@@ -90,3 +90,9 @@ health:
 health-fix:
 	docker compose run --rm --entrypoint python3 test \
 		-m multi_camera.acquisition.health --remediate
+
+# Install /etc/sudoers.d/mocap-acquisition so start_acquisition.sh's
+# auto-remediation path (MTU/rmem/DHCP) and `make health-fix` can run
+# without prompting for a password.
+install-sudoers:
+	sudo ./scripts/acquisition/install_sudoers.sh

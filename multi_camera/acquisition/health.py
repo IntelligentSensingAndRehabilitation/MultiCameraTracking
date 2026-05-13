@@ -186,21 +186,39 @@ class HealthConfig(BaseModel):
 # DHCP server check
 # ---------------------------------------------------------------------------
 
-SystemctlRunner = Callable[[str], tuple[str, int]]
 IpAddrRunner = Callable[[str], str]
 
-
-def _default_systemctl_runner(service: str, timeout_s: float = 1.0) -> tuple[str, int]:
-    result = subprocess.run(
-        ["systemctl", "is-active", service],
-        capture_output=True,
-        text=True,
-        timeout=timeout_s,
-    )
-    return result.stdout.strip(), result.returncode
+# dhcpd rewrites the lease file on every DHCPACK/RELEASE and at startup
+# (database compaction). A recent mtime is the strongest signal we can read
+# from inside a container without mounting the host's systemd D-Bus socket.
+DHCP_LEASE_FILE_RECENT_S = 300
 
 
 def _default_ip_addr_runner(interface: str, timeout_s: float = 1.0) -> str:
+    """Return a fragment of ``ip -4 addr show <iface>`` output for parsing.
+
+    Uses the Linux ``SIOCGIFADDR`` ioctl so the probe works in containers
+    that ship ``net-tools`` (ifconfig) but not ``iproute2`` (ip). Falls
+    back to the ``ip`` subprocess when the ioctl path raises, which
+    covers the no-IPv4-assigned and non-Linux cases.
+    """
+    try:
+        import fcntl
+        import socket
+        import struct
+
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            packed = struct.pack("256s", interface[:15].encode("ascii"))
+            # SIOCGIFADDR = 0x8915. Returns 16-byte sockaddr_in starting
+            # at offset 16; the 4-byte in_addr is at offset 20..24.
+            ip_bytes = fcntl.ioctl(s.fileno(), 0x8915, packed)[20:24]
+        return f"    inet {socket.inet_ntoa(ip_bytes)}/0"
+    except OSError:
+        # Interface unknown, no IPv4 assigned, or ioctl unsupported.
+        # Fall through to the `ip` subprocess which yields the same
+        # parseable form (and raises FileNotFoundError if `ip` is missing,
+        # which the caller surfaces as dhcp_interface_check_failed).
+        pass
     result = subprocess.run(
         ["ip", "-4", "addr", "show", interface],
         capture_output=True,
@@ -261,7 +279,6 @@ def check_dhcp_server(
     lease_file: Path = Path("/var/lib/dhcp/dhcpd.leases"),
     interface: str | None = None,
     expected_interface_ip: str = "192.168.1.1",
-    systemctl_runner: SystemctlRunner = _default_systemctl_runner,
     ip_addr_runner: IpAddrRunner = _default_ip_addr_runner,
     now: datetime.datetime | None = None,
 ) -> DhcpServerStatus:
@@ -286,31 +303,7 @@ def check_dhcp_server(
             findings=findings,
         )
 
-    service_active: bool | None = None
-    try:
-        stdout, returncode = systemctl_runner("isc-dhcp-server")
-        service_active = stdout == "active" and returncode == 0
-        if not service_active:
-            findings.append(
-                Finding(
-                    level="error",
-                    code="dhcp_service_down",
-                    message=(
-                        "The camera IP server is not running. "
-                        "Run: sudo systemctl start isc-dhcp-server"
-                    ),
-                    details={"systemctl_output": stdout, "returncode": returncode},
-                )
-            )
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
-        findings.append(
-            Finding(
-                level="warn",
-                code="dhcp_service_check_failed",
-                message="Could not check DHCP server status.",
-                details={"error": str(e)},
-            )
-        )
+    now = now or datetime.datetime.now(datetime.timezone.utc)
 
     interface_ip: str | None = None
     if interface:
@@ -355,24 +348,14 @@ def check_dhcp_server(
             )
 
     lease_count = 0
+    lease_file_mtime: datetime.datetime | None = None
+    lease_file_read_failed = False
     if lease_file.exists():
         try:
             text = lease_file.read_text()
-            lease_count = _parse_lease_file(
-                text, now or datetime.datetime.now(datetime.timezone.utc)
-            )
-            if service_active and lease_count == 0:
-                findings.append(
-                    Finding(
-                        level="warn",
-                        code="dhcp_no_leases",
-                        message=(
-                            "DHCP server is running but no cameras have leases. "
-                            "Cameras may be unplugged or still booting."
-                        ),
-                    )
-                )
+            lease_count = _parse_lease_file(text, now)
         except OSError as e:
+            lease_file_read_failed = True
             findings.append(
                 Finding(
                     level="warn",
@@ -381,15 +364,71 @@ def check_dhcp_server(
                     details={"error": str(e)},
                 )
             )
-    else:
-        # Missing lease file is not necessarily an error: server may not have issued leases yet.
+        try:
+            lease_file_mtime = datetime.datetime.fromtimestamp(
+                lease_file.stat().st_mtime, datetime.timezone.utc
+            )
+        except OSError:
+            lease_file_mtime = None
+
+    # Service-up inference: lease activity OR a fresh mtime on the lease
+    # file. These are both visible from inside a container that bind-mounts
+    # /var/lib/dhcp read-only, unlike `systemctl is-active` which needs the
+    # host's systemd D-Bus socket.
+    recent_mtime = (
+        lease_file_mtime is not None
+        and (now - lease_file_mtime).total_seconds() <= DHCP_LEASE_FILE_RECENT_S
+    )
+    service_active: bool | None
+    if lease_count > 0 or recent_mtime:
+        service_active = True
+        if lease_count == 0:
+            findings.append(
+                Finding(
+                    level="warn",
+                    code="dhcp_no_leases",
+                    message=(
+                        "DHCP server is running but no cameras have leases. "
+                        "Cameras may be unplugged or still booting."
+                    ),
+                )
+            )
+    elif lease_file.exists() and not lease_file_read_failed:
+        service_active = False
+        findings.append(
+            Finding(
+                level="error",
+                code="dhcp_service_down",
+                message=(
+                    "The camera DHCP server appears to be down (no recent "
+                    "lease activity). Run `make health-fix` to restart it, "
+                    "or `make run` to restart the acquisition stack."
+                ),
+                details={
+                    "lease_file": str(lease_file),
+                    "lease_count": lease_count,
+                    "lease_file_mtime": (
+                        lease_file_mtime.isoformat() if lease_file_mtime else None
+                    ),
+                },
+            )
+        )
+    elif not lease_file.exists():
+        service_active = None
         findings.append(
             Finding(
                 level="warn",
                 code="dhcp_lease_file_missing",
-                message=f"DHCP lease file not found at {lease_file}.",
+                message=(
+                    f"DHCP lease file not found at {lease_file}. If the "
+                    "acquisition stack is running in Docker, confirm that "
+                    "/var/lib/dhcp is bind-mounted from the host."
+                ),
             )
         )
+    else:
+        # Lease file existed but couldn't be read — service_active stays unknown.
+        service_active = None
 
     if not findings:
         findings.append(
@@ -953,7 +992,6 @@ def run_health_check(
     recording_state: str = "Idle",
     include_unexpected_cameras: bool = False,
     skip_camera_enumeration: bool = False,
-    dhcp_runner: SystemctlRunner | None = None,
     ip_addr_runner: IpAddrRunner | None = None,
     camera_enumerator: CameraEnumerator | None = None,
     now: datetime.datetime | None = None,
@@ -988,7 +1026,6 @@ def run_health_check(
             lease_file=config.dhcp_lease_file,
             interface=config.network_interface,
             expected_interface_ip=config.dhcp_expected_interface_ip,
-            systemctl_runner=dhcp_runner or _default_systemctl_runner,
             ip_addr_runner=ip_addr_runner or _default_ip_addr_runner,
             now=now,
         )
@@ -1327,7 +1364,6 @@ __all__ = [
     "RemediationReport",
     "Severity",
     "SudoRunner",
-    "SystemctlRunner",
     "check_camera_reachability",
     "check_dhcp_server",
     "check_host_network",
