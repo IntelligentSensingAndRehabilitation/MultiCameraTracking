@@ -249,6 +249,27 @@ class PersonKeypointReconstruction(dj.Computed):
                 ("r_thumb2", "r_thumb3"),
                 ]
 
+        elif top_down_method_name == "MMPose_VitPose_H":
+            joints = TopDownPerson.joint_names(top_down_method_name)
+            pairs = [
+                ("Nose", "Left Eye"),
+                ("Nose", "Right Eye"),
+                ("Left Eye", "Left Ear"),
+                ("Right Eye", "Right Ear"),
+                ("Left Shoulder", "Right Shoulder"),
+                ("Left Shoulder", "Left Hip"),
+                ("Right Shoulder", "Right Hip"),
+                ("Left Hip", "Right Hip"),
+                ("Left Shoulder", "Left Elbow"),
+                ("Left Elbow", "Left Wrist"),
+                ("Right Shoulder", "Right Elbow"),
+                ("Right Elbow", "Right Wrist"),
+                ("Left Hip", "Left Knee"),
+                ("Left Knee", "Left Ankle"),
+                ("Right Hip", "Right Knee"),
+                ("Right Knee", "Right Ankle"),
+            ]
+
         else:
             joints = TopDownPerson.joint_names(top_down_method_name)
             pairs = [
