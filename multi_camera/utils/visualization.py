@@ -881,7 +881,7 @@ def make_single_camera_reprojection_video(
     # Get SAM 3D Body Mesh
     # --------------------------------------------------
     top_down_method = (TopDownPerson & video_key).fetch1("top_down_method")
-    if top_down_method in (34, 35):
+    if top_down_method in (34, 35, 37):
         from pose_pipeline.wrappers.sam3d_body import get_sam3d_callback
         sam3d_key = dict(video_key)
         sam3d_key["sam3d_method"] = 3
