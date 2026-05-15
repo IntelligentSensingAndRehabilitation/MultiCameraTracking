@@ -132,21 +132,56 @@ def db_dependency():
 
 
 class ConnectionManager:
+    """WebSocket fan-out for ``/api/v1/ws`` (recording status + progress).
+
+    Per-connection ``asyncio.Lock`` serializes writes so a status broadcast
+    can't race the websockets library's keepalive ping on the same writer
+    (the ``AssertionError in _drain_helper`` failure mode that motivated
+    the same shape on :class:`DiagnosticsManager`). Failed sends drop the
+    offending connection instead of leaving stale entries that would block
+    the next broadcast.
+    """
+
     def __init__(self):
         self.active_connections: list[WebSocket] = []
+        self._locks: dict[WebSocket, asyncio.Lock] = {}
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
-        logger.debug("Websocket connected")
         self.active_connections.append(websocket)
+        self._locks[websocket] = asyncio.Lock()
+        logger.debug("Websocket connected")
 
     def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+        self._locks.pop(websocket, None)
         logger.debug("Websocket Disconnected")
-        self.active_connections.remove(websocket)
 
-    async def broadcast(self, message: str):
-        for connection in self.active_connections:
-            await connection.send_json(message)
+    async def _send_one(self, websocket: WebSocket, message: dict) -> bool:
+        lock = self._locks.get(websocket)
+        if lock is None:
+            return False
+        async with lock:
+            try:
+                await websocket.send_json(message)
+                return True
+            except Exception as e:  # noqa: BLE001
+                acquisition_logger.warning(
+                    f"Main WS send failed, dropping connection: {e}"
+                )
+                return False
+
+    async def broadcast(self, message: dict):
+        if not self.active_connections:
+            return
+        results = await asyncio.gather(
+            *(self._send_one(c, message) for c in list(self.active_connections)),
+            return_exceptions=False,
+        )
+        for connection, ok in zip(list(self.active_connections), results):
+            if not ok:
+                self.disconnect(connection)
 
 
 manager = ConnectionManager()
@@ -332,10 +367,15 @@ loop = asyncio.get_event_loop()
 
 
 def receive_status(status, progress=None):
-    """
-    Receive status updates from the acquisition system
+    """Receive status updates from the acquisition system.
 
-    This callback is running on a different thread so needs to be handled carefully.
+    Called from FlirRecorder worker threads (status callback) and from the
+    asyncio loop (during lifespan / async endpoints). Dispatch the
+    broadcast accordingly: ``loop.create_task`` is not thread-safe and
+    silently drops the broadcast when called from a worker thread, which
+    leaves the GUI's main WS subscriber unaware of state transitions
+    (Uninitialized → Idle → Recording → …) and forces a page reload to
+    recover.
     """
     global_state = get_global_state()
     global_state.recording_status = status
@@ -346,8 +386,12 @@ def receive_status(status, progress=None):
     else:
         acquisition_logger.info(f"Status: {status}")
 
-    # Put the status in the queue using asyncio from a synchronous function
-    loop.create_task(manager.broadcast(update))
+    coro = manager.broadcast(update)
+    try:
+        asyncio.get_running_loop()
+        asyncio.create_task(coro)
+    except RuntimeError:
+        asyncio.run_coroutine_threadsafe(coro, loop)
 
 
 def _expected_serials(recorder: FlirRecorder | None) -> list[str]:
