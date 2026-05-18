@@ -132,21 +132,50 @@ def db_dependency():
 
 
 class ConnectionManager:
+    """WebSocket fan-out for ``/api/v1/ws``. Per-connection lock serializes
+    writes against the websockets keepalive ping; failed sends drop the
+    connection."""
+
     def __init__(self):
         self.active_connections: list[WebSocket] = []
+        self._locks: dict[WebSocket, asyncio.Lock] = {}
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
-        logger.debug("Websocket connected")
         self.active_connections.append(websocket)
+        self._locks[websocket] = asyncio.Lock()
+        logger.debug("Websocket connected")
 
     def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+        self._locks.pop(websocket, None)
         logger.debug("Websocket Disconnected")
-        self.active_connections.remove(websocket)
 
-    async def broadcast(self, message: str):
-        for connection in self.active_connections:
-            await connection.send_json(message)
+    async def _send_one(self, websocket: WebSocket, message: dict) -> bool:
+        lock = self._locks.get(websocket)
+        if lock is None:
+            return False
+        async with lock:
+            try:
+                await websocket.send_json(message)
+                return True
+            except Exception as e:  # noqa: BLE001
+                acquisition_logger.warning(
+                    f"Main WS send failed, dropping connection: {e}"
+                )
+                return False
+
+    async def broadcast(self, message: dict):
+        if not self.active_connections:
+            return
+        results = await asyncio.gather(
+            *(self._send_one(c, message) for c in list(self.active_connections)),
+            return_exceptions=False,
+        )
+        for connection, ok in zip(list(self.active_connections), results):
+            if not ok:
+                self.disconnect(connection)
 
 
 manager = ConnectionManager()
@@ -273,6 +302,7 @@ def broadcast_event(
     except RuntimeError:
         asyncio.run_coroutine_threadsafe(coro, loop)
 
+
 RECORDING_BASE = "data"
 CONFIG_PATH = "/configs/"
 DEFAULT_CONFIG = os.path.join(CONFIG_PATH, "cotton_lab_config_20230620.yaml")
@@ -317,7 +347,6 @@ def get_disk_space_info(path: str) -> Dict:
         }
 
 
-
 print(CONFIG_PATH)
 config_files = os.listdir(CONFIG_PATH)
 print(config_files)
@@ -328,15 +357,13 @@ print([""] + [f for f in config_files if f.endswith(".yaml")])
 # print(socket.getfqdn())
 
 
-loop = asyncio.get_event_loop()
+loop: asyncio.AbstractEventLoop | None = None
 
 
 def receive_status(status, progress=None):
-    """
-    Receive status updates from the acquisition system
-
-    This callback is running on a different thread so needs to be handled carefully.
-    """
+    """Acquisition status callback. Invoked from both the asyncio loop and
+    FlirRecorder worker threads, so dispatch via ``run_coroutine_threadsafe``
+    when there is no running loop."""
     global_state = get_global_state()
     global_state.recording_status = status
 
@@ -346,8 +373,12 @@ def receive_status(status, progress=None):
     else:
         acquisition_logger.info(f"Status: {status}")
 
-    # Put the status in the queue using asyncio from a synchronous function
-    loop.create_task(manager.broadcast(update))
+    coro = manager.broadcast(update)
+    try:
+        asyncio.get_running_loop()
+        asyncio.create_task(coro)
+    except RuntimeError:
+        asyncio.run_coroutine_threadsafe(coro, loop)
 
 
 def _expected_serials(recorder: FlirRecorder | None) -> list[str]:
@@ -361,6 +392,10 @@ def _expected_serials(recorder: FlirRecorder | None) -> list[str]:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Bind module-level loop to uvicorn's; worker-thread broadcasts dispatch onto it.
+    global loop
+    loop = asyncio.get_running_loop()
+
     state: GlobalState = get_global_state()
 
     # Perform startup tasks
@@ -640,9 +675,7 @@ def _broadcast_new_session_insights() -> None:
             event_type="session_insight",
             level="warn",
             code=(
-                "trial_symptom_detected"
-                if is_per_trial
-                else "session_pattern_detected"
+                "trial_symptom_detected" if is_per_trial else "session_pattern_detected"
             ),
             message=insight,
             details={
@@ -675,7 +708,9 @@ async def stop_recording():
 
 
 @api_router.post("/session", response_model=Session)
-async def set_session(subject_id: str, fin: Optional[str] = None, db=Depends(db_dependency)) -> Session:
+async def set_session(
+    subject_id: str, fin: Optional[str] = None, db=Depends(db_dependency)
+) -> Session:
     """
     Create a new session directory for the participant
 
@@ -701,6 +736,7 @@ async def set_session(subject_id: str, fin: Optional[str] = None, db=Depends(db_
 
     if fin and fin.strip():
         from multi_camera.backend.recording_db import store_fin
+
         store_fin(db, participant_name=subject_id, fin=fin.strip())
         print(f"FIN stored for participant {subject_id}")
 
@@ -715,7 +751,14 @@ async def get_session() -> Session:
     return state.current_session
 
 
-ALLOWED_IMAGE_TYPES = {'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/bmp', 'image/webp'}
+ALLOWED_IMAGE_TYPES = {
+    "image/jpeg",
+    "image/jpg",
+    "image/png",
+    "image/gif",
+    "image/bmp",
+    "image/webp",
+}
 MAX_UPLOAD_SIZE_MB = 25
 
 
@@ -736,7 +779,10 @@ async def upload_image(
     """
     state: GlobalState = get_global_state()
     if state.current_session is None:
-        raise HTTPException(status_code=404, detail="No active session. Create a session before uploading images.")
+        raise HTTPException(
+            status_code=404,
+            detail="No active session. Create a session before uploading images.",
+        )
 
     current_session = state.current_session
 
@@ -761,8 +807,8 @@ async def upload_image(
     timestamp = datetime.datetime.now()
     time_str = timestamp.strftime("%Y%m%d_%H%M%S")
     original_filename = file.filename or "uploaded_image.jpg"
-    safe_filename = re.sub(r'[^a-zA-Z0-9._-]', '_', os.path.basename(original_filename))
-    if not safe_filename or safe_filename.startswith('.'):
+    safe_filename = re.sub(r"[^a-zA-Z0-9._-]", "_", os.path.basename(original_filename))
+    if not safe_filename or safe_filename.startswith("."):
         safe_filename = "uploaded_image.jpg"
     saved_filename = f"{time_str}_{safe_filename}"
     saved_path = os.path.join(images_dir, saved_filename)
@@ -912,6 +958,7 @@ async def new_trial(data: NewTrialData, db: Session = Depends(db_dependency)):
             _broadcast_new_session_insights()
         except Exception as e:
             import traceback
+
             acquisition_logger.error(f"Trial failed: {e}", exc_info=True)
             # If start_acquisition raised before its set_status("Recording")
             # ran, status is still "Starting" — clear it so recovery
@@ -1290,9 +1337,7 @@ async def restore_camera_defaults(serial: str):
     )
 
     try:
-        await run_in_threadpool(
-            state.acquisition.restore_camera_defaults, serial
-        )
+        await run_in_threadpool(state.acquisition.restore_camera_defaults, serial)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
@@ -1529,6 +1574,7 @@ async def receive_frames(frames):
 # @api_router.get("/video")
 async def video_endpoint():
     state: GlobalState = get_global_state()
+
     async def generate_frames():
         while True:
             # Wait for the next frame to become available
