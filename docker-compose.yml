@@ -66,6 +66,7 @@ services:
       - ${DATAJOINT_EXTERNAL:-/mnt/datajoint_external}:/datajoint_external
       - ./tests:/Mocap/tests
       - ./tests/testdata:/Mocap/tests/testdata
+      - ./scripts:/Mocap/scripts
     network_mode: host
 
   reset:
