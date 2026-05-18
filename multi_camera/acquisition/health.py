@@ -234,6 +234,32 @@ def _parse_interface_ipv4(ip_addr_output: str) -> str | None:
     return match.group(1) if match else None
 
 
+def _get_host_interface_network(interface: str) -> ipaddress.IPv4Network | None:
+    """Return the interface's IPv4 network (e.g. 192.168.1.0/24) via ioctls.
+
+    Reads IP via SIOCGIFADDR and netmask via SIOCGIFNETMASK so the probe
+    works in containers without iproute2. Returns ``None`` when the
+    interface has no IPv4 assigned or ioctls are unsupported — caller
+    should skip the off-subnet camera check in that case.
+    """
+    try:
+        import fcntl
+        import socket
+        import struct
+
+        packed = struct.pack("256s", interface[:15].encode("ascii"))
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            ip_bytes = fcntl.ioctl(s.fileno(), 0x8915, packed)[20:24]  # SIOCGIFADDR
+            mask_bytes = fcntl.ioctl(s.fileno(), 0x891B, packed)[
+                20:24
+            ]  # SIOCGIFNETMASK
+        ip = socket.inet_ntoa(ip_bytes)
+        mask = socket.inet_ntoa(mask_bytes)
+        return ipaddress.IPv4Network(f"{ip}/{mask}", strict=False)
+    except (OSError, ValueError):
+        return None
+
+
 def _parse_lease_file(lease_file_text: str, now: datetime.datetime) -> int:
     """Count non-expired, non-abandoned DHCP leases in an isc-dhcp-server lease file.
 
@@ -595,6 +621,7 @@ def check_camera_reachability(
     include_unexpected: bool = False,
     enumerator: CameraEnumerator = _default_camera_enumerator,
     excluded_serials: set[str] | None = None,
+    host_interface_subnet: ipaddress.IPv4Network | None = None,
 ) -> CameraReachabilityReport:
     """Report which expected cameras are reachable right now.
 
@@ -800,6 +827,45 @@ def check_camera_reachability(
                         },
                     )
                 )
+
+    # GigE Vision discovery is link-local broadcast and crosses subnets, so a
+    # camera with a stale persistent IP or a link-local 169.254.x.x fallback
+    # still shows up in the enumerator. Init() over GVCP would then fail with
+    # "Spinnaker: Camera is on a wrong subnet. [-1015]" — flag it here so the
+    # operator finds out from `make health` instead of `make test`.
+    if host_interface_subnet is not None:
+        for cam_info in cameras:
+            if not cam_info.detected or cam_info.ip is None:
+                continue
+            try:
+                cam_ip = ipaddress.IPv4Address(cam_info.ip)
+            except (ValueError, ipaddress.AddressValueError):
+                continue
+            if cam_ip in host_interface_subnet:
+                continue
+            findings.append(
+                Finding(
+                    level="error",
+                    code="camera_off_subnet",
+                    message=(
+                        f"Camera {cam_info.serial} has IP {cam_info.ip}, not on "
+                        f"the host subnet {host_interface_subnet}. Init() will "
+                        f"fail with 'wrong subnet'."
+                    ),
+                    remediation=[
+                        "Run `python3 scripts/acquisition/force_camera_ips.py` "
+                        "inside the test container to ForceIP affected cameras.",
+                        "Power-cycle the camera so it re-requests a DHCP lease.",
+                        "If this happens repeatedly, the camera's DHCP request is "
+                        "racing the switch link-up; investigate dhcpd start order.",
+                    ],
+                    details={
+                        "serial": cam_info.serial,
+                        "camera_ip": cam_info.ip,
+                        "host_subnet": str(host_interface_subnet),
+                    },
+                )
+            )
 
     if not missing and expected:
         findings.append(
@@ -1044,6 +1110,9 @@ def run_health_check(
                 include_unexpected=include_unexpected_cameras,
                 enumerator=camera_enumerator or _default_camera_enumerator,
                 excluded_serials=excluded_serials,
+                host_interface_subnet=_get_host_interface_network(
+                    config.network_interface
+                ),
             )
         host_future = executor.submit(
             check_host_network,
@@ -1255,9 +1324,7 @@ def _default_sudo_runner(args: list[str], timeout_s: float = 5.0) -> tuple[str, 
     """
     cmd = ["sudo", "-n", *args]
     try:
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout_s
-        )
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_s)
         return (result.stdout + result.stderr).strip(), result.returncode
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
         return f"command failed: {e}", -1
