@@ -38,11 +38,12 @@ import os
 import sys
 import time
 
+from multi_camera.acquisition.flir_recording_api import (
+    _ipv4_to_int,
+    _enumerate_camera_ips,
+    _force_one_camera_ip,
+)
 from multi_camera.acquisition.health import _get_host_interface_network
-
-
-def _ip_to_int(ip: str) -> int:
-    return int(ipaddress.IPv4Address(ip))
 
 
 def _int_to_ip(value: int) -> str:
@@ -133,114 +134,14 @@ def main() -> int:
             )
             return 3
 
-    mask_int = _ip_to_int(str(subnet.netmask))
+    mask_int = _ipv4_to_int(str(subnet.netmask))
     gateway_int = 0
-    network_base = _ip_to_int(str(subnet.network_address))
+    network_base = _ipv4_to_int(str(subnet.network_address))
     print(f"Target subnet: {subnet} (mask {subnet.netmask})")
 
     system = PySpin.System.GetInstance()
     try:
-
-        def enumerate_state() -> tuple[set[str], list[tuple[str, int, str]]]:
-            """Snapshot every camera's (serial, mac, current_ip) by walking
-            every interface. Returns (in_use_ips_on_subnet, off_subnet_list).
-            Re-runnable — used both up-front and again after each ForceIP to
-            verify the camera actually moved.
-            """
-            in_use: set[str] = set()
-            off: list[tuple[str, int, str]] = []
-            iface_list = system.GetInterfaces()
-            try:
-                for iface_idx in range(iface_list.GetSize()):
-                    iface = iface_list.GetByIndex(iface_idx)
-                    cam_list = iface.GetCameras()
-                    try:
-                        for cam_idx in range(cam_list.GetSize()):
-                            cam = cam_list.GetByIndex(cam_idx)
-                            try:
-                                tl = cam.GetTLDeviceNodeMap()
-                                serial_node = PySpin.CStringPtr(
-                                    tl.GetNode("DeviceSerialNumber")
-                                )
-                                if not (
-                                    PySpin.IsAvailable(serial_node)
-                                    and PySpin.IsReadable(serial_node)
-                                ):
-                                    continue
-                                serial = serial_node.GetValue()
-                                ip_node = PySpin.CIntegerPtr(
-                                    tl.GetNode("GevDeviceIPAddress")
-                                )
-                                if not (
-                                    PySpin.IsAvailable(ip_node)
-                                    and PySpin.IsReadable(ip_node)
-                                ):
-                                    continue
-                                cur_ip = _int_to_ip(ip_node.GetValue())
-                                try:
-                                    cur_ip_addr = ipaddress.IPv4Address(cur_ip)
-                                except (ValueError, ipaddress.AddressValueError):
-                                    continue
-                                if cur_ip_addr in subnet:
-                                    in_use.add(cur_ip)
-                                    continue
-                                mac_int = PySpin.CIntegerPtr(
-                                    tl.GetNode("GevDeviceMACAddress")
-                                ).GetValue()
-                                off.append((serial, mac_int, cur_ip))
-                            finally:
-                                del cam
-                    finally:
-                        cam_list.Clear()
-            finally:
-                iface_list.Clear()
-            return in_use, off
-
-        def force_one(target_mac: int, new_ip_int: int) -> bool:
-            """Re-enumerate, find the camera with the matching MAC, write
-            ``GevDeviceForce*`` on its TLDeviceNodeMap, and Execute. The
-            writes + Execute all happen inside one ``CameraPtr`` scope so
-            Spinnaker can target through the handle. Returns True if a
-            matching camera was found (the ForceIP packet was sent), False
-            otherwise. Caller verifies after waiting.
-            """
-            iface_list = system.GetInterfaces()
-            try:
-                for iface_idx in range(iface_list.GetSize()):
-                    iface = iface_list.GetByIndex(iface_idx)
-                    cam_list = iface.GetCameras()
-                    try:
-                        for cam_idx in range(cam_list.GetSize()):
-                            cam = cam_list.GetByIndex(cam_idx)
-                            try:
-                                tl = cam.GetTLDeviceNodeMap()
-                                this_mac = PySpin.CIntegerPtr(
-                                    tl.GetNode("GevDeviceMACAddress")
-                                ).GetValue()
-                                if this_mac != target_mac:
-                                    continue
-                                PySpin.CIntegerPtr(
-                                    tl.GetNode("GevDeviceForceIPAddress")
-                                ).SetValue(new_ip_int)
-                                PySpin.CIntegerPtr(
-                                    tl.GetNode("GevDeviceForceSubnetMask")
-                                ).SetValue(mask_int)
-                                PySpin.CIntegerPtr(
-                                    tl.GetNode("GevDeviceForceGateway")
-                                ).SetValue(gateway_int)
-                                PySpin.CCommandPtr(
-                                    tl.GetNode("GevDeviceForceIP")
-                                ).Execute()
-                                return True
-                            finally:
-                                del cam
-                    finally:
-                        cam_list.Clear()
-            finally:
-                iface_list.Clear()
-            return False
-
-        in_use_ips, off_subnet = enumerate_state()
+        in_use_ips, off_subnet = _enumerate_camera_ips(system, subnet)
         if not off_subnet:
             print("No cameras off-subnet — nothing to do.")
             return 0
@@ -258,13 +159,15 @@ def main() -> int:
         failures: list[str] = []
         for serial, mac_int, cur_ip in off_subnet:
             new_ip = next_free_ip()
-            new_ip_int = _ip_to_int(new_ip)
+            new_ip_int = _ipv4_to_int(new_ip)
             print(
                 f"{serial} (MAC {_mac_to_str(mac_int)}): {cur_ip} → "
                 f"{new_ip} (mask {subnet.netmask})"
             )
 
-            if not force_one(mac_int, new_ip_int):
+            if not _force_one_camera_ip(
+                system, mac_int, new_ip_int, mask_int, gateway_int
+            ):
                 print(
                     f"  ! No camera with MAC {_mac_to_str(mac_int)} found on "
                     f"re-enumeration; skipping.",
@@ -278,7 +181,7 @@ def main() -> int:
             # Verify: if this MAC still shows up in the off-subnet list after
             # the settle, the ForceIP didn't stick — surface the camera so
             # the operator can power-cycle it.
-            _, still_off = enumerate_state()
+            _, still_off = _enumerate_camera_ips(system, subnet)
             if mac_int in {m for _, m, _ in still_off}:
                 print(
                     f"  ! {serial} still off-subnet after {args.settle_seconds}s. "
