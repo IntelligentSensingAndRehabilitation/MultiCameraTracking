@@ -1161,18 +1161,14 @@ async def get_current_config() -> str:
     return os.path.split(config)[-1]
 
 
-# States during which recovery endpoints (restart / restore / exclude) must
-# refuse to act. "Starting" exists to close the race between new_trial
-# returning 200 and FlirRecorder.start_acquisition flipping the status to
-# "Recording" on its worker thread — without it, a fast click on
-# "Restart acquisition" could tear down PySpin mid-BeginAcquisition.
-_BUSY_RECORDING_STATES = frozenset({"Starting", "Recording"})
-
-
-# States during which HealthIdlePoller must skip PySpin GigE enumeration:
-# the recorder is either holding camera handles or actively writing to
-# camera registers (LineMode, DeviceLinkThroughputLimit, …), and a second
-# enumeration would race those writes → GenICam::AccessException.
+# States during which PySpin is in flight — either holding camera handles
+# or actively writing camera registers (LineMode, DeviceLinkThroughputLimit,
+# BeginAcquisition, …). Used by HealthIdlePoller to skip its GigE
+# enumeration (which would race those writes → GenICam::AccessException),
+# and by recovery endpoints (restart / restore / exclude) that must 409
+# instead of racing the in-flight operation. "Starting" closes the gap
+# between new_trial returning 200 and start_acquisition flipping to
+# "Recording" on its worker thread.
 _BUSY_PYSPIN_STATES = frozenset(
     {"Configuring", "Synchronizing", "Synchronized", "Starting", "Recording"}
 )
@@ -1218,9 +1214,6 @@ async def _reset_and_configure(saved_config: str | None, action: str) -> None:
     await run_in_threadpool(state.acquisition.reset)
     if saved_config is None:
         return
-    # Flip status before the configure so HealthIdlePoller skips its
-    # PySpin enumeration during init_camera (see _BUSY_PYSPIN_STATES).
-    state.acquisition.set_status("Configuring")
     try:
         await state.acquisition.configure_cameras(saved_config)
     except Exception as e:  # noqa: BLE001
@@ -1250,9 +1243,6 @@ async def update_config(config: ConfigFileData):
     if config.config == "":
         state.acquisition.reset()
     else:
-        # Flip status before the configure so HealthIdlePoller skips its
-        # PySpin enumeration during init_camera (see _BUSY_PYSPIN_STATES).
-        state.acquisition.set_status("Configuring")
         await state.acquisition.configure_cameras(
             os.path.join(CONFIG_PATH, config.config)
         )
@@ -1273,10 +1263,13 @@ async def _set_camera_excluded(serial: str, excluded: bool) -> dict:
     reconfigure so the change takes effect. Returns the new exclusion list.
     """
     state: GlobalState = get_global_state()
-    if state.recording_status in _BUSY_RECORDING_STATES:
+    if state.recording_status in _BUSY_PYSPIN_STATES:
         raise HTTPException(
             status_code=409,
-            detail="Cannot change camera exclusion while a recording is active.",
+            detail=(
+                "Cannot change camera exclusion while the system is busy "
+                f"(state: {state.recording_status})."
+            ),
         )
     saved_config = getattr(state.acquisition, "config_file", None)
     current = set(getattr(state.acquisition, "excluded_serials", set()))
@@ -1337,13 +1330,16 @@ async def restore_camera_defaults(serial: str):
     case — equivalent to SpinView's 'Restore Factory Defaults' followed by
     reconfigure.
 
-    Returns 409 if recording, 404 if the serial isn't currently in cams.
+    Returns 409 if the system is busy, 404 if the serial isn't currently in cams.
     """
     state: GlobalState = get_global_state()
-    if state.recording_status in _BUSY_RECORDING_STATES:
+    if state.recording_status in _BUSY_PYSPIN_STATES:
         raise HTTPException(
             status_code=409,
-            detail="Cannot restore camera defaults while a recording is active.",
+            detail=(
+                "Cannot restore camera defaults while the system is busy "
+                f"(state: {state.recording_status})."
+            ),
         )
 
     saved_config = getattr(state.acquisition, "config_file", None)
@@ -1383,13 +1379,16 @@ async def restart_acquisition():
     the PTP sync setup in configure_cameras. Recovery path for the
     timestamp-spread > 1.0 / drifted-PTP case.
 
-    Returns 409 while a recording is active.
+    Returns 409 while the system is busy (configuring, recording, etc.).
     """
     state: GlobalState = get_global_state()
-    if state.recording_status in _BUSY_RECORDING_STATES:
+    if state.recording_status in _BUSY_PYSPIN_STATES:
         raise HTTPException(
             status_code=409,
-            detail="Cannot restart acquisition while a recording is active.",
+            detail=(
+                "Cannot restart acquisition while the system is busy "
+                f"(state: {state.recording_status})."
+            ),
         )
 
     # config_file gets cleared by close(); capture before reset().

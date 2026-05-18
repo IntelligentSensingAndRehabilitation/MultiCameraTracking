@@ -788,6 +788,10 @@ class FlirRecorder:
             trigger (bool): Enable network synchronized triggering
         """
 
+        # Flip status before any PySpin work so HealthIdlePoller's skip
+        # predicate covers init_camera's enumeration race window.
+        self.set_status("Configuring")
+
         self.config_file = config_file
 
         iface_list = self.system.GetInterfaces()
@@ -1440,7 +1444,8 @@ class FlirRecorder:
                     error_counters["exceptions"] += 1
                     err_text = str(e)
                     throttled_print(
-                        "exceptions", f"{camera_serial}: Failed to get image — {err_text}"
+                        "exceptions",
+                        f"{camera_serial}: Failed to get image — {err_text}",
                     )
                     if "-1002" in err_text or "no longer valid" in err_text:
                         self._fire_diagnostic_once(
@@ -1881,9 +1886,7 @@ class FlirRecorder:
 
         load_cmd = PySpin.CCommandPtr(nodemap.GetNode("UserSetLoad"))
         if not PySpin.IsAvailable(load_cmd) or not PySpin.IsWritable(load_cmd):
-            raise RuntimeError(
-                f"Camera {serial}: UserSetLoad command not executable"
-            )
+            raise RuntimeError(f"Camera {serial}: UserSetLoad command not executable")
         load_cmd.Execute()
         print(f"[restore_defaults] camera {serial} UserSetLoad executed")
 
@@ -1893,7 +1896,9 @@ class FlirRecorder:
         user_default = PySpin.CEnumerationPtr(nodemap.GetNode("UserSetDefault"))
         if PySpin.IsAvailable(user_default) and PySpin.IsWritable(user_default):
             user_default_entry = user_default.GetEntryByName("Default")
-            if user_default_entry is not None and PySpin.IsAvailable(user_default_entry):
+            if user_default_entry is not None and PySpin.IsAvailable(
+                user_default_entry
+            ):
                 user_default.SetIntValue(user_default_entry.GetValue())
 
         after_throughput = _read_int("DeviceLinkThroughputLimit")

@@ -1,6 +1,7 @@
-"""Tests for the health-poller busy-state predicate that skips PySpin GigE
-enumeration during configure / sync / recording, and for the ``Configuring``
-status flip that lets the predicate fire during ``configure_cameras``."""
+"""Tests for the busy-state predicate that gates HealthIdlePoller's PySpin
+GigE enumeration and the recovery endpoints (restart / restore / exclude),
+and for the ``Configuring`` status flip inside ``FlirRecorder.configure_cameras``
+that lets the predicate fire before ``init_camera``'s register writes."""
 
 from __future__ import annotations
 
@@ -54,117 +55,119 @@ except Exception as exc:  # pragma: no cover
     pytest.skip(f"Backend not importable: {exc}", allow_module_level=True)
 
 
+_BUSY_STATUSES = [
+    "Configuring",
+    "Synchronizing",
+    "Synchronized",
+    "Starting",
+    "Recording",
+]
+_FREE_STATUSES = ["Idle", "Uninitialized", "Resetting", None, ""]
+
+
 class TestShouldSkipCameraEnumeration:
     """The poller must skip PySpin GigE enumeration whenever the recorder is
-    in a state that holds camera handles or runs PySpin writes — otherwise
-    enumeration races ``init_camera``'s ``LineMode``/``DeviceLinkThroughputLimit``
-    writes and raises ``GenICam::AccessException``."""
+    in a state that holds camera handles or runs PySpin register writes —
+    otherwise enumeration races ``init_camera``'s ``LineMode`` /
+    ``DeviceLinkThroughputLimit`` writes and raises ``GenICam::AccessException``."""
 
-    @pytest.mark.parametrize(
-        "status,expected",
-        [
-            ("Configuring", True),
-            ("Synchronizing", True),
-            ("Synchronized", True),
-            ("Starting", True),
-            ("Recording", True),
-            ("Idle", False),
-            ("Uninitialized", False),
-            ("Resetting", False),
-            (None, False),
-            ("", False),
-        ],
-    )
-    def test_skip_decision_per_status(self, status, expected) -> None:
-        assert backend_fastapi._should_skip_camera_enumeration(status) is expected
+    @pytest.mark.parametrize("status", _BUSY_STATUSES)
+    def test_skip_during_busy(self, status) -> None:
+        assert backend_fastapi._should_skip_camera_enumeration(status) is True
 
-    def test_pyspin_states_is_superset_of_recording_states(self) -> None:
-        assert backend_fastapi._BUSY_RECORDING_STATES.issubset(
-            backend_fastapi._BUSY_PYSPIN_STATES
-        )
+    @pytest.mark.parametrize("status", _FREE_STATUSES)
+    def test_do_not_skip_when_free(self, status) -> None:
+        assert backend_fastapi._should_skip_camera_enumeration(status) is False
 
 
-class TestConfigureCamerasFlipsToConfiguring:
-    """Both ``configure_cameras`` call sites must flip status to ``Configuring``
-    before awaiting the configure, so the poller skip predicate evaluates to
-    True during ``init_camera``'s PySpin enumeration."""
+class TestFlirRecorderConfigureCameras:
+    """``FlirRecorder.configure_cameras`` is the single locus for the
+    Configuring flip: any future caller (HTTP handler, script, test) gets the
+    correct status transition for free."""
 
-    def test_update_config_sets_configuring_before_configure(self) -> None:
-        from fastapi import HTTPException  # noqa: F401  (matches endpoint impl)
+    def test_configure_cameras_flips_to_configuring_before_pyspin_work(self) -> None:
+        from multi_camera.acquisition.flir_recording_api import FlirRecorder
 
-        recorder = mock.MagicMock()
+        seen: list[str] = []
+
+        def flip_then_abort(status):
+            seen.append(status)
+            raise RuntimeError("__aborted_by_test__")
+
+        recorder = FlirRecorder.__new__(FlirRecorder)
+        recorder.set_status = flip_then_abort
         recorder.config_file = None
-        call_order = []
-        recorder.set_status.side_effect = lambda s: call_order.append(("set_status", s))
+        recorder.excluded_serials = set()
+        recorder.system = mock.MagicMock()
 
-        async def fake_configure(*args, **kwargs):
-            call_order.append(("configure_cameras", args, kwargs))
+        with pytest.raises(RuntimeError, match="__aborted_by_test__"):
+            asyncio.run(recorder.configure_cameras(num_cams=1))
 
-        recorder.configure_cameras = fake_configure
+        assert seen == ["Configuring"], (
+            "configure_cameras' first observable side effect must be "
+            f"set_status('Configuring'); got {seen!r}"
+        )
 
+
+class TestOperatorActionGuards:
+    """Recovery endpoints (restart / restore-defaults / change-exclusion) must
+    refuse with 409 during any PySpin-busy state, not just ``Recording`` —
+    clicking 'Restart acquisition' 200ms after a config-change POST should not
+    race configure_cameras."""
+
+    def _state_with(self, status: str):
         state = backend_fastapi.GlobalState()
-        state.acquisition = recorder
+        state.recording_status = status
+        state.acquisition = mock.MagicMock()
+        return state
 
-        async def body():
-            with mock.patch.object(
-                backend_fastapi, "get_global_state", return_value=state
-            ), mock.patch.object(
-                backend_fastapi,
-                "_refresh_health_after_configure",
-                new=mock.AsyncMock(),
-            ):
-                cfg = backend_fastapi.ConfigFileData(config="cotton_lab.yaml")
-                await backend_fastapi.update_config(cfg)
+    @pytest.mark.parametrize("status", _BUSY_STATUSES)
+    def test_restart_acquisition_409(self, status) -> None:
+        from fastapi import HTTPException
 
-        asyncio.run(body())
-
-        statuses = [entry[1] for entry in call_order if entry[0] == "set_status"]
-        configure_idx = next(
-            i for i, entry in enumerate(call_order) if entry[0] == "configure_cameras"
-        )
-        set_status_idx = next(
-            i for i, entry in enumerate(call_order) if entry[0] == "set_status"
-        )
-        assert "Configuring" in statuses
-        assert set_status_idx < configure_idx, (
-            "set_status('Configuring') must run BEFORE configure_cameras to "
-            "cover the init_camera enumeration window."
-        )
-
-    def test_reset_and_configure_sets_configuring_before_configure(self) -> None:
-        recorder = mock.MagicMock()
-        call_order = []
-        recorder.set_status.side_effect = lambda s: call_order.append(("set_status", s))
-        recorder.reset.side_effect = lambda: call_order.append(("reset",))
-
-        async def fake_configure(saved_config):
-            call_order.append(("configure_cameras", saved_config))
-
-        recorder.configure_cameras = fake_configure
-
-        state = backend_fastapi.GlobalState()
-        state.acquisition = recorder
+        state = self._state_with(status)
 
         async def body():
             with mock.patch.object(
                 backend_fastapi, "get_global_state", return_value=state
             ):
-                await backend_fastapi._reset_and_configure(
-                    saved_config="/configs/some.yaml", action="Restart"
-                )
+                with pytest.raises(HTTPException) as exc:
+                    await backend_fastapi.restart_acquisition()
+                assert exc.value.status_code == 409
+                assert status in str(exc.value.detail)
 
         asyncio.run(body())
 
-        statuses = [entry[1] for entry in call_order if entry[0] == "set_status"]
-        configure_idx = next(
-            i for i, entry in enumerate(call_order) if entry[0] == "configure_cameras"
-        )
-        configuring_idx = next(
-            i
-            for i, entry in enumerate(call_order)
-            if entry[0] == "set_status" and entry[1] == "Configuring"
-        )
-        assert "Configuring" in statuses
-        assert configuring_idx < configure_idx, (
-            "set_status('Configuring') must run BEFORE configure_cameras."
-        )
+    @pytest.mark.parametrize("status", _BUSY_STATUSES)
+    def test_restore_camera_defaults_409(self, status) -> None:
+        from fastapi import HTTPException
+
+        state = self._state_with(status)
+
+        async def body():
+            with mock.patch.object(
+                backend_fastapi, "get_global_state", return_value=state
+            ):
+                with pytest.raises(HTTPException) as exc:
+                    await backend_fastapi.restore_camera_defaults("12345")
+                assert exc.value.status_code == 409
+                assert status in str(exc.value.detail)
+
+        asyncio.run(body())
+
+    @pytest.mark.parametrize("status", _BUSY_STATUSES)
+    def test_set_camera_excluded_409(self, status) -> None:
+        from fastapi import HTTPException
+
+        state = self._state_with(status)
+
+        async def body():
+            with mock.patch.object(
+                backend_fastapi, "get_global_state", return_value=state
+            ):
+                with pytest.raises(HTTPException) as exc:
+                    await backend_fastapi._set_camera_excluded("12345", True)
+                assert exc.value.status_code == 409
+                assert status in str(exc.value.detail)
+
+        asyncio.run(body())
