@@ -420,12 +420,12 @@ async def lifespan(app: FastAPI):
             expected_serials=_expected_serials(state.acquisition),
             recorder=state.acquisition,
             recording_state=state.recording_status or "Idle",
-            # During an active recording the recorder owns the camera handles;
-            # PySpin GigE enumeration would race with the worker threads and
-            # is also slow. Camera-specific issues during recording are
-            # surfaced via the recorder's diagnostics_callback instead. DHCP
-            # and host-network checks still run.
-            skip_camera_enumeration=(state.recording_status in _BUSY_RECORDING_STATES),
+            # See _BUSY_PYSPIN_STATES: skip enumeration whenever the recorder
+            # is holding handles or writing camera registers. DHCP and
+            # host-network checks still run.
+            skip_camera_enumeration=_should_skip_camera_enumeration(
+                state.recording_status
+            ),
         ),
         on_poll=_on_idle_health_poll,
         logger=acquisition_logger,
@@ -1169,6 +1169,19 @@ async def get_current_config() -> str:
 _BUSY_RECORDING_STATES = frozenset({"Starting", "Recording"})
 
 
+# States during which HealthIdlePoller must skip PySpin GigE enumeration:
+# the recorder is either holding camera handles or actively writing to
+# camera registers (LineMode, DeviceLinkThroughputLimit, …), and a second
+# enumeration would race those writes → GenICam::AccessException.
+_BUSY_PYSPIN_STATES = frozenset(
+    {"Configuring", "Synchronizing", "Synchronized", "Starting", "Recording"}
+)
+
+
+def _should_skip_camera_enumeration(recording_status: str | None) -> bool:
+    return recording_status in _BUSY_PYSPIN_STATES
+
+
 async def _refresh_health_after_configure() -> None:
     """Force a health re-check after a camera reconfigure so the operator
     immediately sees post-init state (link speeds, throughput, missing
@@ -1205,6 +1218,9 @@ async def _reset_and_configure(saved_config: str | None, action: str) -> None:
     await run_in_threadpool(state.acquisition.reset)
     if saved_config is None:
         return
+    # Flip status before the configure so HealthIdlePoller skips its
+    # PySpin enumeration during init_camera (see _BUSY_PYSPIN_STATES).
+    state.acquisition.set_status("Configuring")
     try:
         await state.acquisition.configure_cameras(saved_config)
     except Exception as e:  # noqa: BLE001
@@ -1234,6 +1250,9 @@ async def update_config(config: ConfigFileData):
     if config.config == "":
         state.acquisition.reset()
     else:
+        # Flip status before the configure so HealthIdlePoller skips its
+        # PySpin enumeration during init_camera (see _BUSY_PYSPIN_STATES).
+        state.acquisition.set_status("Configuring")
         await state.acquisition.configure_cameras(
             os.path.join(CONFIG_PATH, config.config)
         )
