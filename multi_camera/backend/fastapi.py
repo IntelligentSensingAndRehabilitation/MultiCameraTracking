@@ -132,15 +132,9 @@ def db_dependency():
 
 
 class ConnectionManager:
-    """WebSocket fan-out for ``/api/v1/ws`` (recording status + progress).
-
-    Per-connection ``asyncio.Lock`` serializes writes so a status broadcast
-    can't race the websockets library's keepalive ping on the same writer
-    (the ``AssertionError in _drain_helper`` failure mode that motivated
-    the same shape on :class:`DiagnosticsManager`). Failed sends drop the
-    offending connection instead of leaving stale entries that would block
-    the next broadcast.
-    """
+    """WebSocket fan-out for ``/api/v1/ws``. Per-connection lock serializes
+    writes against the websockets keepalive ping; failed sends drop the
+    connection."""
 
     def __init__(self):
         self.active_connections: list[WebSocket] = []
@@ -367,16 +361,9 @@ loop: asyncio.AbstractEventLoop | None = None
 
 
 def receive_status(status, progress=None):
-    """Receive status updates from the acquisition system.
-
-    Called from FlirRecorder worker threads (status callback) and from the
-    asyncio loop (during lifespan / async endpoints). Dispatch the
-    broadcast accordingly: ``loop.create_task`` is not thread-safe and
-    silently drops the broadcast when called from a worker thread, which
-    leaves the GUI's main WS subscriber unaware of state transitions
-    (Uninitialized → Idle → Recording → …) and forces a page reload to
-    recover.
-    """
+    """Acquisition status callback. Invoked from both the asyncio loop and
+    FlirRecorder worker threads, so dispatch via ``run_coroutine_threadsafe``
+    when there is no running loop."""
     global_state = get_global_state()
     global_state.recording_status = status
 
@@ -405,11 +392,7 @@ def _expected_serials(recorder: FlirRecorder | None) -> list[str]:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Bind the module-level loop to the loop uvicorn actually runs.
-    # receive_status() and broadcast_event() dispatch worker-thread
-    # broadcasts via run_coroutine_threadsafe(coro, loop); if loop is
-    # the import-time loop instead of uvicorn's, the coroutine is
-    # scheduled on a loop that never runs and the broadcast is dropped.
+    # Bind module-level loop to uvicorn's; worker-thread broadcasts dispatch onto it.
     global loop
     loop = asyncio.get_running_loop()
 

@@ -1,16 +1,5 @@
-"""Regression tests for the main ``/api/v1/ws`` broadcast path
-(``ConnectionManager`` + ``receive_status``).
-
-The bug: ``receive_status`` is invoked from FlirRecorder worker threads
-when the camera stack flips status (Uninitialized → Synchronizing → Idle
-→ Recording → …). The previous implementation used
-``loop.create_task(manager.broadcast(update))`` which is not thread-safe
-when ``loop`` is not the current thread's running loop — broadcasts
-silently failed to schedule, the GUI's ``/api/v1/ws`` subscriber never
-saw status updates, and operators had to reload the page to pull the
-new state via REST. Diagnostics events still arrived because
-``broadcast_event`` already used the loop-aware dispatch pattern.
-"""
+"""Tests for ``ConnectionManager``, ``receive_status``, and ``lifespan``'s
+loop binding on the ``/api/v1/ws`` broadcast path."""
 
 from __future__ import annotations
 
@@ -163,12 +152,7 @@ class TestConnectionManagerBroadcast:
         _run(body())
 
     def test_per_connection_lock_serializes_concurrent_broadcasts(self) -> None:
-        """Two concurrent broadcasts to the same connection must not interleave.
-
-        Mirrors the same invariant ``DiagnosticsManager`` provides — a
-        status broadcast can't race the websockets keepalive ping on the
-        same writer.
-        """
+        """Concurrent broadcasts to the same connection must not interleave."""
 
         async def body():
             mgr = backend_fastapi.ConnectionManager()
@@ -203,18 +187,11 @@ class TestConnectionManagerBroadcast:
 
 
 class TestReceiveStatusCrossThread:
-    """The original bug: receive_status fired from a worker thread silently
-    dropped the broadcast because ``loop.create_task`` is not thread-safe.
-    """
+    """``receive_status`` must broadcast whether invoked from the loop thread
+    or a worker thread."""
 
     def test_status_callback_from_worker_thread_reaches_main_ws(self) -> None:
-        """Drive ``receive_status`` from a non-loop thread and verify the
-        update lands on a connected ``ConnectionManager`` client.
-        """
-
         async def body():
-            # Capture the loop receive_status will dispatch onto when
-            # invoked from a worker thread.
             backend_fastapi.loop = asyncio.get_running_loop()
 
             ws = FakeWebSocket("recv-status")
@@ -229,30 +206,19 @@ class TestReceiveStatusCrossThread:
 
                 threading.Thread(target=fire_from_thread, daemon=True).start()
 
-                # Wait for the worker thread to schedule onto the loop,
-                # then yield repeatedly so the scheduled task runs.
                 assert done.wait(timeout=2.0), "receive_status did not return"
                 for _ in range(20):
                     if ws.sent:
                         break
                     await asyncio.sleep(0.05)
 
-                assert ws.sent == [{"status": "Synchronizing"}], (
-                    f"receive_status broadcast did not reach the WS client; "
-                    f"got {ws.sent!r}. This is the cross-thread regression: "
-                    f"loop.create_task from a worker thread silently drops "
-                    f"the broadcast."
-                )
+                assert ws.sent == [{"status": "Synchronizing"}]
             finally:
                 backend_fastapi.manager.disconnect(ws)
 
         _run(body())
 
     def test_status_callback_from_loop_thread_reaches_main_ws(self) -> None:
-        """Same call site, but invoked from inside the loop (lifespan
-        startup, async endpoints). Must also broadcast.
-        """
-
         async def body():
             backend_fastapi.loop = asyncio.get_running_loop()
 
@@ -294,19 +260,8 @@ class TestReceiveStatusCrossThread:
 
 
 class TestLifespanCapturesRunningLoop:
-    """The follow-on bug found during field validation of the original fix.
-
-    Pre-fix, ``loop = asyncio.get_event_loop()`` ran at module import time —
-    before uvicorn started — so the captured loop was not the one uvicorn
-    ended up running. Worker-thread broadcasts hit
-    ``run_coroutine_threadsafe(coro, loop)`` and were silently dropped onto
-    a loop that never ran. Symptom on jc-compute02: ``Synchronized`` /
-    ``Idle`` transitions (fired from request-handler threads, dispatched
-    via the ``get_running_loop`` branch) reached the WS, but ``Recording``
-    and trailing ``Idle`` (fired from the FlirRecorder worker thread) did
-    not. ``lifespan()`` must re-bind module-level ``loop`` to the actual
-    running loop on startup.
-    """
+    """``lifespan()`` must rebind module-level ``loop`` to the running loop so
+    ``run_coroutine_threadsafe`` from worker threads targets uvicorn's loop."""
 
     def test_lifespan_rebinds_loop_to_running_loop(self) -> None:
         import unittest.mock as _mock
