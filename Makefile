@@ -91,6 +91,14 @@ health-fix:
 	docker compose run --rm --entrypoint python3 test \
 		-m multi_camera.acquisition.health --remediate
 
+# Rescue cameras stuck on link-local 169.254.x.x by broadcasting a Spinnaker
+# ForceIP. Volatile: cameras revert to their previous IP config on next
+# power-cycle, so this is for unblocking the current session, not a
+# permanent fix. Pair with `make health` to confirm afterwards.
+force-ip:
+	docker compose run --rm --entrypoint python3 test \
+		/Mocap/scripts/acquisition/force_camera_ips.py
+
 # Install /etc/sudoers.d/mocap-acquisition so start_acquisition.sh's
 # auto-remediation path (MTU/rmem/DHCP) and `make health-fix` can run
 # without prompting for a password.
