@@ -308,6 +308,7 @@ def broadcast_event(
     except RuntimeError:
         asyncio.run_coroutine_threadsafe(coro, loop)
 
+
 RECORDING_BASE = "data"
 CONFIG_PATH = "/configs/"
 DEFAULT_CONFIG = os.path.join(CONFIG_PATH, "cotton_lab_config_20230620.yaml")
@@ -352,7 +353,6 @@ def get_disk_space_info(path: str) -> Dict:
         }
 
 
-
 print(CONFIG_PATH)
 config_files = os.listdir(CONFIG_PATH)
 print(config_files)
@@ -363,7 +363,7 @@ print([""] + [f for f in config_files if f.endswith(".yaml")])
 # print(socket.getfqdn())
 
 
-loop = asyncio.get_event_loop()
+loop: asyncio.AbstractEventLoop | None = None
 
 
 def receive_status(status, progress=None):
@@ -405,6 +405,14 @@ def _expected_serials(recorder: FlirRecorder | None) -> list[str]:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Bind the module-level loop to the loop uvicorn actually runs.
+    # receive_status() and broadcast_event() dispatch worker-thread
+    # broadcasts via run_coroutine_threadsafe(coro, loop); if loop is
+    # the import-time loop instead of uvicorn's, the coroutine is
+    # scheduled on a loop that never runs and the broadcast is dropped.
+    global loop
+    loop = asyncio.get_running_loop()
+
     state: GlobalState = get_global_state()
 
     # Perform startup tasks
@@ -684,9 +692,7 @@ def _broadcast_new_session_insights() -> None:
             event_type="session_insight",
             level="warn",
             code=(
-                "trial_symptom_detected"
-                if is_per_trial
-                else "session_pattern_detected"
+                "trial_symptom_detected" if is_per_trial else "session_pattern_detected"
             ),
             message=insight,
             details={
@@ -719,7 +725,9 @@ async def stop_recording():
 
 
 @api_router.post("/session", response_model=Session)
-async def set_session(subject_id: str, fin: Optional[str] = None, db=Depends(db_dependency)) -> Session:
+async def set_session(
+    subject_id: str, fin: Optional[str] = None, db=Depends(db_dependency)
+) -> Session:
     """
     Create a new session directory for the participant
 
@@ -745,6 +753,7 @@ async def set_session(subject_id: str, fin: Optional[str] = None, db=Depends(db_
 
     if fin and fin.strip():
         from multi_camera.backend.recording_db import store_fin
+
         store_fin(db, participant_name=subject_id, fin=fin.strip())
         print(f"FIN stored for participant {subject_id}")
 
@@ -759,7 +768,14 @@ async def get_session() -> Session:
     return state.current_session
 
 
-ALLOWED_IMAGE_TYPES = {'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/bmp', 'image/webp'}
+ALLOWED_IMAGE_TYPES = {
+    "image/jpeg",
+    "image/jpg",
+    "image/png",
+    "image/gif",
+    "image/bmp",
+    "image/webp",
+}
 MAX_UPLOAD_SIZE_MB = 25
 
 
@@ -780,7 +796,10 @@ async def upload_image(
     """
     state: GlobalState = get_global_state()
     if state.current_session is None:
-        raise HTTPException(status_code=404, detail="No active session. Create a session before uploading images.")
+        raise HTTPException(
+            status_code=404,
+            detail="No active session. Create a session before uploading images.",
+        )
 
     current_session = state.current_session
 
@@ -805,8 +824,8 @@ async def upload_image(
     timestamp = datetime.datetime.now()
     time_str = timestamp.strftime("%Y%m%d_%H%M%S")
     original_filename = file.filename or "uploaded_image.jpg"
-    safe_filename = re.sub(r'[^a-zA-Z0-9._-]', '_', os.path.basename(original_filename))
-    if not safe_filename or safe_filename.startswith('.'):
+    safe_filename = re.sub(r"[^a-zA-Z0-9._-]", "_", os.path.basename(original_filename))
+    if not safe_filename or safe_filename.startswith("."):
         safe_filename = "uploaded_image.jpg"
     saved_filename = f"{time_str}_{safe_filename}"
     saved_path = os.path.join(images_dir, saved_filename)
@@ -956,6 +975,7 @@ async def new_trial(data: NewTrialData, db: Session = Depends(db_dependency)):
             _broadcast_new_session_insights()
         except Exception as e:
             import traceback
+
             acquisition_logger.error(f"Trial failed: {e}", exc_info=True)
             # If start_acquisition raised before its set_status("Recording")
             # ran, status is still "Starting" — clear it so recovery
@@ -1334,9 +1354,7 @@ async def restore_camera_defaults(serial: str):
     )
 
     try:
-        await run_in_threadpool(
-            state.acquisition.restore_camera_defaults, serial
-        )
+        await run_in_threadpool(state.acquisition.restore_camera_defaults, serial)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
@@ -1573,6 +1591,7 @@ async def receive_frames(frames):
 # @api_router.get("/video")
 async def video_endpoint():
     state: GlobalState = get_global_state()
+
     async def generate_frames():
         while True:
             # Wait for the next frame to become available

@@ -291,3 +291,54 @@ class TestReceiveStatusCrossThread:
                 backend_fastapi.manager.disconnect(ws)
 
         _run(body())
+
+
+class TestLifespanCapturesRunningLoop:
+    """The follow-on bug found during field validation of the original fix.
+
+    Pre-fix, ``loop = asyncio.get_event_loop()`` ran at module import time —
+    before uvicorn started — so the captured loop was not the one uvicorn
+    ended up running. Worker-thread broadcasts hit
+    ``run_coroutine_threadsafe(coro, loop)`` and were silently dropped onto
+    a loop that never ran. Symptom on jc-compute02: ``Synchronized`` /
+    ``Idle`` transitions (fired from request-handler threads, dispatched
+    via the ``get_running_loop`` branch) reached the WS, but ``Recording``
+    and trailing ``Idle`` (fired from the FlirRecorder worker thread) did
+    not. ``lifespan()`` must re-bind module-level ``loop`` to the actual
+    running loop on startup.
+    """
+
+    def test_lifespan_rebinds_loop_to_running_loop(self) -> None:
+        import unittest.mock as _mock
+        from contextlib import ExitStack
+
+        from fastapi import FastAPI
+
+        backend_fastapi.loop = None
+
+        async def body():
+            with ExitStack() as stack:
+                stack.enter_context(
+                    _mock.patch.object(backend_fastapi, "FlirRecorder", autospec=True)
+                )
+                stack.enter_context(
+                    _mock.patch.object(
+                        backend_fastapi, "HealthIdlePoller", autospec=True
+                    )
+                )
+                stack.enter_context(
+                    _mock.patch.object(
+                        backend_fastapi, "get_db", return_value=_mock.MagicMock()
+                    )
+                )
+                stack.enter_context(
+                    _mock.patch.object(backend_fastapi, "synchronize_to_datajoint")
+                )
+                async with backend_fastapi.lifespan(FastAPI()):
+                    assert backend_fastapi.loop is asyncio.get_running_loop(), (
+                        "lifespan() did not re-bind module-level loop to the "
+                        "running loop; worker-thread broadcasts via "
+                        "run_coroutine_threadsafe will silently drop."
+                    )
+
+        _run(body())
