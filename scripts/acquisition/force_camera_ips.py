@@ -59,10 +59,10 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--interface",
-        default=os.environ.get("NETWORK_INTERFACE", "enp34s0"),
+        default=os.environ.get("NETWORK_INTERFACE"),
         help=(
             "Host NIC to auto-detect the target subnet from. "
-            "Defaults to $NETWORK_INTERFACE."
+            "Defaults to $NETWORK_INTERFACE; required if neither is set."
         ),
     )
     parser.add_argument(
@@ -95,6 +95,15 @@ def main() -> int:
         ),
     )
     args = parser.parse_args()
+
+    if not args.interface and not args.target_subnet:
+        print(
+            "No network interface specified. Pass --interface, set "
+            "$NETWORK_INTERFACE, or pass --target-subnet to override the "
+            "auto-detect path.",
+            file=sys.stderr,
+        )
+        return 5
 
     # Gate to laptop deployment mode. In network mode the operator owns
     # the upstream DHCP fix; this CLI's volatile ForceIP rescue would

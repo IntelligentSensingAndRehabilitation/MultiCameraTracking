@@ -21,6 +21,23 @@ const initialState = {
 
 export const AcquisitionState = createContext(initialState);
 
+// Mirrors backend `_BUSY_PYSPIN_STATES` in multi_camera/backend/fastapi.py.
+// Any recovery / reconfigure action the operator can trigger from the GUI
+// (Force IP, Exclude/Include, Restore defaults, Restart acquisition) is
+// refused by the backend in any of these states, so the corresponding
+// frontend buttons should disable to match — otherwise the operator clicks
+// and gets a 409 toast instead of an obviously-unavailable button.
+const BUSY_PYSPIN_STATES = [
+    'Configuring',
+    'Synchronizing',
+    'Synchronized',
+    'Starting',
+    'Recording',
+];
+
+export const isBusyPySpinState = (status) =>
+    BUSY_PYSPIN_STATES.includes(status);
+
 export const useEffectOnce = (effect) => {
 
     const destroyFunc = useRef();

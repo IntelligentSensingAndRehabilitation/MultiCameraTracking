@@ -552,6 +552,30 @@ CameraEnumerator = Callable[[], list[DetectedCamera]]
 WrongSubnetEnumerator = Callable[[], list[WrongSubnetCamera]]
 
 
+def _read_tl_string(node_map: Any, name: str) -> str | None:
+    try:
+        import PySpin  # type: ignore[import-untyped]
+
+        node = PySpin.CStringPtr(node_map.GetNode(name))
+        if PySpin.IsAvailable(node) and PySpin.IsReadable(node):
+            return node.GetValue()
+    except Exception:  # noqa: BLE001
+        return None
+    return None
+
+
+def _read_tl_int(node_map: Any, name: str) -> int | None:
+    try:
+        import PySpin  # type: ignore[import-untyped]
+
+        node = PySpin.CIntegerPtr(node_map.GetNode(name))
+        if PySpin.IsAvailable(node) and PySpin.IsReadable(node):
+            return int(node.GetValue())
+    except Exception:  # noqa: BLE001
+        return None
+    return None
+
+
 def _default_wrong_subnet_enumerator() -> list[WrongSubnetCamera]:
     """Enumerate cameras visible to the GigE interface(s) but on the wrong
     subnet. PySpin's TransportLayerInterface exposes these as "incompatible
@@ -619,6 +643,7 @@ def _default_wrong_subnet_enumerator() -> list[WrongSubnetCamera]:
         finally:
             iface_list.Clear()
     finally:
+        # Don't release the system — simple_pyspin caches a singleton instance.
         pass
 
     return found
@@ -673,30 +698,6 @@ def _default_camera_enumerator() -> list[DetectedCamera]:
         pass
 
     return detected
-
-
-def _read_tl_string(node_map: Any, name: str) -> str | None:
-    try:
-        import PySpin  # type: ignore[import-untyped]
-
-        node = PySpin.CStringPtr(node_map.GetNode(name))
-        if PySpin.IsAvailable(node) and PySpin.IsReadable(node):
-            return node.GetValue()
-    except Exception:  # noqa: BLE001
-        return None
-    return None
-
-
-def _read_tl_int(node_map: Any, name: str) -> int | None:
-    try:
-        import PySpin  # type: ignore[import-untyped]
-
-        node = PySpin.CIntegerPtr(node_map.GetNode(name))
-        if PySpin.IsAvailable(node) and PySpin.IsReadable(node):
-            return int(node.GetValue())
-    except Exception:  # noqa: BLE001
-        return None
-    return None
 
 
 def check_camera_reachability(

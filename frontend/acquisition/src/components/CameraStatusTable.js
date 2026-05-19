@@ -1,13 +1,13 @@
 import React, { useContext, useState } from 'react';
 import { Table, Button } from 'react-bootstrap';
 import Accordion from 'react-bootstrap/Accordion';
-import { AcquisitionState } from "../AcquisitionApi";
+import { AcquisitionState, isBusyPySpinState } from "../AcquisitionApi";
 
 const RestoreDefaultsButton = ({ serial }) => {
     const { restoreCameraDefaults, recordingSystemStatus } = useContext(AcquisitionState);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState(null);
-    const isRecording = recordingSystemStatus === 'Recording';
+    const isPySpinBusy = isBusyPySpinState(recordingSystemStatus);
 
     const handleClick = async () => {
         const ok = window.confirm(
@@ -31,10 +31,12 @@ const RestoreDefaultsButton = ({ serial }) => {
         <div>
             <Button
                 onClick={handleClick}
-                disabled={busy || isRecording}
+                disabled={busy || isPySpinBusy}
                 size="sm"
                 variant="outline-warning"
-                title={isRecording ? 'Stop the recording before restoring defaults' : 'Load factory UserSet on this camera and re-init'}
+                title={isPySpinBusy
+                    ? `Wait until the system is Idle (currently ${recordingSystemStatus})`
+                    : 'Load factory UserSet on this camera and re-init'}
             >
                 {busy ? 'Restoring…' : 'Restore defaults'}
             </Button>

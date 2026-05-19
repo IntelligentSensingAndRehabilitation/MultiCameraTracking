@@ -1,6 +1,6 @@
 import React, { useContext, useEffect, useState } from 'react';
 import { Container, Card, Badge, Button, ListGroup, Accordion, Table } from 'react-bootstrap';
-import { AcquisitionState } from '../AcquisitionApi';
+import { AcquisitionState, isBusyPySpinState } from '../AcquisitionApi';
 
 const severityVariant = {
     ok: 'success',
@@ -335,7 +335,7 @@ const ExcludeCameraButton = ({ serial, excluded }) => {
     const { setCameraExcluded, recordingSystemStatus } = useContext(AcquisitionState);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState(null);
-    const isRecording = recordingSystemStatus === 'Recording';
+    const isPySpinBusy = isBusyPySpinState(recordingSystemStatus);
 
     const handleClick = async () => {
         const target = !excluded;
@@ -363,10 +363,12 @@ const ExcludeCameraButton = ({ serial, excluded }) => {
         <div>
             <Button
                 onClick={handleClick}
-                disabled={busy || isRecording}
+                disabled={busy || isPySpinBusy}
                 size="sm"
                 variant={excluded ? 'outline-success' : 'outline-secondary'}
-                title={isRecording ? 'Stop the recording first' : (excluded ? 'Re-include this camera in the recording' : 'Skip this camera in this session')}
+                title={isPySpinBusy
+                    ? `Wait until the system is Idle (currently ${recordingSystemStatus})`
+                    : (excluded ? 'Re-include this camera in the recording' : 'Skip this camera in this session')}
             >
                 {busy ? '…' : (excluded ? 'Include' : 'Exclude')}
             </Button>
@@ -379,7 +381,7 @@ const ForceIpButton = ({ mac }) => {
     const { forceIpCamera, recordingSystemStatus } = useContext(AcquisitionState);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState(null);
-    const isRecording = recordingSystemStatus === 'Recording';
+    const isPySpinBusy = isBusyPySpinState(recordingSystemStatus);
 
     const handleClick = async () => {
         const ok = window.confirm(
@@ -403,10 +405,12 @@ const ForceIpButton = ({ mac }) => {
         <div>
             <Button
                 onClick={handleClick}
-                disabled={busy || isRecording}
+                disabled={busy || isPySpinBusy}
                 size="sm"
                 variant="outline-warning"
-                title={isRecording ? 'Stop the recording first' : 'Re-IP this camera onto the camera subnet'}
+                title={isPySpinBusy
+                    ? `Wait until the system is Idle (currently ${recordingSystemStatus})`
+                    : 'Re-IP this camera onto the camera subnet'}
             >
                 {busy ? '…' : 'Force IP'}
             </Button>
@@ -419,7 +423,7 @@ const RestartAcquisitionButton = () => {
     const { restartAcquisition, recordingSystemStatus } = useContext(AcquisitionState);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState(null);
-    const isRecording = recordingSystemStatus === 'Recording';
+    const isPySpinBusy = isBusyPySpinState(recordingSystemStatus);
 
     const handleClick = async () => {
         setBusy(true);
@@ -438,10 +442,12 @@ const RestartAcquisitionButton = () => {
         <div>
             <Button
                 onClick={handleClick}
-                disabled={busy || isRecording}
+                disabled={busy || isPySpinBusy}
                 size="sm"
                 variant="outline-warning"
-                title={isRecording ? 'Stop the recording before restarting' : 'Re-init PySpin and re-run PTP sync'}
+                title={isPySpinBusy
+                    ? `Wait until the system is Idle (currently ${recordingSystemStatus})`
+                    : 'Re-init PySpin and re-run PTP sync'}
             >
                 {busy ? 'Restarting…' : 'Restart acquisition'}
             </Button>
