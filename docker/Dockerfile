@@ -86,6 +86,8 @@ COPY datajoint_config.json /root/.datajoint_config.json
 
 COPY tests /Mocap/tests
 
+COPY scripts /Mocap/scripts
+
 RUN pip3 install pytest
 
 RUN pip install --upgrade numpy

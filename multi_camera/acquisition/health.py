@@ -79,6 +79,17 @@ class CameraReachability(BaseModel):
     last_error: str | None = None
 
 
+class WrongSubnetCamera(BaseModel):
+    """A camera visible to the GigE interface but unreachable because its
+    IP is outside the host's subnet. Identified by MAC because the serial
+    isn't readable without Init, and Init isn't possible while wrong-subnet.
+    """
+
+    mac: str
+    current_ip: str | None = None
+    model: str | None = None
+
+
 class CameraReachabilityReport(BaseModel):
     expected: list[str]
     detected: list[str]
@@ -86,6 +97,7 @@ class CameraReachabilityReport(BaseModel):
     extra: list[str]
     cameras: list[CameraReachability]
     enumerated: bool
+    wrong_subnet: list[WrongSubnetCamera] = Field(default_factory=list)
     findings: list[Finding] = Field(default_factory=list)
 
     @property
@@ -232,6 +244,32 @@ def _parse_interface_ipv4(ip_addr_output: str) -> str | None:
     """Extract the first IPv4 address from `ip -4 addr show` output."""
     match = re.search(r"inet\s+(\d+\.\d+\.\d+\.\d+)", ip_addr_output)
     return match.group(1) if match else None
+
+
+def _get_host_interface_network(interface: str) -> ipaddress.IPv4Network | None:
+    """Return the interface's IPv4 network (e.g. 192.168.1.0/24) via ioctls.
+
+    Reads IP via SIOCGIFADDR and netmask via SIOCGIFNETMASK so the probe
+    works in containers without iproute2. Returns ``None`` when the
+    interface has no IPv4 assigned or ioctls are unsupported — caller
+    should skip the off-subnet camera check in that case.
+    """
+    try:
+        import fcntl
+        import socket
+        import struct
+
+        packed = struct.pack("256s", interface[:15].encode("ascii"))
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            ip_bytes = fcntl.ioctl(s.fileno(), 0x8915, packed)[20:24]  # SIOCGIFADDR
+            mask_bytes = fcntl.ioctl(s.fileno(), 0x891B, packed)[
+                20:24
+            ]  # SIOCGIFNETMASK
+        ip = socket.inet_ntoa(ip_bytes)
+        mask = socket.inet_ntoa(mask_bytes)
+        return ipaddress.IPv4Network(f"{ip}/{mask}", strict=False)
+    except (OSError, ValueError):
+        return None
 
 
 def _parse_lease_file(lease_file_text: str, now: datetime.datetime) -> int:
@@ -511,6 +549,104 @@ def _int_to_ipv4(value: int) -> str | None:
 
 
 CameraEnumerator = Callable[[], list[DetectedCamera]]
+WrongSubnetEnumerator = Callable[[], list[WrongSubnetCamera]]
+
+
+def _read_tl_string(node_map: Any, name: str) -> str | None:
+    try:
+        import PySpin  # type: ignore[import-untyped]
+
+        node = PySpin.CStringPtr(node_map.GetNode(name))
+        if PySpin.IsAvailable(node) and PySpin.IsReadable(node):
+            return node.GetValue()
+    except Exception:  # noqa: BLE001
+        return None
+    return None
+
+
+def _read_tl_int(node_map: Any, name: str) -> int | None:
+    try:
+        import PySpin  # type: ignore[import-untyped]
+
+        node = PySpin.CIntegerPtr(node_map.GetNode(name))
+        if PySpin.IsAvailable(node) and PySpin.IsReadable(node):
+            return int(node.GetValue())
+    except Exception:  # noqa: BLE001
+        return None
+    return None
+
+
+def _default_wrong_subnet_enumerator() -> list[WrongSubnetCamera]:
+    """Enumerate cameras visible to the GigE interface(s) but on the wrong
+    subnet. PySpin's TransportLayerInterface exposes these as "incompatible
+    devices" — readable via interface-level nodes without Init.
+    """
+    try:
+        import PySpin  # type: ignore[import-untyped]
+    except ImportError:
+        return []
+
+    found: list[WrongSubnetCamera] = []
+    system = PySpin.System.GetInstance()
+    try:
+        iface_list = system.GetInterfaces()
+        try:
+            for i in range(iface_list.GetSize()):
+                iface = iface_list.GetByIndex(i)
+                try:
+                    tl_node_map = iface.GetTLNodeMap()
+                    count_node = PySpin.CIntegerPtr(
+                        tl_node_map.GetNode("IncompatibleDeviceCount")
+                    )
+                    if not (
+                        PySpin.IsAvailable(count_node) and PySpin.IsReadable(count_node)
+                    ):
+                        continue
+                    count = count_node.GetValue()
+                    if count <= 0:
+                        continue
+                    selector = PySpin.CIntegerPtr(
+                        tl_node_map.GetNode("IncompatibleDeviceSelector")
+                    )
+                    if not (
+                        PySpin.IsAvailable(selector) and PySpin.IsWritable(selector)
+                    ):
+                        continue
+                    for idx in range(count):
+                        selector.SetValue(idx)
+                        mac_int = _read_tl_int(
+                            tl_node_map, "IncompatibleGevDeviceMACAddress"
+                        )
+                        ip_int = _read_tl_int(
+                            tl_node_map, "IncompatibleGevDeviceIPAddress"
+                        )
+                        model = _read_tl_string(
+                            tl_node_map, "IncompatibleDeviceModelName"
+                        )
+                        if mac_int is None:
+                            continue
+                        mac_hex = f"{mac_int:012x}"
+                        mac_str = ":".join(
+                            mac_hex[j : j + 2] for j in range(0, 12, 2)
+                        )
+                        found.append(
+                            WrongSubnetCamera(
+                                mac=mac_str,
+                                current_ip=_int_to_ipv4(ip_int)
+                                if ip_int is not None
+                                else None,
+                                model=model,
+                            )
+                        )
+                finally:
+                    del iface
+        finally:
+            iface_list.Clear()
+    finally:
+        # Don't release the system — simple_pyspin caches a singleton instance.
+        pass
+
+    return found
 
 
 def _default_camera_enumerator() -> list[DetectedCamera]:
@@ -564,30 +700,6 @@ def _default_camera_enumerator() -> list[DetectedCamera]:
     return detected
 
 
-def _read_tl_string(node_map: Any, name: str) -> str | None:
-    try:
-        import PySpin  # type: ignore[import-untyped]
-
-        node = PySpin.CStringPtr(node_map.GetNode(name))
-        if PySpin.IsAvailable(node) and PySpin.IsReadable(node):
-            return node.GetValue()
-    except Exception:  # noqa: BLE001
-        return None
-    return None
-
-
-def _read_tl_int(node_map: Any, name: str) -> int | None:
-    try:
-        import PySpin  # type: ignore[import-untyped]
-
-        node = PySpin.CIntegerPtr(node_map.GetNode(name))
-        if PySpin.IsAvailable(node) and PySpin.IsReadable(node):
-            return int(node.GetValue())
-    except Exception:  # noqa: BLE001
-        return None
-    return None
-
-
 def check_camera_reachability(
     expected_serials: list[str],
     recorder: RecorderLike | None = None,
@@ -595,6 +707,8 @@ def check_camera_reachability(
     include_unexpected: bool = False,
     enumerator: CameraEnumerator = _default_camera_enumerator,
     excluded_serials: set[str] | None = None,
+    host_interface_subnet: ipaddress.IPv4Network | None = None,
+    wrong_subnet_enumerator: WrongSubnetEnumerator | None = None,
 ) -> CameraReachabilityReport:
     """Report which expected cameras are reachable right now.
 
@@ -610,7 +724,46 @@ def check_camera_reachability(
     expected = [str(s) for s in expected_serials]
     recorder_has_cams = recorder is not None and bool(getattr(recorder, "cams", None))
 
+    # Wrong-subnet detection is independent of whether a config is loaded —
+    # the operator should see "camera X is on wrong subnet" even before
+    # they've selected anything, because that's the discoverability case.
+    wrong_subnet_findings: list[Finding] = []
+    wrong_subnet_list: list[WrongSubnetCamera] = []
+    if wrong_subnet_enumerator is not None:
+        try:
+            wrong_subnet_list = wrong_subnet_enumerator()
+        except Exception:  # noqa: BLE001
+            wrong_subnet_list = []
+        for cam in wrong_subnet_list:
+            wrong_subnet_findings.append(
+                Finding(
+                    level="error",
+                    code="camera_wrong_subnet",
+                    message=(
+                        f"Camera {cam.mac} is visible to the GigE interface but "
+                        f"on the wrong subnet (current IP {cam.current_ip or 'unknown'})."
+                    ),
+                    details={
+                        "mac": cam.mac,
+                        "current_ip": cam.current_ip,
+                        "model": cam.model,
+                    },
+                    remediation=[
+                        "Click 'Force IP' on this camera's row to re-IP it onto the camera subnet.",
+                        "If Force IP fails, run `make reset` to power-cycle the camera.",
+                    ],
+                )
+            )
+
     if not recorder_has_cams and not expected:
+        no_config_finding = Finding(
+            level="ok",
+            code="cameras_not_configured",
+            message=(
+                "No camera config loaded — select a config to enable "
+                "camera reachability checks."
+            ),
+        )
         return CameraReachabilityReport(
             expected=[],
             detected=[],
@@ -618,16 +771,8 @@ def check_camera_reachability(
             extra=[],
             cameras=[],
             enumerated=False,
-            findings=[
-                Finding(
-                    level="ok",
-                    code="cameras_not_configured",
-                    message=(
-                        "No camera config loaded — select a config to enable "
-                        "camera reachability checks."
-                    ),
-                )
-            ],
+            wrong_subnet=wrong_subnet_list,
+            findings=wrong_subnet_findings + [no_config_finding],
         )
 
     detected_cams: list[DetectedCamera] = []
@@ -801,6 +946,45 @@ def check_camera_reachability(
                     )
                 )
 
+    # GigE Vision discovery is link-local broadcast and crosses subnets, so a
+    # camera with a stale persistent IP or a link-local 169.254.x.x fallback
+    # still shows up in the enumerator. Init() over GVCP would then fail with
+    # "Spinnaker: Camera is on a wrong subnet. [-1015]" — flag it here so the
+    # operator finds out from `make health` instead of `make test`.
+    if host_interface_subnet is not None:
+        for cam_info in cameras:
+            if not cam_info.detected or cam_info.ip is None:
+                continue
+            try:
+                cam_ip = ipaddress.IPv4Address(cam_info.ip)
+            except (ValueError, ipaddress.AddressValueError):
+                continue
+            if cam_ip in host_interface_subnet:
+                continue
+            findings.append(
+                Finding(
+                    level="error",
+                    code="camera_off_subnet",
+                    message=(
+                        f"Camera {cam_info.serial} has IP {cam_info.ip}, not on "
+                        f"the host subnet {host_interface_subnet}. Init() will "
+                        f"fail with 'wrong subnet'."
+                    ),
+                    remediation=[
+                        "Run `python3 scripts/acquisition/force_camera_ips.py` "
+                        "inside the test container to ForceIP affected cameras.",
+                        "Power-cycle the camera so it re-requests a DHCP lease.",
+                        "If this happens repeatedly, the camera's DHCP request is "
+                        "racing the switch link-up; investigate dhcpd start order.",
+                    ],
+                    details={
+                        "serial": cam_info.serial,
+                        "camera_ip": cam_info.ip,
+                        "host_subnet": str(host_interface_subnet),
+                    },
+                )
+            )
+
     if not missing and expected:
         findings.append(
             Finding(
@@ -809,6 +993,10 @@ def check_camera_reachability(
                 message=f"All {len(expected)} expected cameras are reachable.",
             )
         )
+
+    # Wrong-subnet findings were computed up front (before the
+    # not-configured early-return) so they always surface.
+    findings.extend(wrong_subnet_findings)
 
     if not findings:
         findings.append(
@@ -826,6 +1014,7 @@ def check_camera_reachability(
         extra=extra,
         cameras=cameras,
         enumerated=enumerated_fresh,
+        wrong_subnet=wrong_subnet_list,
         findings=findings,
     )
 
@@ -994,6 +1183,7 @@ def run_health_check(
     skip_camera_enumeration: bool = False,
     ip_addr_runner: IpAddrRunner | None = None,
     camera_enumerator: CameraEnumerator | None = None,
+    wrong_subnet_enumerator: WrongSubnetEnumerator | None = None,
     now: datetime.datetime | None = None,
 ) -> HealthCheckReport:
     """Run DHCP + camera-reachability + host-network checks concurrently.
@@ -1044,6 +1234,12 @@ def run_health_check(
                 include_unexpected=include_unexpected_cameras,
                 enumerator=camera_enumerator or _default_camera_enumerator,
                 excluded_serials=excluded_serials,
+                host_interface_subnet=_get_host_interface_network(
+                    config.network_interface
+                ),
+                wrong_subnet_enumerator=(
+                    wrong_subnet_enumerator or _default_wrong_subnet_enumerator
+                ),
             )
         host_future = executor.submit(
             check_host_network,
@@ -1255,9 +1451,7 @@ def _default_sudo_runner(args: list[str], timeout_s: float = 5.0) -> tuple[str, 
     """
     cmd = ["sudo", "-n", *args]
     try:
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout_s
-        )
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_s)
         return (result.stdout + result.stderr).strip(), result.returncode
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
         return f"command failed: {e}", -1
@@ -1364,6 +1558,8 @@ __all__ = [
     "RemediationReport",
     "Severity",
     "SudoRunner",
+    "WrongSubnetCamera",
+    "WrongSubnetEnumerator",
     "check_camera_reachability",
     "check_dhcp_server",
     "check_host_network",

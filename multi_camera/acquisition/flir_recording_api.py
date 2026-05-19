@@ -10,6 +10,7 @@ from pydantic import BaseModel
 import concurrent.futures
 import threading
 import asyncio
+import ipaddress
 import json
 import time
 import cv2
@@ -97,6 +98,137 @@ def select_interface(interface, cameras):
 
     # If there are no cameras on the interface, return None
     return retval
+
+
+def _mac_str_to_int(mac: str) -> int:
+    """``aa:bb:cc:dd:ee:ff`` → integer, matches PySpin's MAC node format."""
+    return int(mac.replace(":", "").replace("-", ""), 16)
+
+
+def _ipv4_to_int(ip: str) -> int:
+    parts = [int(p) for p in ip.split(".")]
+    if len(parts) != 4:
+        raise ValueError(f"Invalid IPv4 address: {ip}")
+    return (parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]
+
+
+def _enumerate_camera_ips(
+    system: "PySpin.SystemPtr",
+    subnet: "ipaddress.IPv4Network",
+) -> tuple[set[str], list[tuple[str, int, str]]]:
+    """Walk every interface + camera attached to ``system``, return
+    ``(on_subnet_ips_in_use, off_subnet_camera_list)`` where the second
+    is a list of ``(serial, mac_int, current_ip)`` tuples for cameras
+    whose IP is NOT in ``subnet``.
+
+    Read-only — never calls ``Camera.Init()``. Used by
+    :func:`FlirRecorder.force_camera_ip` (and by the CLI rescue script)
+    both up-front (to pick a free IP and find the target) and again
+    after settle (to verify the camera moved). Caller is responsible
+    for the lifetime of ``system``; this just borrows it.
+    """
+    in_use: set[str] = set()
+    off: list[tuple[str, int, str]] = []
+    iface_list = system.GetInterfaces()
+    try:
+        for iface_idx in range(iface_list.GetSize()):
+            iface = iface_list.GetByIndex(iface_idx)
+            cam_list = iface.GetCameras()
+            try:
+                for cam_idx in range(cam_list.GetSize()):
+                    cam = cam_list.GetByIndex(cam_idx)
+                    try:
+                        tl = cam.GetTLDeviceNodeMap()
+                        serial_node = PySpin.CStringPtr(
+                            tl.GetNode("DeviceSerialNumber")
+                        )
+                        if not (
+                            PySpin.IsAvailable(serial_node)
+                            and PySpin.IsReadable(serial_node)
+                        ):
+                            continue
+                        serial = serial_node.GetValue()
+                        ip_node = PySpin.CIntegerPtr(
+                            tl.GetNode("GevDeviceIPAddress")
+                        )
+                        if not (
+                            PySpin.IsAvailable(ip_node)
+                            and PySpin.IsReadable(ip_node)
+                        ):
+                            continue
+                        cur_ip = str(ipaddress.IPv4Address(ip_node.GetValue()))
+                        try:
+                            cur_ip_addr = ipaddress.IPv4Address(cur_ip)
+                        except (ValueError, ipaddress.AddressValueError):
+                            continue
+                        if cur_ip_addr in subnet:
+                            in_use.add(cur_ip)
+                            continue
+                        mac_int = PySpin.CIntegerPtr(
+                            tl.GetNode("GevDeviceMACAddress")
+                        ).GetValue()
+                        off.append((serial, mac_int, cur_ip))
+                    finally:
+                        del cam
+            finally:
+                cam_list.Clear()
+    finally:
+        iface_list.Clear()
+    return in_use, off
+
+
+def _force_one_camera_ip(
+    system: "PySpin.SystemPtr",
+    target_mac: int,
+    new_ip_int: int,
+    mask_int: int,
+    gateway_int: int,
+) -> bool:
+    """Re-enumerate ``system``, find the camera whose MAC matches
+    ``target_mac``, write ``GevDeviceForce*`` on its
+    ``GetTLDeviceNodeMap()``, and execute ``GevDeviceForceIP``. All
+    writes and the Execute happen inside one ``CameraPtr`` scope so
+    Spinnaker targets through the handle. Returns ``True`` if the
+    target was found (the packet was sent), ``False`` otherwise.
+
+    Caller is responsible for waiting + verifying the camera actually
+    moved — see :func:`_enumerate_camera_ips`.
+    """
+    iface_list = system.GetInterfaces()
+    try:
+        for iface_idx in range(iface_list.GetSize()):
+            iface = iface_list.GetByIndex(iface_idx)
+            cam_list = iface.GetCameras()
+            try:
+                for cam_idx in range(cam_list.GetSize()):
+                    cam = cam_list.GetByIndex(cam_idx)
+                    try:
+                        tl = cam.GetTLDeviceNodeMap()
+                        this_mac = PySpin.CIntegerPtr(
+                            tl.GetNode("GevDeviceMACAddress")
+                        ).GetValue()
+                        if this_mac != target_mac:
+                            continue
+                        PySpin.CIntegerPtr(
+                            tl.GetNode("GevDeviceForceIPAddress")
+                        ).SetValue(new_ip_int)
+                        PySpin.CIntegerPtr(
+                            tl.GetNode("GevDeviceForceSubnetMask")
+                        ).SetValue(mask_int)
+                        PySpin.CIntegerPtr(
+                            tl.GetNode("GevDeviceForceGateway")
+                        ).SetValue(gateway_int)
+                        PySpin.CCommandPtr(
+                            tl.GetNode("GevDeviceForceIP")
+                        ).Execute()
+                        return True
+                    finally:
+                        del cam
+            finally:
+                cam_list.Clear()
+    finally:
+        iface_list.Clear()
+    return False
 
 
 def init_camera(
@@ -788,6 +920,10 @@ class FlirRecorder:
             trigger (bool): Enable network synchronized triggering
         """
 
+        # Flip status before any PySpin work so HealthIdlePoller's skip
+        # predicate covers init_camera's enumeration race window.
+        self.set_status("Configuring")
+
         self.config_file = config_file
 
         iface_list = self.system.GetInterfaces()
@@ -1440,7 +1576,8 @@ class FlirRecorder:
                     error_counters["exceptions"] += 1
                     err_text = str(e)
                     throttled_print(
-                        "exceptions", f"{camera_serial}: Failed to get image — {err_text}"
+                        "exceptions",
+                        f"{camera_serial}: Failed to get image — {err_text}",
                     )
                     if "-1002" in err_text or "no longer valid" in err_text:
                         self._fire_diagnostic_once(
@@ -1881,9 +2018,7 @@ class FlirRecorder:
 
         load_cmd = PySpin.CCommandPtr(nodemap.GetNode("UserSetLoad"))
         if not PySpin.IsAvailable(load_cmd) or not PySpin.IsWritable(load_cmd):
-            raise RuntimeError(
-                f"Camera {serial}: UserSetLoad command not executable"
-            )
+            raise RuntimeError(f"Camera {serial}: UserSetLoad command not executable")
         load_cmd.Execute()
         print(f"[restore_defaults] camera {serial} UserSetLoad executed")
 
@@ -1893,7 +2028,9 @@ class FlirRecorder:
         user_default = PySpin.CEnumerationPtr(nodemap.GetNode("UserSetDefault"))
         if PySpin.IsAvailable(user_default) and PySpin.IsWritable(user_default):
             user_default_entry = user_default.GetEntryByName("Default")
-            if user_default_entry is not None and PySpin.IsAvailable(user_default_entry):
+            if user_default_entry is not None and PySpin.IsAvailable(
+                user_default_entry
+            ):
                 user_default.SetIntValue(user_default_entry.GetValue())
 
         after_throughput = _read_int("DeviceLinkThroughputLimit")
@@ -1902,6 +2039,115 @@ class FlirRecorder:
             f"DeviceLinkThroughputLimit after: {after_throughput} "
             f"(delta: {None if before_throughput is None or after_throughput is None else after_throughput - before_throughput})"
         )
+
+    def force_camera_ip(
+        self,
+        mac: str,
+        ip: str | None = None,
+        mask: str | None = None,
+        gateway: str = "0.0.0.0",
+        settle_seconds: float = 5.0,
+        start_octet: int = 240,
+    ) -> dict:
+        """Force a camera that's on the wrong subnet to a target IP.
+
+        Re-enumerates ``system.GetInterfaces()`` per ForceIP call so each
+        write happens through a fresh ``CameraPtr`` whose Spinnaker
+        internal "selected device" state is aligned with the target;
+        reusing handles across calls was the targeting bug that an earlier
+        revision of this method hit (NULL-pointer derefs and force packets
+        landing on the wrong camera).
+
+        If ``ip`` is None the target subnet is auto-detected from
+        ``$NETWORK_INTERFACE`` via SIOCGIFNETMASK and the first free IP at
+        or above ``start_octet`` is chosen. Otherwise ``ip`` / ``mask`` /
+        ``gateway`` are used verbatim — operator override path.
+
+        After the ForceIP packet is sent, waits ``settle_seconds`` and
+        re-enumerates to confirm the camera actually moved. Raises
+        ``RuntimeError`` if the camera is still off-subnet (firmware
+        refused, dormant GVCP, switch ARP staleness — usual fix is
+        ``sudo service isc-dhcp-server restart`` then retry).
+
+        Caller must guarantee no recording is in progress, and (per
+        operator policy today) we only run this in laptop deployment mode.
+        """
+        target_mac_int = _mac_str_to_int(mac)
+
+        # Resolve target subnet for the IP we're about to pick (or to verify
+        # an operator-supplied IP against). Operator override skips the
+        # auto-detect since they're telling us where to put the camera.
+        if ip is None:
+            interface = os.environ.get("NETWORK_INTERFACE")
+            if not interface:
+                raise RuntimeError(
+                    "Cannot auto-pick an IP: $NETWORK_INTERFACE not set. "
+                    "Pass an explicit ip=... or set NETWORK_INTERFACE."
+                )
+            # Local import to avoid a circular dep at module-load time
+            # (health imports nothing from flir_recording_api, but
+            # multi_camera.acquisition imports both).
+            from multi_camera.acquisition.health import _get_host_interface_network
+
+            subnet = _get_host_interface_network(interface)
+            if subnet is None:
+                raise RuntimeError(
+                    f"Could not detect subnet on {interface}; pass ip=... "
+                    f"to override."
+                )
+            mask_int = _ipv4_to_int(str(subnet.netmask))
+            in_use_ips, off_subnet = _enumerate_camera_ips(self.system, subnet)
+            target_off = [
+                (s, m, cur) for (s, m, cur) in off_subnet if m == target_mac_int
+            ]
+            if not target_off:
+                raise ValueError(
+                    f"No off-subnet camera with MAC {mac} on any interface"
+                )
+            network_base = _ipv4_to_int(str(subnet.network_address))
+            new_ip = None
+            for octet in range(start_octet, 255):
+                candidate = str(ipaddress.IPv4Address(network_base + octet))
+                if candidate not in in_use_ips:
+                    new_ip = candidate
+                    break
+            if new_ip is None:
+                raise RuntimeError(
+                    f"No free IPs in {subnet} at or above .{start_octet}"
+                )
+            ip = new_ip
+        else:
+            if mask is None:
+                mask = "255.255.255.0"
+            subnet = None  # operator override; skip auto-verify against subnet
+            mask_int = _ipv4_to_int(mask)
+
+        new_ip_int = _ipv4_to_int(ip)
+        gateway_int = _ipv4_to_int(gateway)
+
+        if not _force_one_camera_ip(
+            self.system, target_mac_int, new_ip_int, mask_int, gateway_int
+        ):
+            raise ValueError(
+                f"No camera with MAC {mac} found on re-enumeration"
+            )
+
+        time.sleep(settle_seconds)
+
+        # Verify the camera actually left the off-subnet list. Skip
+        # verification when the operator overrode the subnet — we don't
+        # know what "on-subnet" means in that case.
+        if subnet is not None:
+            _, still_off = _enumerate_camera_ips(self.system, subnet)
+            if target_mac_int in {m for _, m, _ in still_off}:
+                raise RuntimeError(
+                    f"Camera {mac} still off-subnet {settle_seconds}s after "
+                    f"ForceIP. The camera is ignoring GVCP (stale switch ARP "
+                    f"or dormant state). Try `sudo service isc-dhcp-server "
+                    f"restart`, then retry; power-cycle as a last resort."
+                )
+
+        return {"mac": mac, "ip": ip}
 
     async def reset_cameras(self):
         """Reset all the cameras and reopen the system"""

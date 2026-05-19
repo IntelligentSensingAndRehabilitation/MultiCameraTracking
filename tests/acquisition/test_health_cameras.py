@@ -14,6 +14,7 @@ from pathlib import Path
 from multi_camera.acquisition.health import (
     DetectedCamera,
     HealthConfig,
+    WrongSubnetCamera,
     _int_to_ipv4,
     _snapshot_from_recorder,
     check_camera_reachability,
@@ -187,10 +188,26 @@ class TestThroughputOutlier:
 
         def fake_enum() -> list[DetectedCamera]:
             return [
-                DetectedCamera(serial="A", link_speed_mbps=1000, link_throughput_bytes_per_sec=92_000_000),
-                DetectedCamera(serial="B", link_speed_mbps=1000, link_throughput_bytes_per_sec=92_000_000),
-                DetectedCamera(serial="C", link_speed_mbps=1000, link_throughput_bytes_per_sec=92_000_000),
-                DetectedCamera(serial="D", link_speed_mbps=1000, link_throughput_bytes_per_sec=12_000_000),
+                DetectedCamera(
+                    serial="A",
+                    link_speed_mbps=1000,
+                    link_throughput_bytes_per_sec=92_000_000,
+                ),
+                DetectedCamera(
+                    serial="B",
+                    link_speed_mbps=1000,
+                    link_throughput_bytes_per_sec=92_000_000,
+                ),
+                DetectedCamera(
+                    serial="C",
+                    link_speed_mbps=1000,
+                    link_throughput_bytes_per_sec=92_000_000,
+                ),
+                DetectedCamera(
+                    serial="D",
+                    link_speed_mbps=1000,
+                    link_throughput_bytes_per_sec=12_000_000,
+                ),
             ]
 
         report = check_camera_reachability(
@@ -206,7 +223,11 @@ class TestThroughputOutlier:
     def test_uniform_throughput_no_outlier(self) -> None:
         def fake_enum() -> list[DetectedCamera]:
             return [
-                DetectedCamera(serial=str(i), link_speed_mbps=1000, link_throughput_bytes_per_sec=92_000_000)
+                DetectedCamera(
+                    serial=str(i),
+                    link_speed_mbps=1000,
+                    link_throughput_bytes_per_sec=92_000_000,
+                )
                 for i in range(4)
             ]
 
@@ -412,7 +433,9 @@ class TestRunHealthCheck:
         assert elapsed < 0.2, f"run_health_check took {elapsed:.3f}s, expected <0.2s"
         assert report.cameras.enumerated is False
 
-    def test_skip_camera_enumeration_does_not_call_enumerator(self, tmp_path: Path) -> None:
+    def test_skip_camera_enumeration_does_not_call_enumerator(
+        self, tmp_path: Path
+    ) -> None:
         """During recording, run_health_check must skip the PySpin enum
         (recorder owns the handles) but still run DHCP / host-network checks.
         """
@@ -473,3 +496,189 @@ class TestHealthConfigFromEnv:
         cfg = HealthConfig.from_env({})
         assert cfg.deployment_mode == "laptop"
         assert cfg.network_interface == "enp5s0"
+
+
+class TestCameraOffSubnet:
+    """GigE Vision discovery is link-local broadcast and crosses subnets, so a
+    camera with a stale persistent IP or a 169.254.x.x link-local fallback
+    still enumerates. ``check_camera_reachability`` must flag these explicitly
+    — pre-fix, ``make health`` reported "all reachable" while ``Init()`` failed
+    with ``Spinnaker: Camera is on a wrong subnet. [-1015]``.
+    """
+
+    def test_off_subnet_camera_produces_error_finding(self) -> None:
+        import ipaddress
+
+        def fake_enum() -> list[DetectedCamera]:
+            return [
+                DetectedCamera(serial="111", ip="192.168.1.51"),
+                DetectedCamera(serial="222", ip="169.254.172.46"),
+            ]
+
+        report = check_camera_reachability(
+            expected_serials=["111", "222"],
+            recorder=None,
+            enumerator=fake_enum,
+            host_interface_subnet=ipaddress.IPv4Network("192.168.1.0/24"),
+        )
+        off_subnet = [f for f in report.findings if f.code == "camera_off_subnet"]
+        assert len(off_subnet) == 1
+        assert off_subnet[0].level == "error"
+        assert "222" in off_subnet[0].message
+        assert "169.254.172.46" in off_subnet[0].message
+        assert off_subnet[0].details["serial"] == "222"
+        assert off_subnet[0].details["host_subnet"] == "192.168.1.0/24"
+
+    def test_all_on_subnet_emits_no_off_subnet_finding(self) -> None:
+        import ipaddress
+
+        def fake_enum() -> list[DetectedCamera]:
+            return [
+                DetectedCamera(serial="111", ip="192.168.1.51"),
+                DetectedCamera(serial="222", ip="192.168.1.52"),
+            ]
+
+        report = check_camera_reachability(
+            expected_serials=["111", "222"],
+            recorder=None,
+            enumerator=fake_enum,
+            host_interface_subnet=ipaddress.IPv4Network("192.168.1.0/24"),
+        )
+        assert not any(f.code == "camera_off_subnet" for f in report.findings)
+
+    def test_unknown_subnet_skips_check(self) -> None:
+        def fake_enum() -> list[DetectedCamera]:
+            return [DetectedCamera(serial="111", ip="169.254.1.1")]
+
+        report = check_camera_reachability(
+            expected_serials=["111"],
+            recorder=None,
+            enumerator=fake_enum,
+            host_interface_subnet=None,
+        )
+        assert not any(f.code == "camera_off_subnet" for f in report.findings)
+
+    def test_camera_without_ip_is_skipped(self) -> None:
+        import ipaddress
+
+        def fake_enum() -> list[DetectedCamera]:
+            return [DetectedCamera(serial="111", ip=None)]
+
+        report = check_camera_reachability(
+            expected_serials=["111"],
+            recorder=None,
+            enumerator=fake_enum,
+            host_interface_subnet=ipaddress.IPv4Network("192.168.1.0/24"),
+        )
+        assert not any(f.code == "camera_off_subnet" for f in report.findings)
+
+    def test_multiple_off_subnet_each_get_their_own_finding(self) -> None:
+        import ipaddress
+
+        def fake_enum() -> list[DetectedCamera]:
+            return [
+                DetectedCamera(serial="aaa", ip="169.254.1.1"),
+                DetectedCamera(serial="bbb", ip="192.168.1.51"),
+                DetectedCamera(serial="ccc", ip="10.0.0.5"),
+            ]
+
+        report = check_camera_reachability(
+            expected_serials=["aaa", "bbb", "ccc"],
+            recorder=None,
+            enumerator=fake_enum,
+            host_interface_subnet=ipaddress.IPv4Network("192.168.1.0/24"),
+        )
+        off = sorted(
+            (f.details["serial"], f.details["camera_ip"])
+            for f in report.findings
+            if f.code == "camera_off_subnet"
+        )
+        assert off == [("aaa", "169.254.1.1"), ("ccc", "10.0.0.5")]
+
+    def test_severity_becomes_error_when_off_subnet_present(self) -> None:
+        import ipaddress
+
+        def fake_enum() -> list[DetectedCamera]:
+            return [DetectedCamera(serial="111", ip="169.254.1.1")]
+
+        report = check_camera_reachability(
+            expected_serials=["111"],
+            recorder=None,
+            enumerator=fake_enum,
+            host_interface_subnet=ipaddress.IPv4Network("192.168.1.0/24"),
+        )
+        assert report.severity == "error"
+
+
+class TestWrongSubnetDetection:
+    """``check_camera_reachability`` runs an optional ``wrong_subnet_enumerator``
+    that surfaces cameras visible to PySpin's TransportLayer as "incompatible"
+    — i.e. on a subnet PySpin's GVCP knows is unreachable. Distinct from the
+    ``TestCameraOffSubnet`` path which compares already-detected camera IPs
+    against the host NIC's subnet; this one finds cameras that don't appear
+    in the regular enumeration at all.
+    """
+
+    def test_wrong_subnet_camera_emits_finding(self) -> None:
+        def fake_enum() -> list[DetectedCamera]:
+            return []
+
+        def fake_wrong_subnet() -> list[WrongSubnetCamera]:
+            return [
+                WrongSubnetCamera(
+                    mac="aa:bb:cc:dd:ee:ff",
+                    current_ip="10.0.0.42",
+                    model="Blackfly S",
+                )
+            ]
+
+        report = check_camera_reachability(
+            expected_serials=[],
+            recorder=None,
+            enumerator=fake_enum,
+            wrong_subnet_enumerator=fake_wrong_subnet,
+        )
+
+        assert len(report.wrong_subnet) == 1
+        assert report.wrong_subnet[0].mac == "aa:bb:cc:dd:ee:ff"
+        wrong = [f for f in report.findings if f.code == "camera_wrong_subnet"]
+        assert len(wrong) == 1
+        assert wrong[0].level == "error"
+        assert wrong[0].remediation and any(
+            "Force IP" in s for s in wrong[0].remediation
+        )
+
+    def test_no_wrong_subnet_no_finding(self) -> None:
+        def fake_enum() -> list[DetectedCamera]:
+            return [DetectedCamera(serial="111", link_speed_mbps=1000)]
+
+        def fake_wrong_subnet() -> list[WrongSubnetCamera]:
+            return []
+
+        report = check_camera_reachability(
+            expected_serials=["111"],
+            recorder=None,
+            enumerator=fake_enum,
+            wrong_subnet_enumerator=fake_wrong_subnet,
+        )
+        assert report.wrong_subnet == []
+        assert not any(f.code == "camera_wrong_subnet" for f in report.findings)
+
+    def test_enumerator_raising_does_not_break_check(self) -> None:
+        """A failing wrong-subnet enumerator must not crash the rest of
+        the reachability check — fall back to empty list.
+        """
+
+        def fake_enum() -> list[DetectedCamera]:
+            return [DetectedCamera(serial="111", link_speed_mbps=1000)]
+
+        def boom() -> list[WrongSubnetCamera]:
+            raise RuntimeError("PySpin exploded")
+
+        report = check_camera_reachability(
+            expected_serials=["111"],
+            recorder=None,
+            enumerator=fake_enum,
+            wrong_subnet_enumerator=boom,
+        )
+        assert report.wrong_subnet == []

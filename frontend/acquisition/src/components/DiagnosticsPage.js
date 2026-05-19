@@ -1,6 +1,6 @@
 import React, { useContext, useEffect, useState } from 'react';
 import { Container, Card, Badge, Button, ListGroup, Accordion, Table } from 'react-bootstrap';
-import { AcquisitionState } from '../AcquisitionApi';
+import { AcquisitionState, isBusyPySpinState } from '../AcquisitionApi';
 
 const severityVariant = {
     ok: 'success',
@@ -85,6 +85,7 @@ const HostHealthPanel = () => {
     const dhcpFindings = (dhcp && dhcp.findings) || [];
     const cameraFindings = (cameras && cameras.findings) || [];
     const perCamera = (cameras && cameras.cameras) || [];
+    const wrongSubnet = (cameras && cameras.wrong_subnet) || [];
     const hostFindings = (host_network && host_network.findings) || [];
     const expectedList = (cameras && cameras.expected) || [];
     const detectedList = (cameras && cameras.detected) || [];
@@ -142,6 +143,32 @@ const HostHealthPanel = () => {
                                     <tr><td>Extra</td><td>{extraList.join(', ') || '—'}</td></tr>
                                 </tbody>
                             </Table>
+                            {wrongSubnet.length > 0 && (
+                                <Table size="sm" striped bordered className="mb-2">
+                                    <thead>
+                                        <tr>
+                                            <th colSpan={3}>Cameras on wrong subnet</th>
+                                            <th>Action</th>
+                                        </tr>
+                                        <tr>
+                                            <th>MAC</th>
+                                            <th>Current IP</th>
+                                            <th>Model</th>
+                                            <th></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {wrongSubnet.map((c) => (
+                                            <tr key={c.mac}>
+                                                <td><code>{c.mac}</code></td>
+                                                <td>{c.current_ip || '—'}</td>
+                                                <td>{c.model || '—'}</td>
+                                                <td><ForceIpButton mac={c.mac} /></td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </Table>
+                            )}
                             {perCamera.length > 0 && (
                                 <Table size="sm" striped bordered className="mb-2">
                                     <thead>
@@ -308,7 +335,7 @@ const ExcludeCameraButton = ({ serial, excluded }) => {
     const { setCameraExcluded, recordingSystemStatus } = useContext(AcquisitionState);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState(null);
-    const isRecording = recordingSystemStatus === 'Recording';
+    const isPySpinBusy = isBusyPySpinState(recordingSystemStatus);
 
     const handleClick = async () => {
         const target = !excluded;
@@ -336,12 +363,56 @@ const ExcludeCameraButton = ({ serial, excluded }) => {
         <div>
             <Button
                 onClick={handleClick}
-                disabled={busy || isRecording}
+                disabled={busy || isPySpinBusy}
                 size="sm"
                 variant={excluded ? 'outline-success' : 'outline-secondary'}
-                title={isRecording ? 'Stop the recording first' : (excluded ? 'Re-include this camera in the recording' : 'Skip this camera in this session')}
+                title={isPySpinBusy
+                    ? `Wait until the system is Idle (currently ${recordingSystemStatus})`
+                    : (excluded ? 'Re-include this camera in the recording' : 'Skip this camera in this session')}
             >
                 {busy ? '…' : (excluded ? 'Include' : 'Exclude')}
+            </Button>
+            {error && <div className="text-danger small mt-1">{error}</div>}
+        </div>
+    );
+};
+
+const ForceIpButton = ({ mac }) => {
+    const { forceIpCamera, recordingSystemStatus } = useContext(AcquisitionState);
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState(null);
+    const isPySpinBusy = isBusyPySpinState(recordingSystemStatus);
+
+    const handleClick = async () => {
+        const ok = window.confirm(
+            `Force-IP camera ${mac}? The system will auto-assign the next free address ` +
+            'on the camera subnet. The camera will take a few seconds to reappear.'
+        );
+        if (!ok) return;
+        setBusy(true);
+        setError(null);
+        try {
+            await forceIpCamera(mac);
+        } catch (e) {
+            const msg = (e && e.response && e.response.data && e.response.data.detail) || e.message;
+            setError(msg || 'Force IP failed.');
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    return (
+        <div>
+            <Button
+                onClick={handleClick}
+                disabled={busy || isPySpinBusy}
+                size="sm"
+                variant="outline-warning"
+                title={isPySpinBusy
+                    ? `Wait until the system is Idle (currently ${recordingSystemStatus})`
+                    : 'Re-IP this camera onto the camera subnet'}
+            >
+                {busy ? '…' : 'Force IP'}
             </Button>
             {error && <div className="text-danger small mt-1">{error}</div>}
         </div>
@@ -352,7 +423,7 @@ const RestartAcquisitionButton = () => {
     const { restartAcquisition, recordingSystemStatus } = useContext(AcquisitionState);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState(null);
-    const isRecording = recordingSystemStatus === 'Recording';
+    const isPySpinBusy = isBusyPySpinState(recordingSystemStatus);
 
     const handleClick = async () => {
         setBusy(true);
@@ -371,10 +442,12 @@ const RestartAcquisitionButton = () => {
         <div>
             <Button
                 onClick={handleClick}
-                disabled={busy || isRecording}
+                disabled={busy || isPySpinBusy}
                 size="sm"
                 variant="outline-warning"
-                title={isRecording ? 'Stop the recording before restarting' : 'Re-init PySpin and re-run PTP sync'}
+                title={isPySpinBusy
+                    ? `Wait until the system is Idle (currently ${recordingSystemStatus})`
+                    : 'Re-init PySpin and re-run PTP sync'}
             >
                 {busy ? 'Restarting…' : 'Restart acquisition'}
             </Button>

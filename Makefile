@@ -1,7 +1,7 @@
 # This is the build file for the docker. Note this should be run from the
 # parent directory for the necessary files to be available
 
-.PHONY: clean build run run-no-checks _docker-run run-mocap-test test test-matrix test-diagnostics validate-sync diag-recording diag-analyze health health-fix setup-env install-sudoers
+.PHONY: clean build run run-no-checks _docker-run run-mocap-test test test-matrix test-diagnostics validate-sync diag-recording diag-analyze health health-fix setup-env install-sudoers force-ip
 
 DIR := ${CURDIR}
 
@@ -90,6 +90,14 @@ health:
 health-fix:
 	docker compose run --rm --entrypoint python3 test \
 		-m multi_camera.acquisition.health --remediate
+
+# Rescue cameras stuck on link-local 169.254.x.x by broadcasting a Spinnaker
+# ForceIP. Volatile: cameras revert to their previous IP config on next
+# power-cycle, so this is for unblocking the current session, not a
+# permanent fix. Pair with `make health` to confirm afterwards.
+force-ip:
+	docker compose run --rm --entrypoint python3 test \
+		/Mocap/scripts/acquisition/force_camera_ips.py
 
 # Install /etc/sudoers.d/mocap-acquisition so start_acquisition.sh's
 # auto-remediation path (MTU/rmem/DHCP) and `make health-fix` can run
