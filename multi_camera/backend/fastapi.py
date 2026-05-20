@@ -1135,10 +1135,15 @@ async def validate_sync():
 @api_router.get("/prior_recordings", response_model=List[PriorRecordings])
 async def get_prior_recordings(db=Depends(db_dependency)) -> List[PriorRecordings]:
     state = get_global_state()
+    # Without a participant, get_recordings walks every participant ×
+    # every session × every recording in the DB, plus an N+1 Imported
+    # lookup per session — multi-second on a populated lab database.
+    # Skip the walk: the operator has no meaningful use for "every
+    # recording ever" before they've picked a participant, and the
+    # table shows nothing useful in that state anyway.
     if state.current_session is None:
-        participant_name = None
-    else:
-        participant_name = state.current_session.participant_name
+        return []
+    participant_name = state.current_session.participant_name
     prior_recordings = []
     db_recordings: ParticipantOut = get_recordings(
         db, participant_name=participant_name
