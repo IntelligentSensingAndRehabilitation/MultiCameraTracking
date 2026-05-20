@@ -931,6 +931,11 @@ class FlirRecorder:
         # camera_config_hash on subsequent trials.
         self._config_hash_salt: str = ""
 
+        # Populated by configure_cameras when a YAML is selected. Default
+        # None so accessors (bump_config_hash, etc.) can detect the
+        # "no config loaded yet" state without an AttributeError.
+        self.camera_config = None
+
         self.set_status("Uninitialized")
 
         self.pixel_format_conversion = {

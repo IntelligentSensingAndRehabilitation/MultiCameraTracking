@@ -433,9 +433,10 @@ const ForceIpButton = ({ mac }) => {
 };
 
 const RecalibrateRigButton = () => {
-    const { markRigRecalibrate } = useContext(AcquisitionState);
+    const { markRigRecalibrate, currentConfig } = useContext(AcquisitionState);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState(null);
+    const noConfig = !currentConfig;
 
     const handleClick = async () => {
         const ok = window.confirm(
@@ -461,10 +462,12 @@ const RecalibrateRigButton = () => {
         <div>
             <Button
                 onClick={handleClick}
-                disabled={busy}
+                disabled={busy || noConfig}
                 size="sm"
                 variant="outline-info"
-                title="Force a new camera_config_hash for subsequent trials (after a camera was bumped/moved)"
+                title={noConfig
+                    ? 'Select a camera config first'
+                    : 'Force a new camera_config_hash for subsequent trials (after a camera was bumped/moved)'}
             >
                 {busy ? '…' : 'Camera moved'}
             </Button>

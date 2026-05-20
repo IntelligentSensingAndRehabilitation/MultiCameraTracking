@@ -154,6 +154,35 @@ class TestEndpointPersistsSalt:
         result = asyncio.run(body())
         assert result["status"] == "success"
 
+    def test_recalibrate_409_when_no_config_loaded(self, tmp_path: Path) -> None:
+        """Clicking 'Camera moved' before a config has been selected would
+        crash bump_config_hash (no camera_config to hash). 409 instead.
+        """
+        from fastapi import HTTPException
+
+        recorder = mock.MagicMock()
+        recorder.camera_config = None
+        recorder.bump_config_hash = mock.MagicMock(return_value="abc123")
+
+        state = backend_fastapi.GlobalState()
+        state.current_session = _make_session(tmp_path)
+        state.acquisition = recorder
+        state.recording_status = "Idle"
+
+        async def body():
+            with mock.patch.object(
+                backend_fastapi, "get_global_state", return_value=state
+            ), mock.patch.object(
+                backend_fastapi, "broadcast_event", new=mock.MagicMock()
+            ):
+                with pytest.raises(HTTPException) as exc:
+                    await backend_fastapi.mark_rig_recalibrate()
+                assert exc.value.status_code == 409
+                assert "config" in exc.value.detail.lower()
+
+        asyncio.run(body())
+        recorder.bump_config_hash.assert_not_called()
+
 
 class TestSetSessionRestoresSalt:
     """Mid-session restart path: operator reopens the same participant +

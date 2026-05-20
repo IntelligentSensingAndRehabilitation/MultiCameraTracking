@@ -601,12 +601,23 @@ async def _get_health_report(force_refresh: bool = False) -> HealthCheckReport:
 
         expected = _expected_serials(state.acquisition)
         recording_state = state.recording_status or "Idle"
+        # PySpin GigE enumeration (used for both regular discovery and
+        # wrong-subnet detection) is the slow leg — multiple seconds in
+        # network mode. Skip it when there's no config loaded: nothing to
+        # compare detected cameras against, and the operator already sees
+        # 'select a config' guidance from cameras_not_configured.
+        recorder_has_cams = bool(getattr(state.acquisition, "cams", None))
+        skip_enum = (
+            _should_skip_camera_enumeration(recording_state)
+            or (not expected and not recorder_has_cams)
+        )
         report = await run_in_threadpool(
             run_health_check,
             config=state.health_config,
             expected_serials=expected,
             recorder=state.acquisition,
             recording_state=recording_state,
+            skip_camera_enumeration=skip_enum,
         )
         state._health_cache = report
         state._health_cache_ts = now_mono
@@ -1470,6 +1481,14 @@ async def mark_rig_recalibrate():
     pose). Returns the new hash.
     """
     state: GlobalState = get_global_state()
+    if not getattr(state.acquisition, "camera_config", None):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "No camera config loaded — select a config before marking "
+                "the rig for recalibration."
+            ),
+        )
     new_hash = await run_in_threadpool(
         state.acquisition.bump_config_hash, "rig recalibrate"
     )
