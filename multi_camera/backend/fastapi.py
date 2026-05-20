@@ -100,6 +100,41 @@ class Session(BaseModel):
     recording_path: str
 
 
+# Sidecar file inside the session directory that persists the
+# config_hash_salt for the active session. Survives a mid-session
+# container restart (operator reopens the same participant + date and
+# the salt is restored); a brand-new session next day has no sidecar
+# and starts from the original un-bumped hash.
+_SESSION_SALT_FILENAME = ".config_hash_salt"
+
+
+def _session_salt_path(session: "Session | None") -> "Path | None":
+    if session is None or not session.recording_path:
+        return None
+    return Path(session.recording_path) / _SESSION_SALT_FILENAME
+
+
+def _persist_session_salt(session: "Session | None", salt: str) -> None:
+    path = _session_salt_path(session)
+    if path is None:
+        return
+    try:
+        path.write_text(salt)
+    except OSError as e:
+        acquisition_logger.warning(f"Could not write {path}: {e}")
+
+
+def _load_session_salt(session: "Session | None") -> str:
+    path = _session_salt_path(session)
+    if path is None or not path.exists():
+        return ""
+    try:
+        return path.read_text().strip()
+    except OSError as e:
+        acquisition_logger.warning(f"Could not read {path}: {e}")
+        return ""
+
+
 @dataclass
 class GlobalState:
     preview_queue: asyncio.Queue = field(default_factory=asyncio.Queue)
@@ -740,6 +775,16 @@ async def set_session(
     )
     state.last_session_insights = set()
     print("New session: ", state.current_session)
+
+    # Restore the rig-recalibrate salt if a sidecar exists in this
+    # session's directory — handles the mid-session restart case where
+    # the operator clicked 'Camera moved', then the container restarted,
+    # then they reopened the same participant + date.
+    saved_salt = _load_session_salt(state.current_session)
+    if state.acquisition is not None:
+        state.acquisition.set_salt(saved_salt)
+        if saved_salt:
+            print(f"Restored config_hash_salt from {_session_salt_path(state.current_session)}")
 
     if fin and fin.strip():
         from multi_camera.backend.recording_db import store_fin
@@ -1428,6 +1473,11 @@ async def mark_rig_recalibrate():
     new_hash = await run_in_threadpool(
         state.acquisition.bump_config_hash, "rig recalibrate"
     )
+    # Persist the salt scoped to the active session so a mid-session
+    # container restart preserves the bumped state. A new session next
+    # day gets its own sidecar (or none) and starts from the original
+    # un-salted hash.
+    _persist_session_salt(state.current_session, state.acquisition.get_salt())
     broadcast_event(
         event_type="session_insight",
         level="warn",

@@ -970,6 +970,18 @@ class FlirRecorder:
         )
         return new_hash
 
+    def get_salt(self) -> str:
+        """Current config_hash_salt. Empty string means no rig bump has
+        happened yet (or the salt was cleared)."""
+        return self._config_hash_salt
+
+    def set_salt(self, salt: str) -> None:
+        """Restore the config_hash_salt from external storage (typically a
+        session-scoped sidecar file maintained by the backend). Empty
+        string clears it back to the pre-bump default.
+        """
+        self._config_hash_salt = salt
+
     def get_detailed_processor_info(self):
         cpu_info = ""
 

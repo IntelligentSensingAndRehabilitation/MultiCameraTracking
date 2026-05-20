@@ -728,6 +728,27 @@ class TestBumpConfigHash:
         ).hexdigest()[:10]
         assert rec.get_config_hash(rec.camera_config) == expected
 
+    def test_set_salt_restores_bumped_hash(self) -> None:
+        """set_salt(get_salt()) round-trip reproduces the bumped hash —
+        the contract the backend's session-sidecar persistence relies on.
+        """
+        rec_a = self._make_recorder()
+        bumped_hash = rec_a.bump_config_hash()
+        salt = rec_a.get_salt()
+
+        rec_b = self._make_recorder()
+        assert rec_b.get_config_hash(rec_b.camera_config) != bumped_hash
+        rec_b.set_salt(salt)
+        assert rec_b.get_config_hash(rec_b.camera_config) == bumped_hash
+
+    def test_set_salt_empty_clears(self) -> None:
+        rec = self._make_recorder()
+        unsalted = rec.get_config_hash(rec.camera_config)
+        rec.bump_config_hash()
+        assert rec.get_config_hash(rec.camera_config) != unsalted
+        rec.set_salt("")
+        assert rec.get_config_hash(rec.camera_config) == unsalted
+
 
 class TestClassifySpinnakerError:
     """The classifier translates Spinnaker exception strings into
