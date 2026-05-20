@@ -432,6 +432,20 @@ def _expected_serials(recorder: FlirRecorder | None) -> list[str]:
     return [str(s) for s in camera_info.keys()]
 
 
+def _no_cameras_to_enumerate(recorder: FlirRecorder | None) -> bool:
+    """True when neither the config nor the live recorder names any cameras.
+
+    Used to short-circuit the slow PySpin GigE enumeration: no expected
+    serials AND no held cams means there's nothing to compare detected
+    cameras against, so the GUI gets ``cameras_not_configured`` guidance
+    fast and the idle poller doesn't churn the GigE network in the
+    background.
+    """
+    return not _expected_serials(recorder) and not bool(
+        getattr(recorder, "cams", None)
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Bind module-level loop to uvicorn's; worker-thread broadcasts dispatch onto it.
@@ -462,11 +476,13 @@ async def lifespan(app: FastAPI):
             expected_serials=_expected_serials(state.acquisition),
             recorder=state.acquisition,
             recording_state=state.recording_status or "Idle",
-            # See _BUSY_PYSPIN_STATES: skip enumeration whenever the recorder
-            # is holding handles or writing camera registers. DHCP and
-            # host-network checks still run.
-            skip_camera_enumeration=_should_skip_camera_enumeration(
-                state.recording_status
+            # Skip the slow PySpin GigE enumeration whenever the recorder
+            # is holding handles / writing registers (see _BUSY_PYSPIN_STATES)
+            # OR when there's no config loaded so nothing's worth enumerating
+            # against. DHCP and host-network arms always run.
+            skip_camera_enumeration=(
+                _should_skip_camera_enumeration(state.recording_status)
+                or _no_cameras_to_enumerate(state.acquisition)
             ),
         ),
         on_poll=_on_idle_health_poll,
@@ -606,10 +622,9 @@ async def _get_health_report(force_refresh: bool = False) -> HealthCheckReport:
         # network mode. Skip it when there's no config loaded: nothing to
         # compare detected cameras against, and the operator already sees
         # 'select a config' guidance from cameras_not_configured.
-        recorder_has_cams = bool(getattr(state.acquisition, "cams", None))
         skip_enum = (
             _should_skip_camera_enumeration(recording_state)
-            or (not expected and not recorder_has_cams)
+            or _no_cameras_to_enumerate(state.acquisition)
         )
         report = await run_in_threadpool(
             run_health_check,
