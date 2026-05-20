@@ -1564,6 +1564,14 @@ class FlirRecorder:
         config_metadata["frame_skip_events"] = self._frame_skip_events
         config_metadata["ptp_jump_events"] = self._ptp_jump_events
 
+        # Surface the hash this trial will land under so the operator can
+        # verify rig-recalibrate behavior without opening the JSON sidecar.
+        salt_state = "set" if self._config_hash_salt else "empty"
+        print(
+            f"[config_hash] trial recording under camera_config_hash="
+            f"{config_metadata.get('camera_config_hash', '?')} (salt={salt_state})"
+        )
+
         # Set max_frames = self.video_segment_len. self.video_segment_len is either set to max_frames or
         # a value from the config file.
         max_frames = self.video_segment_len
