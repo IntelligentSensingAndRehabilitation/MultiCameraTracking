@@ -1,4 +1,4 @@
-import React, { useContext, useEffect, useState } from 'react';
+import React, { useContext, useState } from 'react';
 import { Container, Card, Badge, Button, ListGroup, Accordion, Table, Row, Col } from 'react-bootstrap';
 import { AcquisitionState, isBusyPySpinState } from '../AcquisitionApi';
 
@@ -242,12 +242,12 @@ const CurrentSessionPanel = () => {
     const { sessionSummary, fetchSessionSummary } = useContext(AcquisitionState);
     const [refreshing, setRefreshing] = useState(false);
 
-    useEffect(() => {
-        fetchSessionSummary();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+    // Deliberately no auto-fetch on mount. _build_session_summary walks
+    // every trial JSON in the session directory and can take seconds with
+    // a populated session — running it on every Diagnostics tab visit is
+    // wasted work the operator didn't ask for. Wait for an explicit click.
 
-    const handleRefresh = async () => {
+    const handleGenerate = async () => {
         setRefreshing(true);
         try {
             await fetchSessionSummary();
@@ -256,17 +256,24 @@ const CurrentSessionPanel = () => {
         }
     };
 
+    const buttonLabel = sessionSummary
+        ? (refreshing ? 'Refreshing…' : 'Refresh summary')
+        : (refreshing ? 'Generating…' : 'Generate session summary');
+
     return (
         <Card className="mb-4">
             <Card.Header className="d-flex justify-content-between align-items-center">
                 <strong>Current Session</strong>
-                <Button onClick={handleRefresh} disabled={refreshing} size="sm" variant="outline-primary">
-                    {refreshing ? 'Refreshing…' : 'Refresh summary'}
+                <Button onClick={handleGenerate} disabled={refreshing} size="sm" variant="outline-primary">
+                    {buttonLabel}
                 </Button>
             </Card.Header>
             <Card.Body>
                 {!sessionSummary && (
-                    <p className="text-muted mb-0">No active session, or no trials yet.</p>
+                    <p className="text-muted mb-0">
+                        Click "Generate session summary" to scan the current session's
+                        trial files for patterns and recommendations.
+                    </p>
                 )}
 
                 {sessionSummary && (
