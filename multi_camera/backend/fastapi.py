@@ -488,7 +488,12 @@ async def lifespan(app: FastAPI):
         on_poll=_on_idle_health_poll,
         logger=acquisition_logger,
     )
-    state._health_poller.start()
+    # Deliberately NOT started here: before a config is loaded, the poller's
+    # PySpin GigE enumeration produces no useful signal (nothing to compare
+    # against), and even with skip_camera_enumeration the thread sits idle
+    # racing the GUI's mount-time fetches. update_config starts it after
+    # the first successful configure_cameras; start() is idempotent so
+    # subsequent configures are no-ops on the poller.
 
     db = get_db()
 
@@ -1359,6 +1364,12 @@ async def update_config(config: ConfigFileData):
         await state.acquisition.configure_cameras(
             os.path.join(CONFIG_PATH, config.config)
         )
+        # Start the idle health poller on first successful configure.
+        # Lifespan only constructs it; selecting a config is the operator
+        # action that gives PySpin enumeration something useful to do.
+        # start() is idempotent so re-selects are no-ops.
+        if state._health_poller is not None:
+            state._health_poller.start()
     await _refresh_health_after_configure()
     return {"status": "success", "config": config.config}
 

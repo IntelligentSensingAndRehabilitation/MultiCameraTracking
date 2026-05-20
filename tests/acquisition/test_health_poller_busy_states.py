@@ -171,3 +171,61 @@ class TestOperatorActionGuards:
                 assert status in str(exc.value.detail)
 
         asyncio.run(body())
+
+
+class TestPollerDeferredStart:
+    """The HealthIdlePoller is constructed in lifespan but deliberately not
+    started until update_config completes its first successful
+    configure_cameras call. Before that, the poller's PySpin enumeration
+    has nothing useful to compare against and adds latency / background
+    churn on the GUI's mount-time fetches.
+    """
+
+    def test_update_config_with_a_yaml_starts_the_poller(self) -> None:
+        recorder = mock.MagicMock()
+        recorder.configure_cameras = mock.AsyncMock()
+        poller = mock.MagicMock()
+
+        state = backend_fastapi.GlobalState()
+        state.acquisition = recorder
+        state._health_poller = poller
+
+        async def body():
+            with mock.patch.object(
+                backend_fastapi, "get_global_state", return_value=state
+            ), mock.patch.object(
+                backend_fastapi, "_refresh_health_after_configure", new=mock.AsyncMock()
+            ):
+                await backend_fastapi.update_config(
+                    backend_fastapi.ConfigFileData(config="cotton_lab_config_12_cam.yaml")
+                )
+
+        asyncio.run(body())
+        recorder.configure_cameras.assert_awaited_once()
+        poller.start.assert_called_once()
+
+    def test_update_config_empty_string_does_not_start_the_poller(self) -> None:
+        """An empty config means 'reset' — no cameras to enumerate against,
+        so the poller stays in whatever state it was in (not auto-started).
+        """
+        recorder = mock.MagicMock()
+        recorder.reset = mock.MagicMock()
+        poller = mock.MagicMock()
+
+        state = backend_fastapi.GlobalState()
+        state.acquisition = recorder
+        state._health_poller = poller
+
+        async def body():
+            with mock.patch.object(
+                backend_fastapi, "get_global_state", return_value=state
+            ), mock.patch.object(
+                backend_fastapi, "_refresh_health_after_configure", new=mock.AsyncMock()
+            ):
+                await backend_fastapi.update_config(
+                    backend_fastapi.ConfigFileData(config="")
+                )
+
+        asyncio.run(body())
+        recorder.reset.assert_called_once()
+        poller.start.assert_not_called()
