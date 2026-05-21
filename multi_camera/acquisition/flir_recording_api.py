@@ -1,6 +1,6 @@
 import PySpin
 import simple_pyspin
-from simple_pyspin import Camera
+from simple_pyspin import Camera, CameraError
 import numpy as np
 from tqdm import tqdm
 import datetime
@@ -1442,37 +1442,49 @@ class FlirRecorder:
         return serial_msg, frame_count
 
     def _read_ptp_offsets(self) -> dict[str, int]:
-        """Read GevIEEE1588OffsetFromMasterLatched for each camera."""
+        """Read GevIEEE1588OffsetFromMasterLatched for each camera. Skips
+        cameras whose handle has been invalidated mid-session rather than
+        aborting the whole read.
+        """
         offsets: dict[str, int] = {}
         for c in self.cams:
-            serial = c.DeviceSerialNumber
             try:
+                serial = c.DeviceSerialNumber
                 c.GevIEEE1588DataSetLatch()
                 offsets[serial] = c.GevIEEE1588OffsetFromMasterLatched
-            except (AttributeError, PySpin.SpinnakerException):
+            except (AttributeError, PySpin.SpinnakerException, CameraError):
                 pass
         return offsets
 
     def _read_camera_temperatures(self) -> dict[str, float]:
-        """Read DeviceTemperature for each camera."""
+        """Read DeviceTemperature for each camera. Skips cameras whose
+        handle has been invalidated mid-session (e.g. cable unplug)
+        rather than aborting the whole read.
+        """
         temps: dict[str, float] = {}
         for c in self.cams:
-            serial = c.DeviceSerialNumber
             try:
+                serial = c.DeviceSerialNumber
                 temps[serial] = float(c.DeviceTemperature)
-            except (AttributeError, PySpin.SpinnakerException):
+            except (AttributeError, PySpin.SpinnakerException, CameraError):
                 pass
         return temps
 
     def _read_camera_stats(self) -> dict[str, dict[str, int]]:
+        """Read per-camera stream stats. Skips cameras whose handle has
+        been invalidated mid-session rather than aborting the whole read.
+        """
         stats: dict[str, dict[str, int]] = {}
         for c in self.cams:
-            serial = c.DeviceSerialNumber
+            try:
+                serial = c.DeviceSerialNumber
+            except (AttributeError, PySpin.SpinnakerException, CameraError):
+                continue
             cam_stats: dict[str, int] = {}
             for attr in ["StreamDroppedFrameCount", "TransferQueueOverflowCount"]:
                 try:
                     cam_stats[attr] = getattr(c, attr)
-                except (AttributeError, PySpin.SpinnakerException):
+                except (AttributeError, PySpin.SpinnakerException, CameraError):
                     pass
             stats[serial] = cam_stats
         return stats

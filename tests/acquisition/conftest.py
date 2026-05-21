@@ -23,7 +23,13 @@ def _install_pyspin_stubs() -> None:
             def __init__(self, *args, **kwargs):
                 raise RuntimeError("PySpin stub")
 
+        class _CameraError(Exception):
+            """Mirror of simple_pyspin.CameraError. Raised when a camera
+            attribute access fails (e.g. dead handle after disconnect).
+            """
+
         stub.Camera = _Camera  # type: ignore[attr-defined]
+        stub.CameraError = _CameraError  # type: ignore[attr-defined]
         stub._SYSTEM = None  # type: ignore[attr-defined]
         stub.list_cameras = lambda: []  # type: ignore[attr-defined]
         sys.modules["simple_pyspin"] = stub
@@ -35,7 +41,11 @@ def _install_pyspin_stubs() -> None:
             def __init__(self, *args, **kwargs):
                 pass
 
+        class _SpinnakerException(Exception):
+            """Mirror of PySpin.SpinnakerException."""
+
         stub.InterfaceEventHandler = _InterfaceEventHandler  # type: ignore[attr-defined]
+        stub.SpinnakerException = _SpinnakerException  # type: ignore[attr-defined]
         stub.IsReadable = lambda node: False  # type: ignore[attr-defined]
         stub.CStringPtr = lambda node: None  # type: ignore[attr-defined]
         sys.modules["PySpin"] = stub

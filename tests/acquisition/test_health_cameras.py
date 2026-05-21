@@ -819,3 +819,66 @@ class TestClassifySpinnakerError:
         env = self._classify(RuntimeError("LineMode is not writable"))
         assert env is not None
         assert env["code"] == "gpio_linemode_rejected"
+
+
+class TestPostTrialStatReadersSkipDeadHandles:
+    """The post-trial cleanup path in start_acquisition reads PTP offsets,
+    temperatures, and stream stats off each camera. If a camera was
+    unplugged mid-trial, its handle reads raise simple_pyspin.CameraError;
+    the readers must skip it rather than aborting the whole cleanup with
+    an unhandled exception that the GUI then surfaces as "Trial failed".
+    """
+
+    def _make_recorder(self, cams):
+        from multi_camera.acquisition.flir_recording_api import FlirRecorder
+        rec = FlirRecorder.__new__(FlirRecorder)
+        rec.cams = cams
+        return rec
+
+    def _dead_camera(self):
+        """A camera whose DeviceSerialNumber raises CameraError."""
+        from simple_pyspin import CameraError
+
+        class _DeadCam:
+            def __getattr__(self, name):
+                if name in {
+                    "DeviceSerialNumber",
+                    "DeviceTemperature",
+                    "StreamDroppedFrameCount",
+                    "TransferQueueOverflowCount",
+                    "GevIEEE1588OffsetFromMasterLatched",
+                }:
+                    raise CameraError(f"Camera property '{name}' is not readable")
+                if name == "GevIEEE1588DataSetLatch":
+                    def _raise(*_a, **_kw):
+                        raise CameraError("Camera property is not readable")
+                    return _raise
+                raise AttributeError(name)
+        return _DeadCam()
+
+    def _live_camera(self, serial: str):
+        class _LiveCam:
+            DeviceSerialNumber = serial
+            DeviceTemperature = 42.0
+            StreamDroppedFrameCount = 0
+            TransferQueueOverflowCount = 0
+            GevIEEE1588OffsetFromMasterLatched = 12
+            def GevIEEE1588DataSetLatch(self):  # noqa: N802
+                return None
+        return _LiveCam()
+
+    def test_read_camera_stats_skips_dead_handle(self) -> None:
+        rec = self._make_recorder([self._live_camera("AAA"), self._dead_camera()])
+        stats = rec._read_camera_stats()
+        assert "AAA" in stats
+        assert len(stats) == 1
+
+    def test_read_camera_temperatures_skips_dead_handle(self) -> None:
+        rec = self._make_recorder([self._live_camera("AAA"), self._dead_camera()])
+        temps = rec._read_camera_temperatures()
+        assert temps == {"AAA": 42.0}
+
+    def test_read_ptp_offsets_skips_dead_handle(self) -> None:
+        rec = self._make_recorder([self._live_camera("AAA"), self._dead_camera()])
+        offsets = rec._read_ptp_offsets()
+        assert offsets == {"AAA": 12}
