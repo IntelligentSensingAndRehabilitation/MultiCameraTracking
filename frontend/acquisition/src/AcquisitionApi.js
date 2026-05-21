@@ -33,6 +33,8 @@ const BUSY_PYSPIN_STATES = [
     'Synchronized',
     'Starting',
     'Recording',
+    'Resetting',
+    'Reset complete. Waiting to reconfigure.',
 ];
 
 export const isBusyPySpinState = (status) =>

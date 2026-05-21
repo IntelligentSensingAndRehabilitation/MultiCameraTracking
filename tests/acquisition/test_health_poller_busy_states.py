@@ -61,8 +61,10 @@ _BUSY_STATUSES = [
     "Synchronized",
     "Starting",
     "Recording",
+    "Resetting",
+    "Reset complete. Waiting to reconfigure.",
 ]
-_FREE_STATUSES = ["Idle", "Uninitialized", "Resetting", None, ""]
+_FREE_STATUSES = ["Idle", "Uninitialized", None, ""]
 
 
 class TestShouldSkipCameraEnumeration:

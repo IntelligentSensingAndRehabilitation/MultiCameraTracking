@@ -152,7 +152,15 @@ class TestBusyStateGate:
 
     @pytest.mark.parametrize(
         "status",
-        ["Configuring", "Synchronizing", "Synchronized", "Starting", "Recording"],
+        [
+            "Configuring",
+            "Synchronizing",
+            "Synchronized",
+            "Starting",
+            "Recording",
+            "Resetting",
+            "Reset complete. Waiting to reconfigure.",
+        ],
     )
     def test_endpoint_refuses_in_pyspin_busy_state(self, status: str) -> None:
         state = _make_state(recording_status=status)

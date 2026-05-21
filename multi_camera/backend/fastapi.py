@@ -1275,16 +1275,21 @@ async def get_current_config() -> str:
     return os.path.split(config)[-1]
 
 
-# States during which PySpin is in flight — either holding camera handles
-# or actively writing camera registers (LineMode, DeviceLinkThroughputLimit,
-# BeginAcquisition, …). Used by HealthIdlePoller to skip its GigE
-# enumeration (which would race those writes → GenICam::AccessException),
-# and by recovery endpoints (restart / restore / exclude) that must 409
-# instead of racing the in-flight operation. "Starting" closes the gap
-# between new_trial returning 200 and start_acquisition flipping to
-# "Recording" on its worker thread.
+# States during which the recorder is holding camera handles, writing
+# camera registers, or waiting for cameras to come back online after a
+# hardware reset. The health poller skips its GigE enumeration in these
+# states, and the recovery endpoints return 409 instead of starting an
+# operation that would collide with whatever is already running.
 _BUSY_PYSPIN_STATES = frozenset(
-    {"Configuring", "Synchronizing", "Synchronized", "Starting", "Recording"}
+    {
+        "Configuring",
+        "Synchronizing",
+        "Synchronized",
+        "Starting",
+        "Recording",
+        "Resetting",
+        "Reset complete. Waiting to reconfigure.",
+    }
 )
 
 
