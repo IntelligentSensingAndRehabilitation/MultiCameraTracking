@@ -121,7 +121,7 @@ export const AcquisitionApi = (props) => {
                 state.backoffMs = 500;
                 // Re-fetch the authoritative status on every (re)open so
                 // the GUI never sits with stale recordingSystemStatus if
-                // a broadcast was missed while disconnected (MCT-e8o).
+                // a broadcast was missed while disconnected.
                 fetchRecordingStatus();
             };
 

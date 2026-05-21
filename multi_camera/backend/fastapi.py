@@ -488,12 +488,9 @@ async def lifespan(app: FastAPI):
         on_poll=_on_idle_health_poll,
         logger=acquisition_logger,
     )
-    # Deliberately NOT started here: before a config is loaded, the poller's
-    # PySpin GigE enumeration produces no useful signal (nothing to compare
-    # against), and even with skip_camera_enumeration the thread sits idle
-    # racing the GUI's mount-time fetches. update_config starts it after
-    # the first successful configure_cameras; start() is idempotent so
-    # subsequent configures are no-ops on the poller.
+    # Constructed here, started by update_config after the first successful
+    # configure_cameras. start() is idempotent so subsequent configures
+    # are no-ops on the poller.
 
     db = get_db()
 
@@ -622,11 +619,8 @@ async def _get_health_report(force_refresh: bool = False) -> HealthCheckReport:
 
         expected = _expected_serials(state.acquisition)
         recording_state = state.recording_status or "Idle"
-        # PySpin GigE enumeration (used for both regular discovery and
-        # wrong-subnet detection) is the slow leg — multiple seconds in
-        # network mode. Skip it when there's no config loaded: nothing to
-        # compare detected cameras against, and the operator already sees
-        # 'select a config' guidance from cameras_not_configured.
+        # Skip the slow PySpin enum when busy (see _BUSY_PYSPIN_STATES)
+        # or when there's nothing to enumerate against.
         skip_enum = (
             _should_skip_camera_enumeration(recording_state)
             or _no_cameras_to_enumerate(state.acquisition)
@@ -1135,12 +1129,9 @@ async def validate_sync():
 @api_router.get("/prior_recordings", response_model=List[PriorRecordings])
 async def get_prior_recordings(db=Depends(db_dependency)) -> List[PriorRecordings]:
     state = get_global_state()
-    # Without a participant, get_recordings walks every participant ×
-    # every session × every recording in the DB, plus an N+1 Imported
-    # lookup per session — multi-second on a populated lab database.
-    # Skip the walk: the operator has no meaningful use for "every
-    # recording ever" before they've picked a participant, and the
-    # table shows nothing useful in that state anyway.
+    # No participant means get_recordings would walk the full DB plus
+    # N+1 per session — skip the walk since the table has nothing
+    # meaningful to show without a participant filter anyway.
     if state.current_session is None:
         return []
     participant_name = state.current_session.participant_name

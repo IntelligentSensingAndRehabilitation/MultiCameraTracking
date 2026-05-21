@@ -237,9 +237,8 @@ def classify_spinnaker_error(err) -> dict | None:
     render. Returns ``None`` for unrecognized errors so the caller can fall
     back to a generic message.
 
-    Mapping comes from operator-observed failure modes
-    (MultiCameraTracking-0dg). The remediation steps reference the
-    existing in-GUI buttons rather than raw Linux commands.
+    The remediation steps reference in-GUI buttons rather than raw
+    Linux commands.
     """
     text = str(err)
     lower = text.lower()
@@ -265,7 +264,7 @@ def classify_spinnaker_error(err) -> dict | None:
                 "If the issue persists, click Restart acquisition.",
             ],
         }
-    if "wrong subnet" in lower or "incompatible" in lower:
+    if "wrong subnet" in lower or "incompatible device" in lower:
         return {
             "code": "camera_wrong_subnet",
             "level": "error",

@@ -242,10 +242,8 @@ const CurrentSessionPanel = () => {
     const { sessionSummary, fetchSessionSummary } = useContext(AcquisitionState);
     const [refreshing, setRefreshing] = useState(false);
 
-    // Deliberately no auto-fetch on mount. _build_session_summary walks
-    // every trial JSON in the session directory and can take seconds with
-    // a populated session — running it on every Diagnostics tab visit is
-    // wasted work the operator didn't ask for. Wait for an explicit click.
+    // No auto-fetch — _build_session_summary walks every trial JSON
+    // and can take seconds. Wait for an explicit click.
 
     const handleGenerate = async () => {
         setRefreshing(true);

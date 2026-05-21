@@ -783,6 +783,20 @@ class TestClassifySpinnakerError:
         assert env["code"] == "camera_wrong_subnet"
         assert any("Force IP" in step for step in env["remediation"])
 
+    def test_incompatible_device_classifies_as_wrong_subnet(self) -> None:
+        env = self._classify(
+            "Spinnaker: An incompatible device has been detected on the interface."
+        )
+        assert env is not None
+        assert env["code"] == "camera_wrong_subnet"
+
+    def test_bare_incompatible_does_not_match(self) -> None:
+        # Narrow the pattern: ``incompatible`` alone is too loose
+        # (matches ``incompatible version``, ``incompatible parameters``,
+        # etc.). Only ``IncompatibleDevice`` should classify as wrong-subnet.
+        assert self._classify("incompatible version detected") is None
+        assert self._classify("error: incompatible parameters") is None
+
     def test_device_serial_not_readable(self) -> None:
         env = self._classify("Camera property 'DeviceSerialNumber' is not readable")
         assert env is not None
