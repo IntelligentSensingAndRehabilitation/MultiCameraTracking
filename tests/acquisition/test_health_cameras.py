@@ -682,3 +682,203 @@ class TestWrongSubnetDetection:
             wrong_subnet_enumerator=boom,
         )
         assert report.wrong_subnet == []
+
+
+class TestBumpConfigHash:
+    """get_config_hash mixes in self._config_hash_salt so bump_config_hash
+    can force a new hash without changing the YAML config — used when the
+    operator reports a camera was physically bumped or the rig was moved
+    mid-session.
+    """
+
+    def _make_recorder(self):
+        from multi_camera.acquisition.flir_recording_api import FlirRecorder
+        # __init__ calls _get_pyspin_system which we can't run in dev container,
+        # so build a bare instance bypassing __init__ and seed the required
+        # fields directly.
+        rec = FlirRecorder.__new__(FlirRecorder)
+        rec._config_hash_salt = ""
+        rec.camera_config = {"camera-info": {"111": {}}, "meta": "x"}
+        return rec
+
+    def test_bump_changes_hash(self) -> None:
+        rec = self._make_recorder()
+        before = rec.get_config_hash(rec.camera_config)
+        bumped = rec.bump_config_hash(reason="test")
+        after = rec.get_config_hash(rec.camera_config)
+        assert before != after
+        assert bumped == after
+
+    def test_consecutive_bumps_keep_changing(self) -> None:
+        rec = self._make_recorder()
+        h1 = rec.bump_config_hash()
+        h2 = rec.bump_config_hash()
+        assert h1 != h2
+
+    def test_unsalted_hash_is_unchanged_from_pre_bump(self) -> None:
+        """A fresh recorder with empty salt should hash to the same value as
+        the historical (pre-PR-4) implementation. This protects existing
+        recordings' hashes from drifting on upgrade.
+        """
+        import hashlib
+        import json
+        rec = self._make_recorder()
+        expected = hashlib.sha256(
+            json.dumps(rec.camera_config, sort_keys=True).encode("utf-8")
+        ).hexdigest()[:10]
+        assert rec.get_config_hash(rec.camera_config) == expected
+
+    def test_set_salt_restores_bumped_hash(self) -> None:
+        """set_salt(get_salt()) round-trip reproduces the bumped hash —
+        the contract the backend's session-sidecar persistence relies on.
+        """
+        rec_a = self._make_recorder()
+        bumped_hash = rec_a.bump_config_hash()
+        salt = rec_a.get_salt()
+
+        rec_b = self._make_recorder()
+        assert rec_b.get_config_hash(rec_b.camera_config) != bumped_hash
+        rec_b.set_salt(salt)
+        assert rec_b.get_config_hash(rec_b.camera_config) == bumped_hash
+
+    def test_set_salt_empty_clears(self) -> None:
+        rec = self._make_recorder()
+        unsalted = rec.get_config_hash(rec.camera_config)
+        rec.bump_config_hash()
+        assert rec.get_config_hash(rec.camera_config) != unsalted
+        rec.set_salt("")
+        assert rec.get_config_hash(rec.camera_config) == unsalted
+
+
+class TestClassifySpinnakerError:
+    """The classifier translates Spinnaker exception strings into
+    structured operator-facing envelopes. Pure-logic test, no PySpin
+    runtime needed beyond the stub installed by conftest.
+    """
+
+    def _classify(self, text: str):
+        from multi_camera.acquisition.flir_recording_api import classify_spinnaker_error
+        return classify_spinnaker_error(text)
+
+    def test_ptp_node_not_writable(self) -> None:
+        env = self._classify(
+            "AccessException — Node is not writable, GevIEEE1588DataSetLatch.Execute()"
+        )
+        assert env is not None
+        assert env["code"] == "ptp_node_not_writable"
+        assert env["level"] == "error"
+        assert any("Reset Cameras" in step for step in env["remediation"])
+
+    def test_linemode_rejected(self) -> None:
+        env = self._classify(
+            "Failed to write enumeration value. Enum entry is not writable, node 'LineMode'"
+        )
+        assert env is not None
+        assert env["code"] == "gpio_linemode_rejected"
+        assert any("Reset Cameras" in step for step in env["remediation"])
+
+    def test_wrong_subnet(self) -> None:
+        env = self._classify("camera on wrong subnet detected")
+        assert env is not None
+        assert env["code"] == "camera_wrong_subnet"
+        assert any("Force IP" in step for step in env["remediation"])
+
+    def test_incompatible_device_classifies_as_wrong_subnet(self) -> None:
+        env = self._classify(
+            "Spinnaker: An incompatible device has been detected on the interface."
+        )
+        assert env is not None
+        assert env["code"] == "camera_wrong_subnet"
+
+    def test_bare_incompatible_does_not_match(self) -> None:
+        # Narrow the pattern: ``incompatible`` alone is too loose
+        # (matches ``incompatible version``, ``incompatible parameters``,
+        # etc.). Only ``IncompatibleDevice`` should classify as wrong-subnet.
+        assert self._classify("incompatible version detected") is None
+        assert self._classify("error: incompatible parameters") is None
+
+    def test_device_serial_not_readable(self) -> None:
+        env = self._classify("Camera property 'DeviceSerialNumber' is not readable")
+        assert env is not None
+        assert env["code"] == "camera_handle_invalid"
+
+    def test_pyspin_system_uninitialized(self) -> None:
+        env = self._classify(
+            "AttributeError: 'NoneType' object has no attribute 'GetInterfaces'"
+        )
+        assert env is not None
+        assert env["code"] == "pyspin_system_uninitialized"
+        # Tiered remediation: try Restart first, then container restart, then reboot.
+        assert len(env["remediation"]) >= 3
+
+    def test_unrecognized_returns_none(self) -> None:
+        assert self._classify("totally unrelated error message") is None
+
+    def test_accepts_exception_object(self) -> None:
+        """Classifier should work on Exception objects too, not just strings."""
+        env = self._classify(RuntimeError("LineMode is not writable"))
+        assert env is not None
+        assert env["code"] == "gpio_linemode_rejected"
+
+
+class TestPostTrialStatReadersSkipDeadHandles:
+    """The post-trial cleanup path in start_acquisition reads PTP offsets,
+    temperatures, and stream stats off each camera. If a camera was
+    unplugged mid-trial, its handle reads raise simple_pyspin.CameraError;
+    the readers must skip it rather than aborting the whole cleanup with
+    an unhandled exception that the GUI then surfaces as "Trial failed".
+    """
+
+    def _make_recorder(self, cams):
+        from multi_camera.acquisition.flir_recording_api import FlirRecorder
+        rec = FlirRecorder.__new__(FlirRecorder)
+        rec.cams = cams
+        return rec
+
+    def _dead_camera(self):
+        """A camera whose DeviceSerialNumber raises CameraError."""
+        from simple_pyspin import CameraError
+
+        class _DeadCam:
+            def __getattr__(self, name):
+                if name in {
+                    "DeviceSerialNumber",
+                    "DeviceTemperature",
+                    "StreamDroppedFrameCount",
+                    "TransferQueueOverflowCount",
+                    "GevIEEE1588OffsetFromMasterLatched",
+                }:
+                    raise CameraError(f"Camera property '{name}' is not readable")
+                if name == "GevIEEE1588DataSetLatch":
+                    def _raise(*_a, **_kw):
+                        raise CameraError("Camera property is not readable")
+                    return _raise
+                raise AttributeError(name)
+        return _DeadCam()
+
+    def _live_camera(self, serial: str):
+        class _LiveCam:
+            DeviceSerialNumber = serial
+            DeviceTemperature = 42.0
+            StreamDroppedFrameCount = 0
+            TransferQueueOverflowCount = 0
+            GevIEEE1588OffsetFromMasterLatched = 12
+            def GevIEEE1588DataSetLatch(self):  # noqa: N802
+                return None
+        return _LiveCam()
+
+    def test_read_camera_stats_skips_dead_handle(self) -> None:
+        rec = self._make_recorder([self._live_camera("AAA"), self._dead_camera()])
+        stats = rec._read_camera_stats()
+        assert "AAA" in stats
+        assert len(stats) == 1
+
+    def test_read_camera_temperatures_skips_dead_handle(self) -> None:
+        rec = self._make_recorder([self._live_camera("AAA"), self._dead_camera()])
+        temps = rec._read_camera_temperatures()
+        assert temps == {"AAA": 42.0}
+
+    def test_read_ptp_offsets_skips_dead_handle(self) -> None:
+        rec = self._make_recorder([self._live_camera("AAA"), self._dead_camera()])
+        offsets = rec._read_ptp_offsets()
+        assert offsets == {"AAA": 12}

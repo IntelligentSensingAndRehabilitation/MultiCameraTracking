@@ -100,6 +100,41 @@ class Session(BaseModel):
     recording_path: str
 
 
+# Sidecar file inside the session directory that persists the
+# config_hash_salt for the active session. Survives a mid-session
+# container restart (operator reopens the same participant + date and
+# the salt is restored); a brand-new session next day has no sidecar
+# and starts from the original un-bumped hash.
+_SESSION_SALT_FILENAME = ".config_hash_salt"
+
+
+def _session_salt_path(session: "Session | None") -> "Path | None":
+    if session is None or not session.recording_path:
+        return None
+    return Path(session.recording_path) / _SESSION_SALT_FILENAME
+
+
+def _persist_session_salt(session: "Session | None", salt: str) -> None:
+    path = _session_salt_path(session)
+    if path is None:
+        return
+    try:
+        path.write_text(salt)
+    except OSError as e:
+        acquisition_logger.warning(f"Could not write {path}: {e}")
+
+
+def _load_session_salt(session: "Session | None") -> str:
+    path = _session_salt_path(session)
+    if path is None or not path.exists():
+        return ""
+    try:
+        return path.read_text().strip()
+    except OSError as e:
+        acquisition_logger.warning(f"Could not read {path}: {e}")
+        return ""
+
+
 @dataclass
 class GlobalState:
     preview_queue: asyncio.Queue = field(default_factory=asyncio.Queue)
@@ -240,14 +275,21 @@ def _on_acquisition_diagnostic(envelope: dict) -> None:
 
     Called from acquisition worker threads when the recorder catches a
     Spinnaker error per camera. Forwards the envelope to the existing
-    diagnostics WS fan-out as a ``session_insight`` event.
+    diagnostics WS fan-out as a ``session_insight`` event. If the
+    recorder attached a ``remediation`` list (from
+    ``classify_spinnaker_error``), the steps are passed through in
+    ``details`` so the Diagnostics tab renders them as a numbered list.
     """
+    details = dict(envelope.get("details", {}))
+    remediation = envelope.get("remediation")
+    if remediation:
+        details["remediation"] = remediation
     broadcast_event(
         event_type="session_insight",
         level=envelope.get("level", "warn"),
         code=envelope.get("code", "acquisition_error"),
         message=envelope.get("message", ""),
-        details=envelope.get("details", {}),
+        details=details,
     )
 
 
@@ -390,6 +432,20 @@ def _expected_serials(recorder: FlirRecorder | None) -> list[str]:
     return [str(s) for s in camera_info.keys()]
 
 
+def _no_cameras_to_enumerate(recorder: FlirRecorder | None) -> bool:
+    """True when neither the config nor the live recorder names any cameras.
+
+    Used to short-circuit the slow PySpin GigE enumeration: no expected
+    serials AND no held cams means there's nothing to compare detected
+    cameras against, so the GUI gets ``cameras_not_configured`` guidance
+    fast and the idle poller doesn't churn the GigE network in the
+    background.
+    """
+    return not _expected_serials(recorder) and not bool(
+        getattr(recorder, "cams", None)
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Bind module-level loop to uvicorn's; worker-thread broadcasts dispatch onto it.
@@ -420,17 +476,21 @@ async def lifespan(app: FastAPI):
             expected_serials=_expected_serials(state.acquisition),
             recorder=state.acquisition,
             recording_state=state.recording_status or "Idle",
-            # See _BUSY_PYSPIN_STATES: skip enumeration whenever the recorder
-            # is holding handles or writing camera registers. DHCP and
-            # host-network checks still run.
-            skip_camera_enumeration=_should_skip_camera_enumeration(
-                state.recording_status
+            # Skip the slow PySpin GigE enumeration whenever the recorder
+            # is holding handles / writing registers (see _BUSY_PYSPIN_STATES)
+            # OR when there's no config loaded so nothing's worth enumerating
+            # against. DHCP and host-network arms always run.
+            skip_camera_enumeration=(
+                _should_skip_camera_enumeration(state.recording_status)
+                or _no_cameras_to_enumerate(state.acquisition)
             ),
         ),
         on_poll=_on_idle_health_poll,
         logger=acquisition_logger,
     )
-    state._health_poller.start()
+    # Constructed here, started by update_config after the first successful
+    # configure_cameras. start() is idempotent so subsequent configures
+    # are no-ops on the poller.
 
     db = get_db()
 
@@ -559,12 +619,19 @@ async def _get_health_report(force_refresh: bool = False) -> HealthCheckReport:
 
         expected = _expected_serials(state.acquisition)
         recording_state = state.recording_status or "Idle"
+        # Skip the slow PySpin enum when busy (see _BUSY_PYSPIN_STATES)
+        # or when there's nothing to enumerate against.
+        skip_enum = (
+            _should_skip_camera_enumeration(recording_state)
+            or _no_cameras_to_enumerate(state.acquisition)
+        )
         report = await run_in_threadpool(
             run_health_check,
             config=state.health_config,
             expected_serials=expected,
             recorder=state.acquisition,
             recording_state=recording_state,
+            skip_camera_enumeration=skip_enum,
         )
         state._health_cache = report
         state._health_cache_ts = now_mono
@@ -734,6 +801,16 @@ async def set_session(
     state.last_session_insights = set()
     print("New session: ", state.current_session)
 
+    # Restore the rig-recalibrate salt if a sidecar exists in this
+    # session's directory — handles the mid-session restart case where
+    # the operator clicked 'Camera moved', then the container restarted,
+    # then they reopened the same participant + date.
+    saved_salt = _load_session_salt(state.current_session)
+    if state.acquisition is not None:
+        state.acquisition.set_salt(saved_salt)
+        if saved_salt:
+            print(f"Restored config_hash_salt from {_session_salt_path(state.current_session)}")
+
     if fin and fin.strip():
         from multi_camera.backend.recording_db import store_fin
 
@@ -870,6 +947,21 @@ async def get_status() -> Dict:
 
 @api_router.post("/new_trial")
 async def new_trial(data: NewTrialData, db: Session = Depends(db_dependency)):
+    state: GlobalState = get_global_state()
+    if state.recording_status in _BUSY_PYSPIN_STATES:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Cannot start a trial while the system is busy "
+                f"(state: {state.recording_status})."
+            ),
+        )
+    if not getattr(state.acquisition, "cams", None):
+        raise HTTPException(
+            status_code=409,
+            detail="No cameras configured — select a config before starting a trial.",
+        )
+
     recording_dir = data.recording_dir
     recording_filename = data.recording_filename
     comment = data.comment
@@ -960,11 +1052,17 @@ async def new_trial(data: NewTrialData, db: Session = Depends(db_dependency)):
             import traceback
 
             acquisition_logger.error(f"Trial failed: {e}", exc_info=True)
-            # If start_acquisition raised before its set_status("Recording")
-            # ran, status is still "Starting" — clear it so recovery
-            # endpoints aren't blocked.
-            if state.recording_status == "Starting":
-                state.recording_status = "Idle"
+            # The trial died (could be before or after set_status("Recording")
+            # ran on the worker). Reset to Idle unconditionally — leaving
+            # status at "Starting" or "Recording" would lock the operator
+            # out of the recovery endpoints (Restart acquisition, Restore
+            # defaults, Force IP, etc.) since they 409 in busy states.
+            # set_status pushes to the frontend WS so buttons re-enable.
+            if (
+                state.recording_status in _BUSY_PYSPIN_STATES
+                and state.acquisition is not None
+            ):
+                state.acquisition.set_status("Idle")
             broadcast_event(
                 event_type="error",
                 level="error",
@@ -983,12 +1081,26 @@ async def new_trial(data: NewTrialData, db: Session = Depends(db_dependency)):
 
 @api_router.post("/preview")
 async def preview(data: PreviewData):
+    state: GlobalState = get_global_state()
+    if state.recording_status in _BUSY_PYSPIN_STATES:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Cannot start a trial while the system is busy "
+                f"(state: {state.recording_status})."
+            ),
+        )
+    if not getattr(state.acquisition, "cams", None):
+        raise HTTPException(
+            status_code=409,
+            detail="No cameras configured — select a config before previewing.",
+        )
+
     max_frames = data.max_frames
 
     def receive_frames_wrapper(frames):
         loop.create_task(receive_frames(frames))
 
-    state: GlobalState = get_global_state()
     state.selected_camera = None
     await run_in_threadpool(
         state.acquisition.start_acquisition,
@@ -1017,10 +1129,12 @@ async def validate_sync():
 @api_router.get("/prior_recordings", response_model=List[PriorRecordings])
 async def get_prior_recordings(db=Depends(db_dependency)) -> List[PriorRecordings]:
     state = get_global_state()
+    # No participant means get_recordings would walk the full DB plus
+    # N+1 per session — skip the walk since the table has nothing
+    # meaningful to show without a participant filter anyway.
     if state.current_session is None:
-        participant_name = None
-    else:
-        participant_name = state.current_session.participant_name
+        return []
+    participant_name = state.current_session.participant_name
     prior_recordings = []
     db_recordings: ParticipantOut = get_recordings(
         db, participant_name=participant_name
@@ -1161,16 +1275,21 @@ async def get_current_config() -> str:
     return os.path.split(config)[-1]
 
 
-# States during which PySpin is in flight — either holding camera handles
-# or actively writing camera registers (LineMode, DeviceLinkThroughputLimit,
-# BeginAcquisition, …). Used by HealthIdlePoller to skip its GigE
-# enumeration (which would race those writes → GenICam::AccessException),
-# and by recovery endpoints (restart / restore / exclude) that must 409
-# instead of racing the in-flight operation. "Starting" closes the gap
-# between new_trial returning 200 and start_acquisition flipping to
-# "Recording" on its worker thread.
+# States during which the recorder is holding camera handles, writing
+# camera registers, or waiting for cameras to come back online after a
+# hardware reset. The health poller skips its GigE enumeration in these
+# states, and the recovery endpoints return 409 instead of starting an
+# operation that would collide with whatever is already running.
 _BUSY_PYSPIN_STATES = frozenset(
-    {"Configuring", "Synchronizing", "Synchronized", "Starting", "Recording"}
+    {
+        "Configuring",
+        "Synchronizing",
+        "Synchronized",
+        "Starting",
+        "Recording",
+        "Resetting",
+        "Reset complete. Waiting to reconfigure.",
+    }
 )
 
 
@@ -1246,6 +1365,12 @@ async def update_config(config: ConfigFileData):
         await state.acquisition.configure_cameras(
             os.path.join(CONFIG_PATH, config.config)
         )
+        # Start the idle health poller on first successful configure.
+        # Lifespan only constructs it; selecting a config is the operator
+        # action that gives PySpin enumeration something useful to do.
+        # start() is idempotent so re-selects are no-ops.
+        if state._health_poller is not None:
+            state._health_poller.start()
     await _refresh_health_after_configure()
     return {"status": "success", "config": config.config}
 
@@ -1368,6 +1493,48 @@ async def restore_camera_defaults(serial: str):
     )
 
     return {"status": "success", "serial": serial, "config": saved_config}
+
+
+@api_router.post("/rig/recalibrate")
+async def mark_rig_recalibrate():
+    """Operator bumped/moved at least one camera; subsequent trials in this
+    session need a fresh camera_config_hash so DataJoint creates a separate
+    calibration entry. Rig-level (not per-camera) because the calibration
+    is a joint estimate of all cameras' relative poses — moving one
+    invalidates the whole rig's extrinsics.
+
+    Rotates a salt inside FlirRecorder.get_config_hash — no reconfigure
+    needed (the cameras themselves are unchanged, just their physical
+    pose). Returns the new hash.
+    """
+    state: GlobalState = get_global_state()
+    if not getattr(state.acquisition, "camera_config", None):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "No camera config loaded — select a config before marking "
+                "the rig for recalibration."
+            ),
+        )
+    new_hash = await run_in_threadpool(
+        state.acquisition.bump_config_hash, "rig recalibrate"
+    )
+    # Persist the salt scoped to the active session so a mid-session
+    # container restart preserves the bumped state. A new session next
+    # day gets its own sidecar (or none) and starts from the original
+    # un-salted hash.
+    _persist_session_salt(state.current_session, state.acquisition.get_salt())
+    broadcast_event(
+        event_type="session_insight",
+        level="warn",
+        code="rig_recalibrate",
+        message=(
+            "Rig marked for recalibration. Future trials will record under "
+            f"a new camera_config_hash ({new_hash}) — capture a new "
+            "calibration recording before the next trial."
+        ),
+    )
+    return {"status": "success", "new_config_hash": new_hash}
 
 
 class ForceIpData(BaseModel):

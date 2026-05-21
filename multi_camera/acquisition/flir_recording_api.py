@@ -1,6 +1,6 @@
 import PySpin
 import simple_pyspin
-from simple_pyspin import Camera
+from simple_pyspin import Camera, CameraError
 import numpy as np
 from tqdm import tqdm
 import datetime
@@ -229,6 +229,129 @@ def _force_one_camera_ip(
     finally:
         iface_list.Clear()
     return False
+
+
+def classify_spinnaker_error(err) -> dict | None:
+    """Translate a Spinnaker/PySpin exception (or its string repr) into a
+    structured envelope ``{code, level, message, remediation}`` the GUI can
+    render. Returns ``None`` for unrecognized errors so the caller can fall
+    back to a generic message.
+
+    The remediation steps reference in-GUI buttons rather than raw
+    Linux commands.
+    """
+    text = str(err)
+    lower = text.lower()
+
+    if "gevieee1588datasetlatch" in lower:
+        return {
+            "code": "ptp_node_not_writable",
+            "level": "error",
+            "message": "PTP/IEEE1588 sync node is not writable on a camera.",
+            "remediation": [
+                "This typically happens if a camera was unplugged after init.",
+                "Click 'Reset Cameras' on the main page.",
+                "If the issue persists, unplug and re-plug the affected camera, then click Restart acquisition.",
+            ],
+        }
+    if "linemode" in lower and "not writable" in lower:
+        return {
+            "code": "gpio_linemode_rejected",
+            "level": "error",
+            "message": "Camera rejected the GPIO line-mode configuration.",
+            "remediation": [
+                "Click 'Reset Cameras' on the main page.",
+                "If the issue persists, click Restart acquisition.",
+            ],
+        }
+    if "wrong subnet" in lower or "incompatible device" in lower:
+        return {
+            "code": "camera_wrong_subnet",
+            "level": "error",
+            "message": "A camera is on the wrong subnet.",
+            "remediation": [
+                "Click 'Force IP' on the camera row in Diagnostics.",
+                "If the camera doesn't appear in Diagnostics, run `make reset`.",
+            ],
+        }
+    if "deviceserialnumber" in lower and "not readable" in lower:
+        return {
+            "code": "camera_handle_invalid",
+            "level": "error",
+            "message": "A camera handle stopped responding to basic reads.",
+            "remediation": [
+                "Click 'Restart acquisition' on the Diagnostics tab.",
+                "If the issue persists, click 'Reset Cameras' on the main page.",
+            ],
+        }
+    if "nonetype" in lower and "getinterfaces" in lower:
+        return {
+            "code": "pyspin_system_uninitialized",
+            "level": "error",
+            "message": "The Spinnaker system handle is uninitialized.",
+            "remediation": [
+                "Click 'Restart acquisition' on the Diagnostics tab.",
+                "If the issue persists, restart the acquisition application (`make run`).",
+                "If still failing after that, reboot the acquisition laptop.",
+            ],
+        }
+    return None
+
+
+class _RecorderInterfaceEventHandler(PySpin.InterfaceEventHandler):
+    """Fires diagnostic envelopes when a camera arrives or is removed from
+    the GigE interface the recorder is using.
+
+    Cleaner primary signal than the reactive ``-1002`` error catch in
+    ``acquire_frames``: the SDK calls these methods immediately on cable
+    disconnect/reconnect, before the dead handle starts spamming errors.
+    """
+
+    def __init__(self, recorder: "FlirRecorder", interface_id: str):
+        super().__init__()
+        self._recorder = recorder
+        self._interface_id = interface_id
+
+    @staticmethod
+    def _read_serial(camera) -> str:
+        try:
+            nodemap = camera.GetTLDeviceNodeMap()
+            node = PySpin.CStringPtr(nodemap.GetNode("DeviceSerialNumber"))
+            if PySpin.IsReadable(node):
+                return node.GetValue()
+        except Exception:  # noqa: BLE001
+            pass
+        return ""
+
+    def OnDeviceArrival(self, camera) -> None:
+        serial = self._read_serial(camera)
+        if not serial:
+            return
+        self._recorder._fire_diagnostic_once(
+            camera_serial=serial,
+            code="camera_reconnected",
+            level="ok",
+            message=(
+                f"Camera {serial} reconnected on {self._interface_id}. "
+                "Click Restart acquisition to bring it back into the rig."
+            ),
+            details={"interface": self._interface_id},
+        )
+
+    def OnDeviceRemoval(self, camera) -> None:
+        serial = self._read_serial(camera)
+        if not serial:
+            return
+        self._recorder._fire_diagnostic_once(
+            camera_serial=serial,
+            code="camera_disconnected",
+            level="error",
+            message=(
+                f"Camera {serial} was removed from {self._interface_id}. "
+                "Check the cable and power."
+            ),
+            details={"interface": self._interface_id},
+        )
 
 
 def init_camera(
@@ -798,6 +921,20 @@ class FlirRecorder:
         self._diagnostics_fired: set[tuple[str, str]] = set()
         self._diagnostics_fired_lock = threading.Lock()
 
+        # PySpin requires us to hold refs to event handlers — without these
+        # the handler gets GC'd and the callbacks silently stop firing.
+        self._event_handlers: list = []
+
+        # Salt mixed into get_config_hash. Empty until the operator clicks
+        # 'Camera moved' mid-session; setting it forces a fresh
+        # camera_config_hash on subsequent trials.
+        self._config_hash_salt: str = ""
+
+        # Populated by configure_cameras when a YAML is selected. Default
+        # None so accessors (bump_config_hash, etc.) can detect the
+        # "no config loaded yet" state without an AttributeError.
+        self.camera_config = None
+
         self.set_status("Uninitialized")
 
         self.pixel_format_conversion = {
@@ -807,12 +944,47 @@ class FlirRecorder:
         }
 
     def get_config_hash(self, yaml_content, hash_len=10):
-        # Sorting keys to ensure consistent hashing
+        # Sorting keys to ensure consistent hashing. ``self._config_hash_salt``
+        # is mutated by bump_config_hash() when the operator clicks 'Camera
+        # moved' — that produces a fresh hash without re-loading the YAML,
+        # so DataJoint treats subsequent trials as a new calibration setup.
         file_str = json.dumps(yaml_content, sort_keys=True)
+        if self._config_hash_salt:
+            file_str = f"{file_str}\nsalt={self._config_hash_salt}"
         encoded_config = file_str.encode("utf-8")
 
         # Create hash of encoded config file and return
         return hashlib.sha256(encoded_config).hexdigest()[:hash_len]
+
+    def bump_config_hash(self, reason: str | None = None) -> str:
+        """Rotate ``self._config_hash_salt`` so the next ``get_config_hash``
+        returns a different value. Used when the operator reports a camera
+        was physically bumped or the rig was moved mid-session — future
+        trials need to record under a fresh ``camera_config_hash`` so
+        DataJoint creates a separate calibration entry. Returns the new
+        effective hash for confirmation.
+        """
+        import secrets
+        self._config_hash_salt = secrets.token_hex(8)
+        new_hash = (
+            self.get_config_hash(self.camera_config) if self.camera_config else "?"
+        )
+        print(
+            f"[config_hash] bumped salt (reason={reason!r}); new hash={new_hash}"
+        )
+        return new_hash
+
+    def get_salt(self) -> str:
+        """Current config_hash_salt. Empty string means no rig bump has
+        happened yet (or the salt was cleared)."""
+        return self._config_hash_salt
+
+    def set_salt(self, salt: str) -> None:
+        """Restore the config_hash_salt from external storage (typically a
+        session-scoped sidecar file maintained by the backend). Empty
+        string clears it back to the pre-bump default.
+        """
+        self._config_hash_salt = salt
 
     def get_detailed_processor_info(self):
         cpu_info = ""
@@ -865,6 +1037,7 @@ class FlirRecorder:
         level: str,
         message: str,
         details: dict | None = None,
+        remediation: list[str] | None = None,
     ) -> None:
         """Fire ``diagnostics_callback`` exactly once per (camera, code) per
         session, then suppress subsequent calls. The acquisition workers
@@ -879,18 +1052,48 @@ class FlirRecorder:
             if key in self._diagnostics_fired:
                 return
             self._diagnostics_fired.add(key)
+        envelope = {
+            "level": level,
+            "code": code,
+            "message": message,
+            "details": {"serial": camera_serial, **(details or {})},
+        }
+        if remediation:
+            envelope["remediation"] = remediation
         try:
-            self.diagnostics_callback(
-                {
-                    "level": level,
-                    "code": code,
-                    "message": message,
-                    "details": {"serial": camera_serial, **(details or {})},
-                }
-            )
+            self.diagnostics_callback(envelope)
         except Exception as e:  # noqa: BLE001
             # The callback is best-effort: it must not break acquisition.
             print(f"[diagnostics_callback] {camera_serial}/{code} raised: {e}")
+
+    def _register_interface_events(self) -> None:
+        """Subscribe to PySpin device arrival/removal on the active interface."""
+        if self.iface is None:
+            return
+        try:
+            interface_id = (
+                self.iface.TLInterface.InterfaceID.GetValue()
+                if PySpin.IsReadable(self.iface.TLInterface.InterfaceID)
+                else "unknown"
+            )
+        except Exception:  # noqa: BLE001
+            interface_id = "unknown"
+        handler = _RecorderInterfaceEventHandler(self, interface_id)
+        try:
+            self.iface.RegisterEventHandler(handler)
+        except Exception as e:  # noqa: BLE001
+            print(f"[event_handler] failed to register on {interface_id}: {e}")
+            return
+        self._event_handlers.append((self.iface, handler))
+
+    def _unregister_interface_events(self) -> None:
+        """Detach all registered handlers. Called from close()."""
+        for iface, handler in self._event_handlers:
+            try:
+                iface.UnregisterEventHandler(handler)
+            except Exception as e:  # noqa: BLE001
+                print(f"[event_handler] failed to unregister: {e}")
+        self._event_handlers = []
 
     def check_queue_sizes(self, queue_dict):
         for name, q in queue_dict.items():
@@ -978,6 +1181,14 @@ class FlirRecorder:
 
         self.trigger = trigger
 
+        # PySpin InterfaceEventHandler registration is intentionally
+        # disabled: registering a handler appears to leak a C++ ref to
+        # the interface that survives UnregisterEventHandler, causing
+        # `terminate called ... [-1004] Can't clear interface` on
+        # subsequent reset_cameras. Camera-disconnect detection currently
+        # relies on acquire_frames' -1002/-1012 catch path.
+        # self._register_interface_events()
+
         self.iface.TLInterface.GevActionDeviceKey.SetValue(0)
         self.iface.TLInterface.GevActionGroupKey.SetValue(1)
         self.iface.TLInterface.GevActionGroupMask.SetValue(1)
@@ -1034,7 +1245,24 @@ class FlirRecorder:
         with concurrent.futures.ThreadPoolExecutor(
             max_workers=len(self.cams)
         ) as executor:
-            list(executor.map(lambda c: init_camera(c, **config_params), self.cams))
+            try:
+                list(executor.map(lambda c: init_camera(c, **config_params), self.cams))
+            except Exception as init_err:
+                # Classify before re-raising so the GUI sees the right
+                # remediation steps. Backend's _reset_and_configure
+                # catches the re-raised exception and broadcasts a
+                # generic reconfigure_failed envelope as a fallback.
+                classified = classify_spinnaker_error(init_err)
+                if classified is not None:
+                    self._fire_diagnostic_once(
+                        camera_serial="?",
+                        code=classified["code"],
+                        level=classified["level"],
+                        message=classified["message"],
+                        remediation=classified["remediation"],
+                        details={"spinnaker_error": str(init_err)},
+                    )
+                raise
 
         await self.synchronize_cameras()
 
@@ -1052,31 +1280,46 @@ class FlirRecorder:
         self.set_status("Idle")
 
     async def get_camera_status(self) -> List[CameraStatus]:
-        status = [
-            CameraStatus(
-                SerialNumber=c.DeviceSerialNumber,
-                Status="Initialized",
-                # PixelSize=c.PixelSize,
-                PixelFormat=c.PixelFormat,
-                BinningHorizontal=c.BinningHorizontal,
-                BinningVertical=c.BinningVertical,
-                Width=c.Width,
-                Height=c.Height,
-            )
-            for c in self.cams
-        ]
+        # Per-camera try/except so one dead handle (e.g. wrong-subnet camera
+        # whose DeviceSerialNumber isn't readable) doesn't crash the entire
+        # status endpoint with a 500. The arrival/removal event handler
+        # should normally have already dropped the camera; this is the
+        # defense-in-depth path for cases the handler can't observe.
+        status: List[CameraStatus] = []
+        for c in self.cams:
+            try:
+                cs = CameraStatus(
+                    SerialNumber=c.DeviceSerialNumber,
+                    Status="Initialized",
+                    PixelFormat=c.PixelFormat,
+                    BinningHorizontal=c.BinningHorizontal,
+                    BinningVertical=c.BinningVertical,
+                    Width=c.Width,
+                    Height=c.Height,
+                )
+            except Exception as e:  # noqa: BLE001
+                self._fire_diagnostic_once(
+                    camera_serial="?",
+                    code="camera_status_unreadable",
+                    level="warn",
+                    message=(
+                        "A camera handle did not respond to a basic status "
+                        f"read: {e}. Try Restart acquisition."
+                    ),
+                )
+                continue
+            status.append(cs)
 
         for c in self.cams:
-            c.GevIEEE1588DataSetLatch()
-            # print(
-            #    "Primary" if c.GevIEEE1588StatusLatched == "Master" else "Secondary",
-            #    c.GevIEEE1588OffsetFromMasterLatched,
-            # )
-
-            # set the corresponding camera status
+            try:
+                c.GevIEEE1588DataSetLatch()
+                offset = c.GevIEEE1588OffsetFromMasterLatched
+                serial = c.DeviceSerialNumber
+            except Exception:  # noqa: BLE001
+                continue
             for cs in status:
-                if cs.SerialNumber == c.DeviceSerialNumber:
-                    cs.SyncOffset = c.GevIEEE1588OffsetFromMasterLatched
+                if cs.SerialNumber == serial:
+                    cs.SyncOffset = offset
 
         status.sort(key=lambda x: x.SerialNumber)
 
@@ -1199,37 +1442,49 @@ class FlirRecorder:
         return serial_msg, frame_count
 
     def _read_ptp_offsets(self) -> dict[str, int]:
-        """Read GevIEEE1588OffsetFromMasterLatched for each camera."""
+        """Read GevIEEE1588OffsetFromMasterLatched for each camera. Skips
+        cameras whose handle has been invalidated mid-session rather than
+        aborting the whole read.
+        """
         offsets: dict[str, int] = {}
         for c in self.cams:
-            serial = c.DeviceSerialNumber
             try:
+                serial = c.DeviceSerialNumber
                 c.GevIEEE1588DataSetLatch()
                 offsets[serial] = c.GevIEEE1588OffsetFromMasterLatched
-            except (AttributeError, PySpin.SpinnakerException):
+            except (AttributeError, PySpin.SpinnakerException, CameraError):
                 pass
         return offsets
 
     def _read_camera_temperatures(self) -> dict[str, float]:
-        """Read DeviceTemperature for each camera."""
+        """Read DeviceTemperature for each camera. Skips cameras whose
+        handle has been invalidated mid-session (e.g. cable unplug)
+        rather than aborting the whole read.
+        """
         temps: dict[str, float] = {}
         for c in self.cams:
-            serial = c.DeviceSerialNumber
             try:
+                serial = c.DeviceSerialNumber
                 temps[serial] = float(c.DeviceTemperature)
-            except (AttributeError, PySpin.SpinnakerException):
+            except (AttributeError, PySpin.SpinnakerException, CameraError):
                 pass
         return temps
 
     def _read_camera_stats(self) -> dict[str, dict[str, int]]:
+        """Read per-camera stream stats. Skips cameras whose handle has
+        been invalidated mid-session rather than aborting the whole read.
+        """
         stats: dict[str, dict[str, int]] = {}
         for c in self.cams:
-            serial = c.DeviceSerialNumber
+            try:
+                serial = c.DeviceSerialNumber
+            except (AttributeError, PySpin.SpinnakerException, CameraError):
+                continue
             cam_stats: dict[str, int] = {}
             for attr in ["StreamDroppedFrameCount", "TransferQueueOverflowCount"]:
                 try:
                     cam_stats[attr] = getattr(c, attr)
-                except (AttributeError, PySpin.SpinnakerException):
+                except (AttributeError, PySpin.SpinnakerException, CameraError):
                     pass
             stats[serial] = cam_stats
         return stats
@@ -1262,6 +1517,36 @@ class FlirRecorder:
         self.set_status("Recording")
         with self._diagnostics_fired_lock:
             self._diagnostics_fired.clear()
+
+        # Drop any camera handles that went dead between configure_cameras
+        # and now (e.g. operator unplugged a camera while the system was
+        # idle). Cameras are Init'd at this point, so DeviceSerialNumber
+        # is readable on live ones and raises CameraError on dead ones.
+        # Without this filter, the image_queue_dict comprehension below
+        # crashes start_acquisition with no clean recovery.
+        live_cams = []
+        for c in self.cams:
+            try:
+                serial = c.DeviceSerialNumber
+            except Exception as e:  # noqa: BLE001
+                self._fire_diagnostic_once(
+                    camera_serial="?",
+                    code="camera_handle_invalid",
+                    level="warn",
+                    message=(
+                        f"A camera handle was dead at start of trial "
+                        f"(skipping it): {e}. Click Restart acquisition "
+                        "to bring it back in."
+                    ),
+                )
+                continue
+            live_cams.append(c)
+        if not live_cams:
+            raise RuntimeError(
+                "No live camera handles at start of trial — every "
+                "configured camera appears disconnected."
+            )
+        self.cams = live_cams
         self._diagnostics_level = diagnostics_level
         self._timespread_alert_threshold_ms = timespread_alert_threshold_ms
         self._sync_timeout_s = sync_timeout_s
@@ -1294,6 +1579,14 @@ class FlirRecorder:
         config_metadata = self._prepare_config_metadata(max_frames)
         config_metadata["frame_skip_events"] = self._frame_skip_events
         config_metadata["ptp_jump_events"] = self._ptp_jump_events
+
+        # Surface the hash this trial will land under so the operator can
+        # verify rig-recalibrate behavior without opening the JSON sidecar.
+        salt_state = "set" if self._config_hash_salt else "empty"
+        print(
+            f"[config_hash] trial recording under camera_config_hash="
+            f"{config_metadata.get('camera_config_hash', '?')} (salt={salt_state})"
+        )
 
         # Set max_frames = self.video_segment_len. self.video_segment_len is either set to max_frames or
         # a value from the config file.
@@ -1580,6 +1873,12 @@ class FlirRecorder:
                         f"{camera_serial}: Failed to get image — {err_text}",
                     )
                     if "-1002" in err_text or "no longer valid" in err_text:
+                        # Disconnect during grab — surface to the operator
+                        # and bail out of this worker. Without the break,
+                        # the loop would spam -1002 every few ms for the
+                        # rest of the trial. Putting None in the
+                        # acquisition_queue lets the corresponding writer
+                        # thread drain and exit cleanly.
                         self._fire_diagnostic_once(
                             camera_serial=camera_serial,
                             code="camera_disconnected",
@@ -1590,6 +1889,8 @@ class FlirRecorder:
                             ),
                             details={"spinnaker_error": err_text},
                         )
+                        self.acquisition_queue[camera_serial].put(None)
+                        break
                     elif "-1012" in err_text or "aborted" in err_text:
                         self._fire_diagnostic_once(
                             camera_serial=camera_serial,
@@ -1601,16 +1902,29 @@ class FlirRecorder:
                             ),
                             details={"spinnaker_error": err_text},
                         )
+                        self.acquisition_queue[camera_serial].put(None)
+                        break
                     else:
-                        self._fire_diagnostic_once(
-                            camera_serial=camera_serial,
-                            code="camera_grab_error",
-                            level="warn",
-                            message=(
-                                f"Camera {camera_serial} failed to deliver a frame: {err_text}"
-                            ),
-                            details={"spinnaker_error": err_text},
-                        )
+                        classified = classify_spinnaker_error(err_text)
+                        if classified is not None:
+                            self._fire_diagnostic_once(
+                                camera_serial=camera_serial,
+                                code=classified["code"],
+                                level=classified["level"],
+                                message=classified["message"],
+                                remediation=classified["remediation"],
+                                details={"spinnaker_error": err_text},
+                            )
+                        else:
+                            self._fire_diagnostic_once(
+                                camera_serial=camera_serial,
+                                code="camera_grab_error",
+                                level="warn",
+                                message=(
+                                    f"Camera {camera_serial} failed to deliver a frame: {err_text}"
+                                ),
+                                details={"spinnaker_error": err_text},
+                            )
                     time.sleep(0.1)
                     continue
 
@@ -2200,18 +2514,38 @@ class FlirRecorder:
     def close(self):
         """Close all the cameras and release the system"""
 
+        self._unregister_interface_events()
+
         if len(self.cams) > 0:
 
             def close_cam(c):
-                print("Closing camera", c.DeviceSerialNumber)
-                c.cam.DeInit()
-                c.close()
+                # Every read off c can raise CameraError if the camera was
+                # unplugged. Guard each step independently so one dead
+                # handle doesn't prevent the rest of the cameras (and the
+                # system release) from being cleaned up.
+                serial = "?"
+                try:
+                    serial = c.DeviceSerialNumber
+                except Exception:  # noqa: BLE001
+                    pass
+                print("Closing camera", serial)
+                try:
+                    c.cam.DeInit()
+                except Exception as e:  # noqa: BLE001
+                    print(f"DeInit on {serial} raised (continuing): {e}")
+                try:
+                    c.close()
+                except Exception as e:  # noqa: BLE001
+                    print(f"close on {serial} raised (continuing): {e}")
                 del c
 
+            # Use list() to force materialization of all futures, so any
+            # exception that DID slip past the inner guards is collected
+            # rather than swallowed by the executor's iterator.
             with concurrent.futures.ThreadPoolExecutor(
                 max_workers=len(self.cams)
             ) as executor:
-                executor.map(close_cam, self.cams)
+                list(executor.map(close_cam, self.cams))
 
         self.cams = []
 

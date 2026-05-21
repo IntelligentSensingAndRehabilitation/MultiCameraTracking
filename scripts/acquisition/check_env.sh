@@ -77,6 +77,36 @@ set_env_value() {
     fi
 }
 
+# Echo a suggested DEPLOYMENT_MODE ("laptop" or "network") plus a one-line
+# rationale on stderr, based on signs that this host runs its own DHCP server
+# for the camera subnet. Empty echo on stdout means "no strong signal".
+suggest_deployment_mode() {
+    local rationale=""
+    local mode=""
+    if command -v nmcli >/dev/null 2>&1 && nmcli -t -f NAME con show 2>/dev/null | grep -qx "DHCP-Server"; then
+        mode="laptop"
+        rationale="NetworkManager profile 'DHCP-Server' is configured"
+    elif command -v dhcpd >/dev/null 2>&1 || dpkg -s isc-dhcp-server >/dev/null 2>&1; then
+        mode="laptop"
+        rationale="isc-dhcp-server is installed"
+    else
+        local iface
+        iface="$(get_env_value NETWORK_INTERFACE)"
+        if [ -n "$iface" ] && command -v ip >/dev/null 2>&1; then
+            local addrs
+            addrs="$(ip -4 -o addr show dev "$iface" 2>/dev/null | awk '{print $4}')"
+            if [ -n "$addrs" ] && ! echo "$addrs" | grep -q '^192\.168\.1\.'; then
+                mode="network"
+                rationale="$iface has $addrs (no 192.168.1.x address)"
+            fi
+        fi
+    fi
+    if [ -n "$mode" ]; then
+        echo "$mode"
+        [ -n "$rationale" ] && echo "  hint: detected $mode mode ($rationale)" >&2
+    fi
+}
+
 print_header "Validating .env against .env.template"
 
 if [ ! -f "$TEMPLATE_FILE" ]; then
@@ -111,9 +141,14 @@ while IFS= read -r -u 3 line; do
         echo "$var"
         desc=$(describe_var "$var")
         [ -n "$desc" ] && echo "  $desc"
-        if [ -n "$template_default" ]; then
-            read -r -p "  value [$template_default]: " value
-            value="${value:-$template_default}"
+        prompt_default="$template_default"
+        if [ "$var" = "DEPLOYMENT_MODE" ]; then
+            suggested="$(suggest_deployment_mode)"
+            [ -n "$suggested" ] && prompt_default="$suggested"
+        fi
+        if [ -n "$prompt_default" ]; then
+            read -r -p "  value [$prompt_default]: " value
+            value="${value:-$prompt_default}"
         else
             read -r -p "  value: " value
         fi

@@ -1,4 +1,5 @@
-import React, { useContext, useState, useRef, useEffect } from "react";
+import React, { useContext, useState, useRef } from "react";
+import { useEffectOnce } from "./AcquisitionApi";
 import { Accordion, Table, Form, Container, Button, Col, Row, ButtonGroup, ToggleButton } from 'react-bootstrap';
 import path from 'path-browserify';
 import { AcquisitionState } from "./AcquisitionApi";
@@ -249,17 +250,17 @@ const AnalysisHome = () => {
         onCalibrate: onCalibrate
     }
 
-    useEffect(() => {
-
+    // Fetch the recording DB once on mount. fetchRecordingDb is recreated
+    // on every AcquisitionApi render, so adding it as a dependency would
+    // cause an endless re-fetch loop.
+    useEffectOnce(() => {
         const fetchData = async () => {
             const recordings = await fetchRecordingDb();
             console.log("recordings", recordings);
             setRecordingDb(recordings);
-        }
-
+        };
         fetchData();
-
-    }, [fetchRecordingDb]);
+    }, []);
 
     const resyncData = async () => {
         const recordings = await fetchRecordingDb();
