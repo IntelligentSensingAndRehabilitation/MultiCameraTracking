@@ -1182,12 +1182,12 @@ class FlirRecorder:
 
         self.trigger = trigger
 
-        # NOTE: PySpin InterfaceEventHandler registration was disabled in
-        # PR 4 testing — registering a handler appears to leak a C++ ref to
+        # PySpin InterfaceEventHandler registration is intentionally
+        # disabled: registering a handler appears to leak a C++ ref to
         # the interface that survives UnregisterEventHandler, causing
         # `terminate called ... [-1004] Can't clear interface` on
-        # subsequent reset_cameras. Camera-disconnect detection now relies
-        # on acquire_frames' -1002/-1012 catch path. Tracked in a bead.
+        # subsequent reset_cameras. Camera-disconnect detection currently
+        # relies on acquire_frames' -1002/-1012 catch path.
         # self._register_interface_events()
 
         self.iface.TLInterface.GevActionDeviceKey.SetValue(0)
@@ -1863,12 +1863,11 @@ class FlirRecorder:
                     )
                     if "-1002" in err_text or "no longer valid" in err_text:
                         # Disconnect during grab — surface to the operator
-                        # and bail out of this worker. Without the break
+                        # and bail out of this worker. Without the break,
                         # the loop would spam -1002 every few ms for the
-                        # rest of the trial (observed: x244 in a single
-                        # ~5s window during PR 4 testing). Putting None
-                        # in the acquisition_queue lets the corresponding
-                        # writer thread drain and exit cleanly.
+                        # rest of the trial. Putting None in the
+                        # acquisition_queue lets the corresponding writer
+                        # thread drain and exit cleanly.
                         self._fire_diagnostic_once(
                             camera_serial=camera_serial,
                             code="camera_disconnected",
