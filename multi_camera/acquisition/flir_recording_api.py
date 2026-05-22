@@ -100,6 +100,17 @@ def select_interface(interface, cameras):
     return retval
 
 
+class TrialAbortedError(RuntimeError):
+    """Raised by start_acquisition when a camera disconnected mid-trial.
+
+    A multi-camera trial missing one camera cannot go through the
+    reconstruction pipeline, so the trial is failed as a whole rather
+    than saved as a partial recording. The partial mp4 files stay on
+    disk for inspection, but no recording-database row is created, so
+    the trial is never pushed to DataJoint.
+    """
+
+
 def _mac_str_to_int(mac: str) -> int:
     """``aa:bb:cc:dd:ee:ff`` → integer, matches PySpin's MAC node format."""
     return int(mac.replace(":", "").replace("-", ""), 16)
@@ -900,6 +911,13 @@ class FlirRecorder:
         self.stop_recording = threading.Event()
         self.stop_frame_set = threading.Event()
 
+        # Set when a camera disconnects mid-trial. The string is the
+        # operator-facing reason; start_acquisition raises TrialAbortedError
+        # with it instead of returning records, so the trial is not written
+        # to the recording database. Reset at the start of every trial.
+        self._trial_aborted_reason: str | None = None
+        self._trial_abort_lock = threading.Lock()
+
         # Set up thread safe counter for frame count
         self.frame_counter_lock = threading.Lock()
         self.stop_frame = 0
@@ -1502,6 +1520,24 @@ class FlirRecorder:
         self.stop_frame_set.set()
         print("stop_frame", self.stop_frame)
 
+    def _abort_trial(self, reason: str) -> None:
+        """Mark the in-progress trial as failed and trigger a coordinated
+        stop of every camera worker.
+
+        Called from a camera worker thread when that camera disconnects
+        mid-trial. The first caller wins; later disconnects during the
+        same wind-down are ignored. Triggering stop_acquisition() routes
+        the remaining cameras through the normal stop path so their mp4
+        files finalize cleanly. start_acquisition checks the recorded
+        reason after the wind-down and raises TrialAbortedError.
+        """
+        with self._trial_abort_lock:
+            if self._trial_aborted_reason is not None:
+                return
+            self._trial_aborted_reason = reason
+        print(f"[trial_abort] {reason}")
+        self.stop_acquisition()
+
     def start_acquisition(
         self,
         recording_path=None,
@@ -1517,6 +1553,8 @@ class FlirRecorder:
         self.set_status("Recording")
         with self._diagnostics_fired_lock:
             self._diagnostics_fired.clear()
+        with self._trial_abort_lock:
+            self._trial_aborted_reason = None
 
         # Drop any camera handles that went dead between configure_cameras
         # and now (e.g. operator unplugged a camera while the system was
@@ -1873,12 +1911,11 @@ class FlirRecorder:
                         f"{camera_serial}: Failed to get image — {err_text}",
                     )
                     if "-1002" in err_text or "no longer valid" in err_text:
-                        # Disconnect during grab — surface to the operator
-                        # and bail out of this worker. Without the break,
-                        # the loop would spam -1002 every few ms for the
-                        # rest of the trial. Putting None in the
-                        # acquisition_queue lets the corresponding writer
-                        # thread drain and exit cleanly.
+                        # Disconnect during grab. Surface it to the operator,
+                        # bail out of this worker (putting None in the
+                        # acquisition_queue lets the writer thread drain and
+                        # exit), and abort the whole trial — a multi-camera
+                        # recording missing one camera is not usable.
                         self._fire_diagnostic_once(
                             camera_serial=camera_serial,
                             code="camera_disconnected",
@@ -1890,6 +1927,9 @@ class FlirRecorder:
                             details={"spinnaker_error": err_text},
                         )
                         self.acquisition_queue[camera_serial].put(None)
+                        self._abort_trial(
+                            f"Camera {camera_serial} disconnected during recording"
+                        )
                         break
                     elif "-1012" in err_text or "aborted" in err_text:
                         self._fire_diagnostic_once(
@@ -1903,6 +1943,9 @@ class FlirRecorder:
                             details={"spinnaker_error": err_text},
                         )
                         self.acquisition_queue[camera_serial].put(None)
+                        self._abort_trial(
+                            f"Camera {camera_serial} stream aborted during recording"
+                        )
                         break
                     else:
                         classified = classify_spinnaker_error(err_text)
@@ -2233,6 +2276,16 @@ class FlirRecorder:
             self.records_queue.join()
 
         self.set_status("Idle")
+
+        # If a camera disconnected mid-trial, fail the whole trial. The
+        # partial mp4 files have been finalized above and stay on disk for
+        # inspection, but raising here means start_acquisition's caller
+        # never receives the records list, so no recording-database row is
+        # created and the trial is never pushed to DataJoint.
+        with self._trial_abort_lock:
+            abort_reason = self._trial_aborted_reason
+        if abort_reason is not None:
+            raise TrialAbortedError(abort_reason)
 
         return records
 

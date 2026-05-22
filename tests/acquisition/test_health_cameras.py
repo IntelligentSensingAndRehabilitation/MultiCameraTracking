@@ -882,3 +882,52 @@ class TestPostTrialStatReadersSkipDeadHandles:
         rec = self._make_recorder([self._live_camera("AAA"), self._dead_camera()])
         offsets = rec._read_ptp_offsets()
         assert offsets == {"AAA": 12}
+
+
+class TestTrialAbort:
+    """_abort_trial marks the in-progress trial as failed and triggers a
+    coordinated stop. start_acquisition reads the recorded reason after the
+    wind-down and raises TrialAbortedError so the trial is not written to
+    the recording database.
+    """
+
+    def _make_recorder(self):
+        import threading
+
+        from multi_camera.acquisition.flir_recording_api import FlirRecorder
+
+        rec = FlirRecorder.__new__(FlirRecorder)
+        rec._trial_aborted_reason = None
+        rec._trial_abort_lock = threading.Lock()
+        rec.stop_recording = threading.Event()
+        return rec
+
+    def test_abort_records_reason_and_triggers_stop(self) -> None:
+        rec = self._make_recorder()
+        assert not rec.stop_recording.is_set()
+        rec._abort_trial("Camera 111 disconnected during recording")
+        assert rec._trial_aborted_reason == (
+            "Camera 111 disconnected during recording"
+        )
+        # stop_acquisition() must have fired so the other camera workers
+        # wind down through the normal stop path.
+        assert rec.stop_recording.is_set()
+
+    def test_first_abort_wins(self) -> None:
+        rec = self._make_recorder()
+        rec._abort_trial("Camera 111 disconnected during recording")
+        rec._abort_trial("Camera 222 stream aborted during recording")
+        # A second disconnect during the same wind-down must not overwrite
+        # the reason — the first camera to drop is the one reported.
+        assert rec._trial_aborted_reason == (
+            "Camera 111 disconnected during recording"
+        )
+
+    def test_trial_aborted_error_is_runtime_error(self) -> None:
+        # task_done_callback catches Exception; restart/recovery code paths
+        # catch RuntimeError. TrialAbortedError must satisfy both.
+        from multi_camera.acquisition.flir_recording_api import TrialAbortedError
+
+        err = TrialAbortedError("Camera 111 disconnected during recording")
+        assert isinstance(err, RuntimeError)
+        assert "Camera 111" in str(err)
