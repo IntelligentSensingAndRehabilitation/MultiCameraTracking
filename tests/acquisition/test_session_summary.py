@@ -147,6 +147,22 @@ def test_session_summary_endpoint_returns_insights_list(configured_session) -> N
     assert isinstance(body["trial_findings"], list)
 
 
+def test_session_summary_includes_session_header(configured_session) -> None:
+    """The summary carries a one-line session-scope header so the operator
+    can tell which participant / date / trial range is being shown.
+    """
+    with TestClient(backend_fastapi.app) as client:
+        r = client.get("/api/v1/health/session_summary")
+    assert r.status_code == 200
+    header = r.json()["session_header"]
+    assert "participant_1" in header
+    assert "2026-04-22" in header
+    assert "3 trials" in header
+    # The three trial sidecars are named ..._120000 / _120001 / _120002.
+    assert "12:00:00" in header
+    assert "12:00:02" in header
+
+
 def test_session_summary_returns_404_without_session(
     configured_session, monkeypatch
 ) -> None:
@@ -180,3 +196,5 @@ def test_session_summary_returns_empty_when_no_trials_yet(
     assert body["insights"] == []
     assert body["recommendations"] == []
     assert body["trial_findings"] == []
+    assert "no trials yet" in body["session_header"]
+    assert "participant_2" in body["session_header"]
