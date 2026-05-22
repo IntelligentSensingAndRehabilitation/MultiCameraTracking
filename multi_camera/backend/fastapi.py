@@ -34,7 +34,11 @@ import re
 import time
 from pathlib import Path
 
-from multi_camera.acquisition.flir_recording_api import FlirRecorder, CameraStatus
+from multi_camera.acquisition.flir_recording_api import (
+    FlirRecorder,
+    CameraStatus,
+    TrialAbortedError,
+)
 from multi_camera.acquisition.diagnostics.json_parser import (
     diagnose_session_issues,
     diagnose_sync_issues,
@@ -1094,16 +1098,30 @@ async def new_trial(data: NewTrialData, db: Session = Depends(db_dependency)):
                 and state.acquisition is not None
             ):
                 state.acquisition.set_status("Idle")
-            broadcast_event(
-                event_type="error",
-                level="error",
-                code="trial_failed",
-                message=f"Recording failed: {e}",
-                details={
-                    "exception_type": type(e).__name__,
-                    "traceback": traceback.format_exc(),
-                },
-            )
+            # A TrialAbortedError is the expected outcome of a mid-trial
+            # camera disconnect, not a crash — give the operator a plain
+            # message and a distinct code rather than a raw traceback.
+            if isinstance(e, TrialAbortedError):
+                broadcast_event(
+                    event_type="error",
+                    level="error",
+                    code="trial_aborted",
+                    message=(
+                        f"Trial aborted: {e}. The partial recording was not "
+                        "saved — please redo the trial."
+                    ),
+                )
+            else:
+                broadcast_event(
+                    event_type="error",
+                    level="error",
+                    code="trial_failed",
+                    message=f"Recording failed: {e}",
+                    details={
+                        "exception_type": type(e).__name__,
+                        "traceback": traceback.format_exc(),
+                    },
+                )
 
     task.add_done_callback(task_done_callback)
 
