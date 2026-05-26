@@ -276,6 +276,11 @@ const CurrentSessionPanel = () => {
 
                 {sessionSummary && (
                     <>
+                        {sessionSummary.session_header && (
+                            <div className="fw-bold mb-1">
+                                {sessionSummary.session_header}
+                            </div>
+                        )}
                         <div className="mb-3 small text-muted">
                             {sessionSummary.n_trials} trials analyzed.{' '}
                             Last refreshed: {new Date(sessionSummary.generated_at).toLocaleTimeString()}

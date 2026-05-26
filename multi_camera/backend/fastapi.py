@@ -38,6 +38,7 @@ from multi_camera.acquisition.flir_recording_api import FlirRecorder, CameraStat
 from multi_camera.acquisition.diagnostics.json_parser import (
     diagnose_session_issues,
     diagnose_sync_issues,
+    format_trial_time,
     load_session,
 )
 from multi_camera.acquisition.health import (
@@ -673,7 +674,35 @@ class SessionSummaryReport(BaseModel):
     insights: List[str]
     recommendations: List[str]
     trial_findings: List[str] = []
+    session_header: str = ""
     generated_at: datetime.datetime
+
+
+def _build_session_header(session_dir: str, report=None) -> str:
+    """Build the one-line session-scope header for the Diagnostics tab.
+
+    ``session_dir`` is ``RECORDING_BASE/{participant}/{YYYYMMDD}``, so the
+    participant and date come from the path. The trial count and time
+    range come from the loaded report; ``report`` is None when the session
+    has no trials yet.
+    """
+    path = Path(session_dir)
+    participant = path.parent.name or "unknown"
+    try:
+        date_label = datetime.datetime.strptime(path.name, "%Y%m%d").strftime(
+            "%Y-%m-%d"
+        )
+    except ValueError:
+        date_label = path.name
+    trials = report.trials if report is not None else []
+    if not trials:
+        return f"Session: {participant} — {date_label} (no trials yet)"
+    times = sorted(format_trial_time(t.recording_timestamp) for t in trials)
+    plural = "s" if len(trials) != 1 else ""
+    return (
+        f"Session: {participant} — {date_label} "
+        f"({len(trials)} trial{plural}, {times[0]} → {times[-1]})"
+    )
 
 
 def _build_session_summary(session_dir: str) -> SessionSummaryReport:
@@ -692,6 +721,7 @@ def _build_session_summary(session_dir: str) -> SessionSummaryReport:
             insights=[],
             recommendations=[],
             trial_findings=[],
+            session_header=_build_session_header(session_dir),
             generated_at=now,
         )
     insights, recommendations = diagnose_session_issues(report)
@@ -701,6 +731,7 @@ def _build_session_summary(session_dir: str) -> SessionSummaryReport:
         insights=insights,
         recommendations=recommendations,
         trial_findings=trial_findings,
+        session_header=_build_session_header(session_dir, report),
         generated_at=now,
     )
 

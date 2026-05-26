@@ -142,6 +142,30 @@ def extract_recording_timestamp(json_path: Path) -> str:
     return candidate
 
 
+def format_trial_time(recording_timestamp: str) -> str:
+    """Convert a ``YYYYMMDD_HHMMSS`` recording timestamp to ``HH:MM:SS``.
+
+    Returns the input unchanged if it does not match the expected format,
+    so a malformed timestamp degrades to a visible string rather than an
+    exception.
+    """
+    try:
+        return datetime.strptime(recording_timestamp, "%Y%m%d_%H%M%S").strftime(
+            "%H:%M:%S"
+        )
+    except (ValueError, TypeError):
+        return recording_timestamp
+
+
+def trial_label(t: TrialSyncMetrics) -> str:
+    """Operator-facing label for a trial: index plus wall-clock start time.
+
+    Used to prefix per-trial findings so the operator can tell which
+    recording a finding refers to without cross-referencing trial indices.
+    """
+    return f"Trial {t.trial_index} ({format_trial_time(t.recording_timestamp)})"
+
+
 def load_trial(json_path: Path, trial_index: int) -> TrialSyncMetrics:
     """Load a single JSON metadata file and compute sync deltas."""
     with open(json_path) as f:
@@ -805,7 +829,7 @@ def diagnose_sync_issues(report: SessionSyncReport) -> list[str]:
             nonzero = row[row != 0]
             if len(nonzero) == per_frame_deltas.shape[1] and len(set(nonzero)) == 1:
                 insights.append(
-                    f"Trial {t.trial_index}: all delta cameras show {nonzero[0]:+d} at frame {row_idx} "
+                    f"{trial_label(t)}: all delta cameras show {nonzero[0]:+d} at frame {row_idx} "
                     f"→ reference camera ({t.reference_camera}) skipped, not the others"
                 )
                 break
@@ -841,7 +865,7 @@ def diagnose_sync_issues(report: SessionSyncReport) -> list[str]:
                 and count > n_waited * BOTTLENECK_MIN_FRACTION
             ):
                 insights.append(
-                    f"Trial {t.trial_index}: Camera {cam} was sync bottleneck on {count}/{n_waited} waited frames"
+                    f"{trial_label(t)}: Camera {cam} was sync bottleneck on {count}/{n_waited} waited frames"
                 )
 
     # 6. Queue depth spikes: any camera queue exceeding depth 10
@@ -861,7 +885,7 @@ def diagnose_sync_issues(report: SessionSyncReport) -> list[str]:
                 f"{cam}={d}" for cam, d in sorted(spiked.items(), key=lambda x: -x[1])
             ]
             insights.append(
-                f"Trial {t.trial_index}: Queue depth spikes ({', '.join(parts)}) "
+                f"{trial_label(t)}: Queue depth spikes ({', '.join(parts)}) "
                 f"→ metadata thread falling behind acquisition"
             )
 
@@ -894,7 +918,7 @@ def diagnose_sync_issues(report: SessionSyncReport) -> list[str]:
             longest_run = current_run_len
             longest_run_start = current_run_start
         insights.append(
-            f"Trial {t.trial_index}: Frame-ID cross-camera misalignment first at frame {first_nonzero}, "
+            f"{trial_label(t)}: Frame-ID cross-camera misalignment first at frame {first_nonzero}, "
             f"longest consecutive run of {longest_run} frames starting at frame {longest_run_start}"
         )
 
@@ -924,7 +948,7 @@ def diagnose_sync_issues(report: SessionSyncReport) -> list[str]:
                 if gaps:
                     parts.append(f"{gaps} gaps")
                 insights.append(
-                    f"Trial {t.trial_index}: Camera {cam}: "
+                    f"{trial_label(t)}: Camera {cam}: "
                     f"{', '.join(parts)} ({rate:.1f}% error rate)"
                 )
 
@@ -942,7 +966,7 @@ def diagnose_sync_issues(report: SessionSyncReport) -> list[str]:
                 if overflow > 0:
                     parts.append(f"queue overflow {overflow}")
                 insights.append(
-                    f"Trial {t.trial_index}: Camera {cam} {', '.join(parts)} at device/network level"
+                    f"{trial_label(t)}: Camera {cam} {', '.join(parts)} at device/network level"
                 )
 
     # 10. PTP offset drift: significant change between recording start and end
@@ -957,7 +981,7 @@ def diagnose_sync_issues(report: SessionSyncReport) -> list[str]:
             drift_us = abs(end_ns - start_ns) / 1000
             if drift_us > PTP_DRIFT_THRESHOLD_US:
                 insights.append(
-                    f"Trial {t.trial_index}: Camera {cam} PTP offset drifted {drift_us:.0f} µs during recording "
+                    f"{trial_label(t)}: Camera {cam} PTP offset drifted {drift_us:.0f} µs during recording "
                     f"(start={start_ns} ns, end={end_ns} ns)"
                 )
 
@@ -973,7 +997,7 @@ def diagnose_sync_issues(report: SessionSyncReport) -> list[str]:
             delta = end_temp - start_temp
             if delta > TEMPERATURE_RISE_THRESHOLD_C:
                 insights.append(
-                    f"Trial {t.trial_index}: Camera {cam} temperature rose {delta:.1f}°C "
+                    f"{trial_label(t)}: Camera {cam} temperature rose {delta:.1f}°C "
                     f"({start_temp:.1f}→{end_temp:.1f}°C)"
                 )
 
@@ -986,7 +1010,7 @@ def diagnose_sync_issues(report: SessionSyncReport) -> list[str]:
         for evt in t.sync_timeout_events:
             cameras_involved.update(evt.get("empty_cameras", []))
         insights.append(
-            f"Trial {t.trial_index}: {n_events} sync timeout event(s), "
+            f"{trial_label(t)}: {n_events} sync timeout event(s), "
             f"stalled cameras: {', '.join(sorted(cameras_involved))}"
         )
 
@@ -996,7 +1020,7 @@ def diagnose_sync_issues(report: SessionSyncReport) -> list[str]:
             continue
         alerts = t.timespread_alerts
         insights.append(
-            f"Trial {t.trial_index}: {alerts['count']} timespread alert(s), "
+            f"{trial_label(t)}: {alerts['count']} timespread alert(s), "
             f"max {alerts['max_spread_ms']:.3f} ms, "
             f"frames {alerts['first_frame']}-{alerts['last_frame']}"
         )
@@ -1012,53 +1036,77 @@ def diagnose_sync_issues(report: SessionSyncReport) -> list[str]:
         delta_dropped = last_dropped - first_dropped
         if delta_dropped > 0:
             insights.append(
-                f"Trial {t.trial_index}: NIC rx_dropped increased by {delta_dropped} during recording"
+                f"{trial_label(t)}: NIC rx_dropped increased by {delta_dropped} during recording"
             )
 
-    # 15. Frame skip events: placeholder insertion or unrecovered skips
+    # 15. Frame skip events: one summary line per camera per trial.
+    # A trial can contain hundreds of individual skip events; emitting one
+    # line each makes the findings list unscannable. Aggregate into a
+    # per-camera summary instead — the individual events stay in the saved
+    # JSON metadata for anyone who needs the detail.
     for t in report.trials:
         if not t.frame_skip_events:
             continue
+        events_by_camera: dict[str, list[dict]] = {}
         for evt in t.frame_skip_events:
-            cam = evt["camera_serial"]
-            frame_idx = evt["frame_idx"]
-            gap = evt["gap_size"]
-            if evt["recovered"]:
-                action = "placeholder inserted"
+            events_by_camera.setdefault(evt["camera_serial"], []).append(evt)
+        for cam, events in sorted(events_by_camera.items()):
+            total_skipped = sum(e["gap_size"] for e in events)
+            unrecovered = sum(1 for e in events if not e["recovered"])
+            frame_indices = sorted(e["frame_idx"] for e in events)
+            first_frame, last_frame = frame_indices[0], frame_indices[-1]
+            if unrecovered == 0:
+                recovery = "all recovered with placeholder frames"
+            elif unrecovered == len(events):
+                recovery = "none recovered"
             else:
-                action = "NOT recovered"
-            plural = "s" if gap > 1 else ""
+                recovery = f"{unrecovered} of {len(events)} not recovered"
+            rate = ""
+            if t.n_frames > 0:
+                rate = f", {total_skipped / t.n_frames:.1%} of trial"
+            plural = "s" if len(events) != 1 else ""
             insights.append(
-                f"Trial {t.trial_index}: Camera {cam} skipped {gap} frame{plural} "
-                f"at frame {frame_idx} — {action}"
+                f"{trial_label(t)}: Camera {cam} skipped {total_skipped} frames "
+                f"across {len(events)} event{plural} "
+                f"(frames {first_frame}-{last_frame}{rate}) — {recovery}"
             )
 
-    # 16. PTP timestamp jumps: per-camera clock discontinuities
+    # 16. PTP timestamp jumps: one summary line per camera per trial.
+    # Aggregated for the same reason as detector 15.
     for t in report.trials:
         threshold_ms = frame_period * TIMESTAMP_JUMP_THRESHOLD_FACTOR
         jumps = detect_timestamp_jumps(t, threshold_ms=threshold_ms)
+        if not jumps:
+            continue
+        jumps_by_camera: dict[str, list[dict]] = {}
         for j in jumps:
-            cam = j["camera"]
-            frame = j["frame"]
-            if j["correction_frame"] is not None:
-                frames_affected = j["frames_affected"]
-                residual = j["residual_ms"]
-                if j["frame_ids_aligned"]:
-                    usability = "Frame IDs aligned — frames usable, timestamps unreliable in affected range"
-                else:
-                    usability = "Frame ID drift during jump — manual review recommended"
-                insights.append(
-                    f"Trial {t.trial_index}: Camera {cam} timestamp jumped "
-                    f"{j['magnitude_ms']:+.0f}ms at frame {frame}, "
-                    f"corrected {j['correction_ms']:+.0f}ms at frame {j['correction_frame']} "
-                    f"({frames_affected} frames, residual {residual:+.0f}ms). {usability}"
+            jumps_by_camera.setdefault(j["camera"], []).append(j)
+        for cam, cam_jumps in sorted(jumps_by_camera.items()):
+            corrected = sum(1 for j in cam_jumps if j["correction_frame"] is not None)
+            uncorrected = len(cam_jumps) - corrected
+            max_magnitude = max(abs(j["magnitude_ms"]) for j in cam_jumps)
+            frames = sorted(j["frame"] for j in cam_jumps)
+            if uncorrected == 0:
+                outcome = (
+                    "all corrected within the trial — timestamps unreliable "
+                    "only in the affected ranges"
+                )
+            elif corrected == 0:
+                outcome = (
+                    "none corrected within the trial — timestamps unreliable "
+                    "from the first jump onward"
                 )
             else:
-                insights.append(
-                    f"Trial {t.trial_index}: Camera {cam} PTP jump "
-                    f"{j['magnitude_ms']:+.0f}ms at frame {frame} — "
-                    f"not corrected within trial. Timestamps unreliable from frame {frame} onward"
+                outcome = (
+                    f"{corrected} corrected, {uncorrected} not corrected — "
+                    "review the uncorrected ranges"
                 )
+            plural = "s" if len(cam_jumps) != 1 else ""
+            insights.append(
+                f"{trial_label(t)}: Camera {cam} had {len(cam_jumps)} PTP timestamp "
+                f"jump{plural} (max {max_magnitude:.0f} ms, "
+                f"frames {frames[0]}-{frames[-1]}) — {outcome}"
+            )
 
     return insights
 

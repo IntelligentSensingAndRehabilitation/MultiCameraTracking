@@ -16,9 +16,11 @@ from multi_camera.acquisition.diagnostics.json_parser import (
     detect_timestamp_jumps,
     diagnose_session_issues,
     diagnose_sync_issues,
+    format_trial_time,
     load_session,
     load_trial,
     save_report,
+    trial_label,
 )
 
 CAMERA_IDS = ["CAM_A", "CAM_B", "CAM_C"]
@@ -572,6 +574,21 @@ class TestJsonCompaction:
         assert report.trials[0].has_diagnostics is True
 
 
+class TestTrialLabel:
+    def test_format_trial_time_converts_to_hms(self) -> None:
+        assert format_trial_time("20260521_133418") == "13:34:18"
+
+    def test_format_trial_time_degrades_on_bad_input(self) -> None:
+        # A malformed timestamp returns unchanged rather than raising.
+        assert format_trial_time("not-a-timestamp") == "not-a-timestamp"
+
+    def test_trial_label_combines_index_and_time(self, tmp_path: Path) -> None:
+        data = _make_json_data()
+        _write_json(tmp_path, data, filename="test_20250101_120000.json")
+        report = load_session(tmp_path)
+        assert trial_label(report.trials[0]) == "Trial 0 (12:00:00)"
+
+
 class TestFrameSkipInsight:
     def test_recovered_skip_insight(self, tmp_path: Path) -> None:
         events = [
@@ -596,8 +613,8 @@ class TestFrameSkipInsight:
         skip_insights = [i for i in insights if "skipped" in i]
         assert len(skip_insights) == 1
         assert "CAM_A" in skip_insights[0]
-        assert "placeholder inserted" in skip_insights[0]
-        assert "frame 100" in skip_insights[0]
+        assert "recovered with placeholder frames" in skip_insights[0]
+        assert "frames 100-100" in skip_insights[0]
 
     def test_unrecovered_skip_insight(self, tmp_path: Path) -> None:
         events = [
@@ -622,8 +639,56 @@ class TestFrameSkipInsight:
         skip_insights = [i for i in insights if "skipped" in i]
         assert len(skip_insights) == 1
         assert "CAM_C" in skip_insights[0]
-        assert "NOT recovered" in skip_insights[0]
-        assert "2 frames" in skip_insights[0]
+        assert "none recovered" in skip_insights[0]
+        assert "skipped 2 frames" in skip_insights[0]
+
+    def test_many_events_aggregate_to_one_line_per_camera(
+        self, tmp_path: Path
+    ) -> None:
+        """A trial with hundreds of skip events must produce one summary
+        line per camera, not one line per event — this is the core fix.
+        """
+        events = []
+        for i in range(150):
+            events.append(
+                {
+                    "frame_idx": i * 2,
+                    "camera_serial": "CAM_A",
+                    "expected_frame_id": 1000 + i,
+                    "actual_frame_id": 1001 + i,
+                    "gap_size": 1,
+                    "recovered": True,
+                }
+            )
+        for i in range(40):
+            events.append(
+                {
+                    "frame_idx": i * 3,
+                    "camera_serial": "CAM_B",
+                    "expected_frame_id": 2000 + i,
+                    "actual_frame_id": 2001 + i,
+                    "gap_size": 1,
+                    "recovered": False,
+                }
+            )
+        data = _make_json_data(
+            include_diagnostics=True,
+            diagnostics_version=2,
+            frame_skip_events=events,
+        )
+        _write_json(tmp_path, data)
+        report = load_session(tmp_path)
+        insights = diagnose_sync_issues(report)
+
+        skip_insights = [i for i in insights if "skipped" in i]
+        # 190 events → exactly 2 lines (one per camera), not 190.
+        assert len(skip_insights) == 2
+        cam_a = next(i for i in skip_insights if "CAM_A" in i)
+        cam_b = next(i for i in skip_insights if "CAM_B" in i)
+        assert "skipped 150 frames across 150 events" in cam_a
+        assert "recovered with placeholder frames" in cam_a
+        assert "skipped 40 frames across 40 events" in cam_b
+        assert "none recovered" in cam_b
 
     def test_no_skip_events_no_insight(self, tmp_path: Path) -> None:
         data = _make_json_data(include_diagnostics=True, diagnostics_version=2)
@@ -860,7 +925,7 @@ class TestDetectTimestampJumps:
 
 class TestPtpTimestampJumpInsight:
     def test_paired_jump_usability(self, tmp_path: Path) -> None:
-        """Paired + aligned → 'frames usable' in insight."""
+        """Paired (corrected) jump → summary reports it as corrected."""
         n = 100
         timestamps = _make_jump_timestamps(
             n_frames=n,
@@ -877,14 +942,12 @@ class TestPtpTimestampJumpInsight:
         report = load_session(tmp_path)
         insights = diagnose_sync_issues(report)
 
-        jump_insights = [
-            i for i in insights if "PTP jump" in i or "timestamp jumped" in i
-        ]
-        assert len(jump_insights) >= 1
-        assert "frames usable" in jump_insights[0]
+        jump_insights = [i for i in insights if "PTP timestamp jump" in i]
+        assert len(jump_insights) == 1
+        assert "all corrected within the trial" in jump_insights[0]
 
     def test_unrecovered_jump_insight(self, tmp_path: Path) -> None:
-        """Single jump → 'not corrected' in insight."""
+        """Single uncorrected jump → summary reports none corrected."""
         n = 50
         timestamps = _make_jump_timestamps(
             n_frames=n, n_cams=3, jump_camera_col=2, jump_frame=20, jump_ms=500.0
@@ -895,11 +958,9 @@ class TestPtpTimestampJumpInsight:
         report = load_session(tmp_path)
         insights = diagnose_sync_issues(report)
 
-        jump_insights = [
-            i for i in insights if "PTP jump" in i or "timestamp jumped" in i
-        ]
-        assert len(jump_insights) >= 1
-        assert "not corrected" in jump_insights[0]
+        jump_insights = [i for i in insights if "PTP timestamp jump" in i]
+        assert len(jump_insights) == 1
+        assert "none corrected within the trial" in jump_insights[0]
 
 
 class TestPtpJumpReportOutput:
