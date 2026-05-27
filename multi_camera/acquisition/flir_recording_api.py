@@ -2243,11 +2243,12 @@ class FlirRecorder:
 
         records = []
         if self.video_base_file is not None:
-            # Iterate image_queue_dict directly — its keys are stable
-            # across a mid-trial disconnect, unlike self.cams attribute reads.
-            for serial, queue in self.image_queue_dict.items():
-                queue.put(None)
-                queue.join()
+            # stop video writing threads and output json file
+
+            # to allow each queue to be processed before moving on
+            for c in self.cams:
+                self.image_queue_dict[c.DeviceSerialNumber].put(None)
+                self.image_queue_dict[c.DeviceSerialNumber].join()
 
             self.json_queue.put(None)
             self.json_queue.join()
