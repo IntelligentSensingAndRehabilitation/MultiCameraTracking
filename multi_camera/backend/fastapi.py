@@ -1098,9 +1098,6 @@ async def new_trial(data: NewTrialData, db: Session = Depends(db_dependency)):
                 and state.acquisition is not None
             ):
                 state.acquisition.set_status("Idle")
-            # A TrialAbortedError is the expected outcome of a mid-trial
-            # camera disconnect, not a crash — give the operator a plain
-            # message and a distinct code rather than a raw traceback.
             if isinstance(e, TrialAbortedError):
                 broadcast_event(
                     event_type="error",

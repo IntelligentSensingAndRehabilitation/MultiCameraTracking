@@ -101,14 +101,7 @@ def select_interface(interface, cameras):
 
 
 class TrialAbortedError(RuntimeError):
-    """Raised by start_acquisition when a camera disconnected mid-trial.
-
-    A multi-camera trial missing one camera cannot go through the
-    reconstruction pipeline, so the trial is failed as a whole rather
-    than saved as a partial recording. The partial mp4 files stay on
-    disk for inspection, but no recording-database row is created, so
-    the trial is never pushed to DataJoint.
-    """
+    """Raised by start_acquisition when a camera disconnected mid-trial."""
 
 
 def _mac_str_to_int(mac: str) -> int:
@@ -911,10 +904,6 @@ class FlirRecorder:
         self.stop_recording = threading.Event()
         self.stop_frame_set = threading.Event()
 
-        # Set when a camera disconnects mid-trial. The string is the
-        # operator-facing reason; start_acquisition raises TrialAbortedError
-        # with it instead of returning records, so the trial is not written
-        # to the recording database. Reset at the start of every trial.
         self._trial_aborted_reason: str | None = None
         self._trial_abort_lock = threading.Lock()
 
@@ -1142,27 +1131,18 @@ class FlirRecorder:
         """
 
         # Flip status before any PySpin work so HealthIdlePoller's skip
-        # predicate covers init_camera's enumeration race window.
+        # predicate covers init_camera's enumeration race window. Restore
+        # to Idle on failure so recovery endpoints don't 409.
         self.set_status("Configuring")
         try:
-            await self._configure_cameras_impl(config_file, num_cams, trigger)
+            await self._configure_cameras(config_file, num_cams, trigger)
         except Exception:
-            # Restore status so every recovery endpoint (Restart
-            # acquisition, Reset cameras, Force IP, Camera moved) is
-            # clickable again. Without this, a failed configure leaves
-            # the system in "Configuring" forever, which is in
-            # _BUSY_PYSPIN_STATES and 409s every recovery button.
-            # The recorder is left in a partially-configured state, but
-            # the operator can now use recovery actions to fix it.
             self.set_status("Idle")
             raise
 
-    async def _configure_cameras_impl(
+    async def _configure_cameras(
         self, config_file: str = None, num_cams: int = None, trigger: bool = True
     ) -> None:
-        """Body of configure_cameras; the public method wraps this in a
-        try/except that restores status on failure."""
-
         self.config_file = config_file
 
         iface_list = self.system.GetInterfaces()
@@ -1539,15 +1519,11 @@ class FlirRecorder:
         print("stop_frame", self.stop_frame)
 
     def _abort_trial(self, reason: str) -> None:
-        """Mark the in-progress trial as failed and trigger a coordinated
-        stop of every camera worker.
+        """Mark the trial failed and trigger the normal stop path.
 
-        Called from a camera worker thread when that camera disconnects
-        mid-trial. The first caller wins; later disconnects during the
-        same wind-down are ignored. Triggering stop_acquisition() routes
-        the remaining cameras through the normal stop path so their mp4
-        files finalize cleanly. start_acquisition checks the recorded
-        reason after the wind-down and raises TrialAbortedError.
+        First caller wins so a later sibling disconnect doesn't overwrite
+        the reason. start_acquisition checks the recorded reason after
+        the wind-down and raises TrialAbortedError.
         """
         with self._trial_abort_lock:
             if self._trial_aborted_reason is not None:
@@ -1929,11 +1905,6 @@ class FlirRecorder:
                         f"{camera_serial}: Failed to get image — {err_text}",
                     )
                     if "-1002" in err_text or "no longer valid" in err_text:
-                        # Disconnect during grab. Surface it to the operator,
-                        # bail out of this worker (putting None in the
-                        # acquisition_queue lets the writer thread drain and
-                        # exit), and abort the whole trial — a multi-camera
-                        # recording missing one camera is not usable.
                         self._fire_diagnostic_once(
                             camera_serial=camera_serial,
                             code="camera_disconnected",
@@ -2259,18 +2230,7 @@ class FlirRecorder:
         exposure_times = []
         frame_rates = []
         camera_ids = []
-        # NOTE: wrapping c.stop() in per-camera try/except caused a
-        # `-1004 Can't clear interface` regression in reset_cameras after
-        # a disconnect — calling EndAcquisition on the surviving cameras
-        # in this path appears to leave an interface reference held
-        # somewhere in PySpin. Tracked as part of bead 47l. Leave the loop
-        # as-is for now: on a disconnect, the dead camera raises here and
-        # the surviving cameras stay in BeginAcquisition. reset_cameras
-        # will print "camera is still streaming" warnings as it stops
-        # them, which is loud but harmless.
         for c in self.cams:
-            # Recording the final exposure times and requested frame rates per camera.
-            # Actual frame rate can be calculated from the timestamps in the output json.
             exposure_times.append(c.ExposureTime)
             frame_rates.append(c.BinningHorizontal * 30)
             camera_ids.append(c.DeviceSerialNumber)
@@ -2283,20 +2243,15 @@ class FlirRecorder:
 
         records = []
         if self.video_base_file is not None:
-            # Stop video writing threads and output json file. Iterate the
-            # image_queue_dict directly (built when cameras were healthy at
-            # the start of the trial) instead of re-reading
-            # DeviceSerialNumber off self.cams, which can raise on dead
-            # handles after a mid-trial disconnect.
+            # Iterate image_queue_dict directly — its keys are stable
+            # across a mid-trial disconnect, unlike self.cams attribute reads.
             for serial, queue in self.image_queue_dict.items():
                 queue.put(None)
                 queue.join()
 
-            # to allow the json queue to be processed before moving on
             self.json_queue.put(None)
             self.json_queue.join()
 
-            # go through the records queue and add the records to a list
             for i in range(self.records_queue.qsize()):
                 records.append(self.records_queue.get())
                 self.records_queue.task_done()
@@ -2305,11 +2260,6 @@ class FlirRecorder:
 
         self.set_status("Idle")
 
-        # If a camera disconnected mid-trial, fail the whole trial. The
-        # partial mp4 files have been finalized above and stay on disk for
-        # inspection, but raising here means start_acquisition's caller
-        # never receives the records list, so no recording-database row is
-        # created and the trial is never pushed to DataJoint.
         with self._trial_abort_lock:
             abort_reason = self._trial_aborted_reason
         if abort_reason is not None:
@@ -2545,29 +2495,17 @@ class FlirRecorder:
         return {"mac": mac, "ip": ip}
 
     async def reset_cameras(self):
-        """Reset all the cameras and reopen the system.
-
-        Enumerates fresh from the PySpin system rather than reading
-        serials off ``self.cams``. The wrappers in ``self.cams`` may hold
-        dead handles after a failed configure or a mid-trial disconnect;
-        ``simple_pyspin``'s attribute access raises ``CameraError`` on
-        those, which previously crashed the very recovery path the
-        operator reaches for after such a failure.
-        """
+        """Reset all the cameras and reopen the system."""
 
         self.set_status("Resetting")
         await asyncio.sleep(0.1)  # let the web service update with this message
 
         config_file = self.config_file  # grab this before closing as it is cleared
 
-        # Release all the handles in self.cams; we'll enumerate fresh below.
         self.close()
 
         print("Reopening and resetting")
-        # Local temporary reference to PySpin — separate Get/Release pair
-        # from the cached singleton that _get_pyspin_system() holds. We
-        # need a fresh enumeration here because the camera list may have
-        # changed since configure_cameras (disconnects, hot-plugs, etc.).
+        # Local Get/Release pair, separate from the simple_pyspin singleton.
         system = PySpin.System.GetInstance()
         cams = system.GetCameras()
 
@@ -2576,12 +2514,6 @@ class FlirRecorder:
             print(f"Resetting {n_cams} cameras.")
 
             def reset_cam_by_index(i: int) -> tuple[str, str | None]:
-                """Reset one camera by index; return (serial, error_or_None).
-
-                Reads the serial via TLDevice.DeviceSerialNumber.GetValue(),
-                which works pre-Init — unlike simple_pyspin's attribute
-                accessor that requires Init.
-                """
                 try:
                     c = cams[i]
                     serial = c.TLDevice.DeviceSerialNumber.GetValue()
@@ -2592,7 +2524,7 @@ class FlirRecorder:
                     c.Init()
                     c.DeviceReset()
                     c.DeInit()
-                    del c  # force release of the handle
+                    del c
                     return serial, None
                 except Exception as e:
                     return serial, str(e)
@@ -2601,8 +2533,6 @@ class FlirRecorder:
                 with concurrent.futures.ThreadPoolExecutor(
                     max_workers=n_cams
                 ) as executor:
-                    # list(...) forces consumption so per-camera failures
-                    # surface instead of disappearing silently.
                     results = list(
                         executor.map(reset_cam_by_index, range(n_cams))
                     )
@@ -2621,8 +2551,6 @@ class FlirRecorder:
         finally:
             cams.Clear()
             system.ReleaseInstance()
-
-        # Back to the cached PySpin system reference.
 
         self.set_status("Reset complete. Waiting to reconfigure.")
         await asyncio.sleep(15)

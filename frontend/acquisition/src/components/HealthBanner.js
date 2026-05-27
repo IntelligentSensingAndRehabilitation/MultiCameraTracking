@@ -3,16 +3,8 @@ import { useContext, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AcquisitionState } from '../AcquisitionApi';
 
-// Operator-facing red banner that surfaces error-level signals from two
-// sources:
-//   - healthReport.findings — persistent health-check state (DHCP down,
-//     camera missing, host network drift, etc.). Self-clears when the
-//     underlying condition resolves on the next health poll.
-//   - sessionInsights — live envelopes broadcast over the diagnostics
-//     WebSocket (trial aborted, camera disconnected mid-trial, etc.).
-//     These are events rather than state, so they don't self-clear; the
-//     banner shows a Dismiss button that hides the current envelope
-//     until a newer one arrives.
+// Red banner for error-level signals from the health report (persistent
+// state, self-clearing) and live diagnostic envelopes (events, dismissable).
 const HealthBanner = () => {
     const { healthReport, sessionInsights } = useContext(AcquisitionState);
     const [dismissedTs, setDismissedTs] = useState(null);
@@ -32,9 +24,7 @@ const HealthBanner = () => {
 
     if (!latestInsight && !persistentError) return null;
 
-    // Prefer the most recent live envelope over the persistent health
-    // finding — disconnects, abort, and similar events are usually the
-    // thing the operator needs to act on right now.
+    // Live envelopes (recent events) take precedence over persistent findings.
     const showingInsight = !!latestInsight;
     const source = showingInsight ? latestInsight : persistentError;
     const message = source.message;
