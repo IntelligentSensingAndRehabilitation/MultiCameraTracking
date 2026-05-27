@@ -79,10 +79,15 @@ class TrialSyncMetrics:
 
     @property
     def max_timestamp_spread_ms(self) -> float:
+        # Single-camera trials have no peer to drift against (shape (N, 0)).
+        if self.timestamp_delta_ms.size == 0:
+            return 0.0
         return float(np.max(np.abs(self.timestamp_delta_ms)))
 
     @property
     def mean_timestamp_spread_ms(self) -> float:
+        if self.timestamp_delta_ms.size == 0:
+            return 0.0
         return float(np.mean(np.abs(self.timestamp_delta_ms)))
 
     @property
