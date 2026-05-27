@@ -1,19 +1,50 @@
 import React from 'react';
-import { useContext } from 'react';
+import { useContext, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AcquisitionState } from '../AcquisitionApi';
 
+// Operator-facing red banner that surfaces error-level signals from two
+// sources:
+//   - healthReport.findings — persistent health-check state (DHCP down,
+//     camera missing, host network drift, etc.). Self-clears when the
+//     underlying condition resolves on the next health poll.
+//   - sessionInsights — live envelopes broadcast over the diagnostics
+//     WebSocket (trial aborted, camera disconnected mid-trial, etc.).
+//     These are events rather than state, so they don't self-clear; the
+//     banner shows a Dismiss button that hides the current envelope
+//     until a newer one arrives.
 const HealthBanner = () => {
-    const { healthReport } = useContext(AcquisitionState);
+    const { healthReport, sessionInsights } = useContext(AcquisitionState);
+    const [dismissedTs, setDismissedTs] = useState(null);
 
-    if (!healthReport) return null;
-    if (healthReport.overall !== 'error') return null;
+    const errorInsights = (sessionInsights || []).filter(
+        (e) => e.level === 'error'
+    );
+    const freshInsights = errorInsights.filter(
+        (e) => !dismissedTs || !e.ts || e.ts > dismissedTs
+    );
+    const latestInsight = freshInsights[freshInsights.length - 1];
 
-    const errorFindings = (healthReport.findings || []).filter(f => f.level === 'error');
-    if (errorFindings.length === 0) return null;
+    const errorFindings = (healthReport && healthReport.findings)
+        ? healthReport.findings.filter((f) => f.level === 'error')
+        : [];
+    const persistentError = errorFindings[0];
 
-    const top = errorFindings[0];
-    const extra = errorFindings.length > 1 ? ` (+${errorFindings.length - 1} more)` : '';
+    if (!latestInsight && !persistentError) return null;
+
+    // Prefer the most recent live envelope over the persistent health
+    // finding — disconnects, abort, and similar events are usually the
+    // thing the operator needs to act on right now.
+    const showingInsight = !!latestInsight;
+    const source = showingInsight ? latestInsight : persistentError;
+    const message = source.message;
+    const remediation = showingInsight
+        ? (source.details && source.details.remediation) || []
+        : source.remediation || [];
+    const extra =
+        !showingInsight && errorFindings.length > 1
+            ? ` (+${errorFindings.length - 1} more)`
+            : '';
 
     return (
         <div style={{
@@ -22,16 +53,49 @@ const HealthBanner = () => {
             padding: '8px 16px',
             display: 'flex',
             justifyContent: 'space-between',
-            alignItems: 'center',
+            alignItems: 'flex-start',
+            gap: '16px',
             fontWeight: '500',
         }}>
-            <span>{top.message}{extra}</span>
-            <Link
-                to="/diagnostics"
-                style={{ color: 'white', textDecoration: 'underline', fontWeight: 'bold' }}
-            >
-                Open Diagnostics →
-            </Link>
+            <div style={{ flexGrow: 1 }}>
+                <div>{message}{extra}</div>
+                {remediation.length > 0 && (
+                    <ol style={{
+                        margin: '4px 0 0 20px',
+                        padding: 0,
+                        fontSize: '0.9em',
+                        fontWeight: 'normal',
+                    }}>
+                        {remediation.map((step, i) => (
+                            <li key={i}>{step}</li>
+                        ))}
+                    </ol>
+                )}
+            </div>
+            <div style={{ display: 'flex', gap: '12px', flexShrink: 0 }}>
+                <Link
+                    to="/diagnostics"
+                    style={{ color: 'white', textDecoration: 'underline', fontWeight: 'bold' }}
+                >
+                    Open Diagnostics →
+                </Link>
+                {showingInsight && (
+                    <button
+                        onClick={() => setDismissedTs(latestInsight.ts || new Date().toISOString())}
+                        style={{
+                            background: 'transparent',
+                            color: 'white',
+                            border: '1px solid white',
+                            borderRadius: '3px',
+                            padding: '2px 8px',
+                            cursor: 'pointer',
+                            fontSize: '0.85em',
+                        }}
+                    >
+                        Dismiss
+                    </button>
+                )}
+            </div>
         </div>
     );
 };

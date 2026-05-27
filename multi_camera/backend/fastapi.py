@@ -1107,9 +1107,17 @@ async def new_trial(data: NewTrialData, db: Session = Depends(db_dependency)):
                     level="error",
                     code="trial_aborted",
                     message=(
-                        f"Trial aborted: {e}. The partial recording was not "
-                        "saved — please redo the trial."
+                        f"Trial aborted: {e}. The partial recording was not saved."
                     ),
+                    details={
+                        "remediation": [
+                            "Reconnect the camera if it was unplugged.",
+                            "Open the Diagnostics tab to confirm every camera "
+                            "is detected.",
+                            "Click Reset Cameras to reinitialize before "
+                            "starting the next trial.",
+                        ],
+                    },
                 )
             else:
                 broadcast_event(

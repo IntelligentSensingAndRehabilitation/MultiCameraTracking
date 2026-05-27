@@ -2259,28 +2259,43 @@ class FlirRecorder:
         exposure_times = []
         frame_rates = []
         camera_ids = []
+        # Per-camera try/except so a dead handle (e.g. the camera that
+        # disconnected and triggered a trial abort) doesn't strand every
+        # following camera in BeginAcquisition state. Without this, the
+        # next reset_cameras call has to recover from "camera is still
+        # streaming" errors on the non-disconnected cameras.
         for c in self.cams:
-            # Recording the final exposure times and requested frame rates for each camera
-            # Actual frame rate can be calculated from the timestamps in the output json
-            exposure_times.append(c.ExposureTime)
-            frame_rates.append(c.BinningHorizontal * 30)
+            try:
+                # Recording the final exposure times and requested frame rates per camera.
+                # Actual frame rate can be calculated from the timestamps in the output json.
+                exposure_times.append(c.ExposureTime)
+                frame_rates.append(c.BinningHorizontal * 30)
+                camera_ids.append(c.DeviceSerialNumber)
 
-            camera_ids.append(c.DeviceSerialNumber)
-
-            if self.gpio_settings["line2"] == "3V3_Enable":
-                c.LineSelector = "Line2"
-                c.V3_3Enable = False
-                c.LineMode = "Output"
-            c.stop()
+                if self.gpio_settings["line2"] == "3V3_Enable":
+                    c.LineSelector = "Line2"
+                    c.V3_3Enable = False
+                    c.LineMode = "Output"
+                c.stop()
+            except (AttributeError, PySpin.SpinnakerException, CameraError) as e:
+                # Read the serial via the TL node map if we can — works
+                # pre-Init and survives some dead-handle cases.
+                try:
+                    serial = c.TLDevice.DeviceSerialNumber.GetValue()
+                except Exception:  # noqa: BLE001
+                    serial = "?"
+                print(f"[cleanup] camera {serial} failed to stop cleanly: {e}")
 
         records = []
         if self.video_base_file is not None:
-            # stop video writing threads and output json file
-
-            # to allow each queue to be processed before moving on
-            for c in self.cams:
-                self.image_queue_dict[c.DeviceSerialNumber].put(None)
-                self.image_queue_dict[c.DeviceSerialNumber].join()
+            # Stop video writing threads and output json file. Iterate the
+            # image_queue_dict directly (built when cameras were healthy at
+            # the start of the trial) instead of re-reading
+            # DeviceSerialNumber off self.cams, which can raise on dead
+            # handles after a mid-trial disconnect.
+            for serial, queue in self.image_queue_dict.items():
+                queue.put(None)
+                queue.join()
 
             # to allow the json queue to be processed before moving on
             self.json_queue.put(None)
