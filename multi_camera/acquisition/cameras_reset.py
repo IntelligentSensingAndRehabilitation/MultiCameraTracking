@@ -15,23 +15,45 @@ def reset(all_cams=True, config="", verbose=False):
         print(f"Resetting {N} cameras.")
 
         def reset_cam(i):
-            c = cams[i]
-            c.Init()
-            c.DeviceReset()
-            c.DeInit()
-            print(f"{i}: Reset {c.TLDevice.DeviceSerialNumber.GetValue()}")
-            del c
+            """Reset one camera by index; return (serial_or_label, error_or_None)."""
+            try:
+                c = cams[i]
+                serial = c.TLDevice.DeviceSerialNumber.GetValue()
+            except Exception as e:
+                return f"index={i}", f"could not read serial: {e}"
+            try:
+                c.Init()
+                c.DeviceReset()
+                c.DeInit()
+                print(f"{i}: Reset {serial}")
+                del c
+                return serial, None
+            except Exception as e:
+                return serial, str(e)
 
         import concurrent.futures
 
+        # list(...) forces consumption so per-camera failures surface
+        # instead of disappearing into the executor.
         with concurrent.futures.ThreadPoolExecutor(max_workers=N) as executor:
-            executor.map(reset_cam, range(N))
+            results = list(executor.map(reset_cam, range(N)))
+
+        failures = [(s, err) for s, err in results if err is not None]
+        for serial, err in failures:
+            print(f"  ! Failed to reset {serial}: {err}")
 
         cams.Clear()
 
         system.ReleaseInstance()
 
-        print("Completed resetting all cameras. Exiting.")
+        if failures:
+            print(
+                f"Completed with {len(failures)} of {N} cameras failed to "
+                "reset. Power-cycle those cameras manually if they remain "
+                "unresponsive."
+            )
+        else:
+            print("Completed resetting all cameras. Exiting.")
         return
 
     # Get the available cameras
