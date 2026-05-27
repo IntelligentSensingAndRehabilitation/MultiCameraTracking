@@ -2259,32 +2259,27 @@ class FlirRecorder:
         exposure_times = []
         frame_rates = []
         camera_ids = []
-        # Per-camera try/except so a dead handle (e.g. the camera that
-        # disconnected and triggered a trial abort) doesn't strand every
-        # following camera in BeginAcquisition state. Without this, the
-        # next reset_cameras call has to recover from "camera is still
-        # streaming" errors on the non-disconnected cameras.
+        # NOTE: wrapping c.stop() in per-camera try/except caused a
+        # `-1004 Can't clear interface` regression in reset_cameras after
+        # a disconnect — calling EndAcquisition on the surviving cameras
+        # in this path appears to leave an interface reference held
+        # somewhere in PySpin. Tracked as part of bead 47l. Leave the loop
+        # as-is for now: on a disconnect, the dead camera raises here and
+        # the surviving cameras stay in BeginAcquisition. reset_cameras
+        # will print "camera is still streaming" warnings as it stops
+        # them, which is loud but harmless.
         for c in self.cams:
-            try:
-                # Recording the final exposure times and requested frame rates per camera.
-                # Actual frame rate can be calculated from the timestamps in the output json.
-                exposure_times.append(c.ExposureTime)
-                frame_rates.append(c.BinningHorizontal * 30)
-                camera_ids.append(c.DeviceSerialNumber)
+            # Recording the final exposure times and requested frame rates per camera.
+            # Actual frame rate can be calculated from the timestamps in the output json.
+            exposure_times.append(c.ExposureTime)
+            frame_rates.append(c.BinningHorizontal * 30)
+            camera_ids.append(c.DeviceSerialNumber)
 
-                if self.gpio_settings["line2"] == "3V3_Enable":
-                    c.LineSelector = "Line2"
-                    c.V3_3Enable = False
-                    c.LineMode = "Output"
-                c.stop()
-            except (AttributeError, PySpin.SpinnakerException, CameraError) as e:
-                # Read the serial via the TL node map if we can — works
-                # pre-Init and survives some dead-handle cases.
-                try:
-                    serial = c.TLDevice.DeviceSerialNumber.GetValue()
-                except Exception:  # noqa: BLE001
-                    serial = "?"
-                print(f"[cleanup] camera {serial} failed to stop cleanly: {e}")
+            if self.gpio_settings["line2"] == "3V3_Enable":
+                c.LineSelector = "Line2"
+                c.V3_3Enable = False
+                c.LineMode = "Output"
+            c.stop()
 
         records = []
         if self.video_base_file is not None:
