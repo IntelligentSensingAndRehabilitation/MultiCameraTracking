@@ -110,6 +110,38 @@ class TestFlirRecorderConfigureCameras:
             f"set_status('Configuring'); got {seen!r}"
         )
 
+    def test_reset_cameras_does_not_read_attributes_off_self_cams(self) -> None:
+        """After a failed configure (or a mid-trial disconnect), wrappers in
+        ``self.cams`` may hold dead PySpin handles whose attribute reads
+        raise ``CameraError``. ``reset_cameras`` is the operator's primary
+        recovery path for exactly that situation, so it must not depend on
+        those attributes being readable.
+        """
+        import PySpin
+        from multi_camera.acquisition.flir_recording_api import FlirRecorder
+        from simple_pyspin import CameraError
+
+        class DeadCam:
+            def __getattr__(self, name):
+                raise CameraError(f"Camera property '{name}' is not readable")
+
+        recorder = FlirRecorder.__new__(FlirRecorder)
+        recorder.cams = [DeadCam(), DeadCam()]
+        recorder.config_file = ""
+        recorder.set_status = lambda s: None
+        # Stub close so reset_cameras doesn't try to walk the dead cams there.
+        recorder.close = lambda: None
+
+        # Raise a marker from PySpin.System.GetInstance — if reset_cameras
+        # reaches that call without crashing on self.cams attribute access
+        # first, the marker propagates out, proving the fix.
+        sentinel = RuntimeError("__got_past_self_cams_read__")
+        fake_system_cls = mock.MagicMock()
+        fake_system_cls.GetInstance.side_effect = sentinel
+        with mock.patch.object(PySpin, "System", fake_system_cls, create=True):
+            with pytest.raises(RuntimeError, match="__got_past_self_cams_read__"):
+                asyncio.run(recorder.reset_cameras())
+
     def test_configure_cameras_restores_status_on_failure(self) -> None:
         """A failed configure must restore status to "Idle" before
         re-raising, otherwise every recovery endpoint stays 409'd because
