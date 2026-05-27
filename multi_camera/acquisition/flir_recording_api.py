@@ -1130,6 +1130,24 @@ class FlirRecorder:
         # Flip status before any PySpin work so HealthIdlePoller's skip
         # predicate covers init_camera's enumeration race window.
         self.set_status("Configuring")
+        try:
+            await self._configure_cameras_impl(config_file, num_cams, trigger)
+        except Exception:
+            # Restore status so every recovery endpoint (Restart
+            # acquisition, Reset cameras, Force IP, Camera moved) is
+            # clickable again. Without this, a failed configure leaves
+            # the system in "Configuring" forever, which is in
+            # _BUSY_PYSPIN_STATES and 409s every recovery button.
+            # The recorder is left in a partially-configured state, but
+            # the operator can now use recovery actions to fix it.
+            self.set_status("Idle")
+            raise
+
+    async def _configure_cameras_impl(
+        self, config_file: str = None, num_cams: int = None, trigger: bool = True
+    ) -> None:
+        """Body of configure_cameras; the public method wraps this in a
+        try/except that restores status on failure."""
 
         self.config_file = config_file
 

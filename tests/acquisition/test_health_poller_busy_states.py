@@ -110,6 +110,37 @@ class TestFlirRecorderConfigureCameras:
             f"set_status('Configuring'); got {seen!r}"
         )
 
+    def test_configure_cameras_restores_status_on_failure(self) -> None:
+        """A failed configure must restore status to "Idle" before
+        re-raising, otherwise every recovery endpoint stays 409'd because
+        "Configuring" is in _BUSY_PYSPIN_STATES."""
+        from multi_camera.acquisition.flir_recording_api import FlirRecorder
+
+        seen: list[str] = []
+
+        recorder = FlirRecorder.__new__(FlirRecorder)
+        recorder.set_status = lambda status: seen.append(status)
+        recorder.config_file = None
+        recorder.excluded_serials = set()
+        # Make the first PySpin call inside _configure_cameras_impl raise,
+        # mimicking the wrong-subnet / dead-system failure mode.
+        recorder.system = mock.MagicMock()
+        recorder.system.GetInterfaces.side_effect = RuntimeError(
+            "__pyspin_wedged__"
+        )
+
+        with pytest.raises(RuntimeError, match="__pyspin_wedged__"):
+            asyncio.run(recorder.configure_cameras(num_cams=1))
+
+        # Configuring was set first, then Idle must be restored before the
+        # exception propagated. Without the fix, seen would be just
+        # ["Configuring"] and the operator's recovery buttons would all
+        # 409 forever.
+        assert seen == ["Configuring", "Idle"], (
+            "configure_cameras must restore status to Idle on failure; "
+            f"got {seen!r}"
+        )
+
 
 class TestOperatorActionGuards:
     """Recovery endpoints (restart / restore-defaults / change-exclusion) must
