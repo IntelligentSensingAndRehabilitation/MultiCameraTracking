@@ -35,3 +35,10 @@ Use the links below to navigate:
 1. [Processing Pipeline](analysis/processing_pipeline.md)
 2. [SMPL Model Setup](analysis/smpl_setup.md)
 
+## Operations
+1. [Container Reference](operations/container_reference.md)
+2. [DataJoint Test Environment](operations/datajoint_test_environment.md)
+
+## Development
+1. [Backend Architecture](development/backend_architecture.md)
+

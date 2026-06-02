@@ -26,13 +26,23 @@ the subject or session level that might be invalidated by a later recording.
 """
 
 import os
-from typing import List, Tuple
-from datetime import date
+from dataclasses import dataclass
+from datetime import date, datetime
+from typing import List, Optional, Tuple
 
 import datajoint as dj
 from .multi_camera_dj import import_recording, MultiCameraRecording
 
 schema = dj.schema("mocap_sessions")
+
+
+@dataclass
+class PhotoSpec:
+    saved_path: str
+    filename: str
+    original_filename: str
+    upload_timestamp: datetime
+    description: Optional[str] = None
 
 
 def get_subject_id_from_participant_id(participant_id: str) -> int:
@@ -72,11 +82,27 @@ class Recording(dj.Manual):
     """
 
 
+@schema
+class Photo(dj.Manual):
+    definition = """
+    # Most recent patient identification photo for the session.
+    -> Session
+    ---
+    photo: attach@localattach
+    filename: varchar(255)
+    original_filename: varchar(255)
+    description=null: varchar(255)
+    upload_timestamp: datetime
+    """
+
+
 def import_session(
     participant_id: str,
     session_date: date,
     video_project: str,
     recordings: List[Tuple[str, str]],
+    fin: Optional[str] = None,
+    photo: Optional[PhotoSpec] = None,
 ):
     """
     Import a session with a list of recordings
@@ -86,6 +112,8 @@ def import_session(
         session_date (date): session date
         video_project (str): video project
         recordings (List[Tuple(str, str)]): list of recording tuples
+        fin (Optional[str]): hospital FIN for this session (pushed to subject_extended.Fin)
+        photo (Optional[PhotoSpec]): most recent patient identification photo for this session
 
     """
 
@@ -93,6 +121,13 @@ def import_session(
     session_key = {"participant_id": participant_id, "session_date": session_date}
 
     assert not Session & session_key, "Session already exists"
+
+    # Activate subject_extended outside the transaction: first import triggers DDL
+    # (create schema + ~log table), and MySQL implicitly commits DDL, which
+    # tears down the surrounding transaction. The deferred import here also
+    # breaks the sessions <-> subject_extended cycle at module load time.
+    if fin is not None:
+        from multi_camera.datajoint.subject_extended import Fin
 
     dj.conn().start_transaction()
     try:
@@ -115,6 +150,21 @@ def import_session(
             key["comment"] = comment
 
             Recording.insert1(key)
+
+        if photo is not None:
+            if not os.path.exists(photo.saved_path):
+                raise FileNotFoundError(f"Photo missing on disk: {photo.saved_path}")
+            Photo.insert1({
+                **session_key,
+                "photo": photo.saved_path,
+                "filename": photo.filename,
+                "original_filename": photo.original_filename,
+                "description": photo.description,
+                "upload_timestamp": photo.upload_timestamp,
+            })
+
+        if fin is not None:
+            Fin.insert1({**session_key, "fin": fin})
 
     except Exception as e:
         dj.conn().cancel_transaction()

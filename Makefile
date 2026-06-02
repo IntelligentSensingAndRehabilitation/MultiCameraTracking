@@ -1,9 +1,10 @@
 # This is the build file for the docker. Note this should be run from the
 # parent directory for the necessary files to be available
 
-.PHONY: clean build run run-no-checks _docker-run run-mocap-test test test-matrix test-diagnostics validate-sync diag-recording diag-analyze health health-fix setup-env install-sudoers force-ip
+.PHONY: clean build run run-no-checks _docker-run run-mocap-test test test-matrix test-diagnostics validate-sync diag-recording diag-analyze health health-fix setup-env install-sudoers force-ip init-dj-test run-mocap-test-dj reset-dj-test
 
 DIR := ${CURDIR}
+TEST_DJ_EXTERNAL ?= /tmp/datajoint_external_test
 
 build-mocap:
 	docker compose build mocap
@@ -104,3 +105,26 @@ force-ip:
 # without prompting for a password.
 install-sudoers:
 	sudo ./scripts/acquisition/install_sudoers.sh
+
+# --- Test DataJoint targets ---
+
+# One-time setup: create external storage directory with sentinel file (TEST_DJ_EXTERNAL, default /mnt/datajoint_external_test).
+init-dj-test:
+	mkdir -p $(TEST_DJ_EXTERNAL)
+	touch $(TEST_DJ_EXTERNAL)/.multi_cam_mount_check
+
+# Run acquisition in test mode against local test DataJoint (starts datajoint-test automatically).
+# Cannot run simultaneously with 'make run' or 'make run-mocap-test' — all bind host ports 8000 and 3000.
+# Run 'make init-dj-test' once before first use.
+# --build rebuilds the image so Python source changes under multi_camera/ are picked up
+# (the Dockerfile bakes source in via COPY; there is no source bind mount on this service).
+run-mocap-test-dj:
+	docker compose run --rm --build mocap-test-dj
+
+# Drop and recreate the test DataJoint database (clean-slate testing).
+# Stops the container, removes the data volume, and restarts.
+reset-dj-test:
+	docker compose stop datajoint-test
+	docker compose rm -f datajoint-test
+	docker volume ls -q | grep datajoint_test_db | xargs -r docker volume rm
+	docker compose up -d datajoint-test
