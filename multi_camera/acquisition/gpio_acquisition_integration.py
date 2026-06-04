@@ -90,8 +90,8 @@ class _ExposureEndHandler(PySpin.DeviceEventHandler if _PYSPIN_AVAILABLE else ob
         if self._cam_ref is None:
             return
         try:
-            ts_ns = self.GetTimestamp()
-            ts_s = ts_ns / 1e9
+            import time
+            ts_s = time.time()
             line0_high = bool(self._cam_ref.LineStatusAll & self._LINE0_BIT)
 
             with self.lock:
