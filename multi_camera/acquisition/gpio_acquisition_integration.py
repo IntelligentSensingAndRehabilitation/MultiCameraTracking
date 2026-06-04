@@ -150,22 +150,23 @@ class GPIOEdgeRecorder:
         try:
             c = self._camera
 
-            # Debug: print firmware version and valid EventSelector entries
-            import PySpin
-            try:
-                print(f"Camera firmware: {c.DeviceFirmwareVersion}")
-            except Exception:
-                pass
-            try:
-                print(f"Camera model: {c.DeviceModelName}")
-            except Exception:
-                pass
-            node_map = c.cam.GetNodeMap()
-            selector = PySpin.CEnumerationPtr(node_map.GetNode('EventSelector'))
-            entries = selector.GetEntries()
-            print("Valid EventSelector values:")
-            for e in entries:
-                print(" ", PySpin.CEnumEntryPtr(e).GetSymbolic())
+            # Debug: try all known selector string variants
+            candidates = [
+                "Line0RisingEdge",
+                "Line0FallingEdge",
+                "EventLine0RisingEdge",
+                "EventLine0FallingEdge",
+                "Line0Rise",
+                "Line0Fall",
+                "GPI0RisingEdge",
+                "GPI0FallingEdge",
+            ]
+            for candidate in candidates:
+                try:
+                    c.EventSelector = candidate
+                    print(f"EventSelector accepted: {candidate}")
+                except Exception as e:
+                    print(f"EventSelector rejected '{candidate}': {e}")
 
             # Ensure Line0 is in input mode. When line0 = "Off" in the camera
             # config yaml, init_camera() does not touch Line0, so this sets
