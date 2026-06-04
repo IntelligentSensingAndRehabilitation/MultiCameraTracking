@@ -906,6 +906,7 @@ class FlirRecorder:
 
         self.preview_callback = None
         self.cams = []
+        self.gpio_recorder = None
         self.image_queue_dict = {}
         self.config_file = None
         self.iface = None
@@ -1267,6 +1268,13 @@ class FlirRecorder:
         await self.synchronize_cameras()
 
         self.cams.sort(key=lambda x: x.DeviceSerialNumber)
+
+        from multi_camera.acquisition.gpio_acquisition_integration import GPIOEdgeRecorder
+        line0_is_trigger = self.gpio_settings.get("line0") == "ArduinoTrigger"
+        self.gpio_recorder = GPIOEdgeRecorder(
+            self.cams[0] if self.cams else None,
+            line0_used_for_trigger=line0_is_trigger,
+        )
 
         # Get the pixel format for each camera
         pixel_formats = [c.PixelFormat for c in self.cams]
@@ -1646,6 +1654,9 @@ class FlirRecorder:
             max_workers=len(self.cams)
         ) as executor:
             l = list(executor.map(start_cam, range(len(self.cams))))
+
+        if self.gpio_recorder is not None and recording_path is not None:
+            self.gpio_recorder.start()
 
         self.frame_diff = {}
         self.prev_timestamp = {}
@@ -2221,9 +2232,18 @@ class FlirRecorder:
                 self.image_queue_dict[c.DeviceSerialNumber].put(None)
                 self.image_queue_dict[c.DeviceSerialNumber].join()
 
+            gpio_data = self.gpio_recorder.stop() if self.gpio_recorder is not None and recording_path is not None else {}
+
             # to allow the json queue to be processed before moving on
             self.json_queue.put(None)
             self.json_queue.join()
+
+            if gpio_data and self.video_base_file is not None:
+                import pathlib
+                p = pathlib.Path(self.video_base_file + ".json")
+                obj = json.loads(p.read_text())
+                obj["gpio_line_0"] = gpio_data
+                p.write_text(json.dumps(obj) + "\n")
 
             # go through the records queue and add the records to a list
             for i in range(self.records_queue.qsize()):
