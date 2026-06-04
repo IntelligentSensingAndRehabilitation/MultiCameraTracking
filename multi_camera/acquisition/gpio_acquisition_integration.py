@@ -152,7 +152,7 @@ class GPIOEdgeRecorder:
 
             # Debug: print valid EventSelector entries
             import PySpin
-            node_map = c.GetNodeMap()
+            node_map = c.camera.GetNodeMap()
             selector = PySpin.CEnumerationPtr(node_map.GetNode('EventSelector'))
             entries = selector.GetEntries()
             print("Valid EventSelector values:")
