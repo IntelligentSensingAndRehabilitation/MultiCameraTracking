@@ -152,7 +152,7 @@ class GPIOEdgeRecorder:
 
             # Debug: print valid EventSelector entries
             import PySpin
-            node_map = c.camera.GetNodeMap()
+            node_map = c.cam.GetNodeMap()
             selector = PySpin.CEnumerationPtr(node_map.GetNode('EventSelector'))
             entries = selector.GetEntries()
             print("Valid EventSelector values:")
@@ -174,8 +174,8 @@ class GPIOEdgeRecorder:
             c.EventNotification = "On"
 
             self._handler = _Line0EventHandler()
-            c.RegisterEventHandler(self._handler, self._RISING_EVENT)
-            c.RegisterEventHandler(self._handler, self._FALLING_EVENT)
+            c.cam.RegisterEventHandler(self._handler, self._RISING_EVENT)
+            c.cam.RegisterEventHandler(self._handler, self._FALLING_EVENT)
 
         except Exception as exc:
             print(f"GPIOEdgeRecorder: failed to start — {exc}. Edge recording disabled.")
@@ -197,8 +197,8 @@ class GPIOEdgeRecorder:
 
         try:
             c = self._camera
-            c.UnregisterEventHandler(self._handler, self._RISING_EVENT)
-            c.UnregisterEventHandler(self._handler, self._FALLING_EVENT)
+            c.cam.UnregisterEventHandler(self._handler, self._RISING_EVENT)
+            c.cam.UnregisterEventHandler(self._handler, self._FALLING_EVENT)
             c.EventSelector = self._RISING_SELECTOR
             c.EventNotification = "Off"
             c.EventSelector = self._FALLING_SELECTOR
