@@ -150,8 +150,16 @@ class GPIOEdgeRecorder:
         try:
             c = self._camera
 
-            # Debug: print valid EventSelector entries
+            # Debug: print firmware version and valid EventSelector entries
             import PySpin
+            try:
+                print(f"Camera firmware: {c.DeviceFirmwareVersion}")
+            except Exception:
+                pass
+            try:
+                print(f"Camera model: {c.DeviceModelName}")
+            except Exception:
+                pass
             node_map = c.cam.GetNodeMap()
             selector = PySpin.CEnumerationPtr(node_map.GetNode('EventSelector'))
             entries = selector.GetEntries()
