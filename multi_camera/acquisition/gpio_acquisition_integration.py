@@ -150,6 +150,15 @@ class GPIOEdgeRecorder:
         try:
             c = self._camera
 
+            # Debug: print valid EventSelector entries
+            import PySpin
+            node_map = c.GetNodeMap()
+            selector = PySpin.CEnumerationPtr(node_map.GetNode('EventSelector'))
+            entries = selector.GetEntries()
+            print("Valid EventSelector values:")
+            for e in entries:
+                print(" ", PySpin.CEnumEntryPtr(e).GetSymbolic())
+
             # Ensure Line0 is in input mode. When line0 = "Off" in the camera
             # config yaml, init_camera() does not touch Line0, so this sets
             # it explicitly to input before enabling events.
