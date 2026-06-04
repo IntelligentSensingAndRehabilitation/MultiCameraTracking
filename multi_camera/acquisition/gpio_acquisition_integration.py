@@ -150,23 +150,44 @@ class GPIOEdgeRecorder:
         try:
             c = self._camera
 
-            # Debug: try all known selector string variants
-            candidates = [
-                "Line0RisingEdge",
-                "Line0FallingEdge",
-                "EventLine0RisingEdge",
-                "EventLine0FallingEdge",
-                "Line0Rise",
-                "Line0Fall",
-                "GPI0RisingEdge",
-                "GPI0FallingEdge",
-            ]
-            for candidate in candidates:
+            # Debug: dump all top-level event-related nodes and their values
+            import PySpin
+            node_map = c.cam.GetNodeMap()
+            print("=== Event-related nodes ===")
+            for node_name in [
+                "EventEnable", "AcquisitionStatusSelector",
+                "TransferEventEnable", "GevSCPSDoNotFragment",
+                "EventExposureEndFrameID",
+            ]:
                 try:
-                    c.EventSelector = candidate
-                    print(f"EventSelector accepted: {candidate}")
+                    node = node_map.GetNode(node_name)
+                    if PySpin.IsAvailable(node):
+                        print(f"  {node_name}: available")
+                    else:
+                        print(f"  {node_name}: not available")
                 except Exception as e:
-                    print(f"EventSelector rejected '{candidate}': {e}")
+                    print(f"  {node_name}: error - {e}")
+
+            # Try enabling event engine first, then query EventSelector
+            print("=== Trying to enable event engine ===")
+            for enable_node in ["EventEnable", "AcquisitionEventEnable"]:
+                try:
+                    node = PySpin.CBooleanPtr(node_map.GetNode(enable_node))
+                    if PySpin.IsAvailable(node) and PySpin.IsWritable(node):
+                        node.SetValue(True)
+                        print(f"  Set {enable_node} = True")
+                except Exception as e:
+                    print(f"  {enable_node}: {e}")
+
+            # Now retry EventSelector
+            print("=== EventSelector entries after enable attempt ===")
+            try:
+                selector = PySpin.CEnumerationPtr(node_map.GetNode('EventSelector'))
+                entries = selector.GetEntries()
+                for e in entries:
+                    print(f"  {PySpin.CEnumEntryPtr(e).GetSymbolic()}")
+            except Exception as e:
+                print(f"  EventSelector query failed: {e}")
 
             # Ensure Line0 is in input mode. When line0 = "Off" in the camera
             # config yaml, init_camera() does not touch Line0, so this sets
