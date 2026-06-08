@@ -85,11 +85,11 @@ health:
 	docker compose run --rm --entrypoint python3 test \
 		-m multi_camera.acquisition.health
 
-# Same as `make health` but auto-remediates known drift before reporting.
-# Requires passwordless sudo for ip link / sysctl / systemctl.
+# Same as `make health` but auto-remediates host drift (MTU/rmem/DHCP) first.
+# Runs on the host — the container has no sudo and cannot reach host systemd.
+# Requires passwordless sudo (run `make install-sudoers` once).
 health-fix:
-	docker compose run --rm --entrypoint python3 test \
-		-m multi_camera.acquisition.health --remediate
+	./scripts/acquisition/health_fix.sh
 
 # Rescue cameras stuck on link-local 169.254.x.x by broadcasting a Spinnaker
 # ForceIP. Volatile: cameras revert to their previous IP config on next
