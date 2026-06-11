@@ -2242,6 +2242,36 @@ class FlirRecorder:
                 import pathlib
                 p = pathlib.Path(self.video_base_file + ".json")
                 obj = json.loads(p.read_text())
+
+                # Convert GPIO timestamps from host time to PTP using frame timestamps
+                if "frames" in obj and obj["frames"]:
+                    frames = obj["frames"]
+                    # Get host and PTP timestamps from first and last frames
+                    first_frame = frames[0]
+                    last_frame = frames[-1]
+
+                    host_time_first = first_frame.get("timestamp")
+                    ptp_first = first_frame.get("ptp_timestamp")
+                    host_time_last = last_frame.get("timestamp")
+                    ptp_last = last_frame.get("ptp_timestamp")
+
+                    if (host_time_first is not None and ptp_first is not None and
+                        host_time_last is not None and ptp_last is not None):
+                        # Linear mapping: ptp = a * host_time + b
+                        host_diff = host_time_last - host_time_first
+                        ptp_diff = ptp_last - ptp_first
+
+                        if host_diff > 0:
+                            a = ptp_diff / host_diff
+                            b = ptp_first - a * host_time_first
+
+                            # Apply mapping to GPIO timestamps
+                            for i, gpio_ts in enumerate(gpio_data["ptp_times"]):
+                                gpio_data["ptp_times"][i] = a * gpio_ts + b
+
+                            gpio_data["rising_time"] = a * gpio_data["rising_time"] + b
+                            gpio_data["falling_time"] = a * gpio_data["falling_time"] + b
+
                 obj["gpio_line_0"] = gpio_data
                 p.write_text(json.dumps(obj) + "\n")
 
