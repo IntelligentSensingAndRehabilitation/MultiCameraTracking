@@ -194,7 +194,8 @@ class GPIOEdgeRecorder:
 
         try:
             c = self._camera
-            c.cam.UnregisterEventHandler(self._EXPOSURE_END_EVENT)
+            # Note: explicit UnregisterEventHandler causes SWIG signature errors.
+            # The handler will be cleaned up when the camera connection closes.
             c.EventSelector = self._EXPOSURE_END_SELECTOR
             c.EventNotification = "Off"
         except Exception as exc:
