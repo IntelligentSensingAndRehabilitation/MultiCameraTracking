@@ -109,6 +109,34 @@ class GPIOEdgeTrigger(dj.Computed):
                 "to the SmartWheel TTL output with Pin 5 as ground."
             )
 
+        # Convert GPIO timestamps from host time to PTP using frame mapping
+        frames = metadata.get("frames", [])
+        if frames:
+            first_frame = frames[0]
+            last_frame = frames[-1]
+
+            host_time_first = first_frame.get("timestamp")
+            ptp_first = first_frame.get("ptp_timestamp")
+            host_time_last = last_frame.get("timestamp")
+            ptp_last = last_frame.get("ptp_timestamp")
+
+            if (host_time_first is not None and ptp_first is not None and
+                host_time_last is not None and ptp_last is not None):
+                # Linear mapping: ptp = a * host_time + b
+                host_diff = host_time_last - host_time_first
+                ptp_diff = ptp_last - ptp_first
+
+                if host_diff > 0:
+                    a = ptp_diff / host_diff
+                    b = ptp_first - a * host_time_first
+
+                    # Apply mapping to GPIO timestamps (convert from host to PTP)
+                    gpio_data["ptp_times"] = [
+                        a * ts + b for ts in gpio_data["ptp_times"]
+                    ]
+                    gpio_data["rising_time"] = a * gpio_data["rising_time"] + b
+                    gpio_data["falling_time"] = a * gpio_data["falling_time"] + b
+
         ptp_times  = np.array(gpio_data["ptp_times"],  dtype=np.float64)
         edge_types = np.array(gpio_data["edge_types"],  dtype=object)
 
