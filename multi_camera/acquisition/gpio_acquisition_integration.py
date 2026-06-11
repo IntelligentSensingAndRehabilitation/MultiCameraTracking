@@ -185,9 +185,11 @@ class GPIOEdgeRecorder:
         """
         Unregister the ExposureEnd handler and return edge data for JSON storage.
 
-        Returns a dict with keys ptp_times, edge_types, rising_time, and
+        Returns a dict with keys host_times, edge_types, rising_time, and
         falling_time if at least one rising and one falling edge were recorded.
-        Returns an empty dict with a printed warning otherwise.
+        host_times are in host wall clock seconds (time.time()) and will be
+        converted to PTP during DataJoint population. Returns an empty dict
+        with a printed warning otherwise.
         """
         if not self._enabled or self._handler is None:
             return {}
@@ -228,7 +230,7 @@ class GPIOEdgeRecorder:
             return {}
 
         return {
-            "ptp_times":   ptp_times,
+            "host_times":  ptp_times,
             "edge_types":  edge_types,
             "rising_time": rising_time,
             "falling_time": falling_time,

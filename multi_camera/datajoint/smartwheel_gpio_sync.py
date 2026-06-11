@@ -131,13 +131,13 @@ class GPIOEdgeTrigger(dj.Computed):
                     b = ptp_first - a * host_time_first
 
                     # Apply mapping to GPIO timestamps (convert from host to PTP)
-                    gpio_data["ptp_times"] = [
-                        a * ts + b for ts in gpio_data["ptp_times"]
+                    gpio_data["host_times"] = [
+                        a * ts + b for ts in gpio_data["host_times"]
                     ]
                     gpio_data["rising_time"] = a * gpio_data["rising_time"] + b
                     gpio_data["falling_time"] = a * gpio_data["falling_time"] + b
 
-        ptp_times  = np.array(gpio_data["ptp_times"],  dtype=np.float64)
+        ptp_times  = np.array(gpio_data["host_times"],  dtype=np.float64)
         edge_types = np.array(gpio_data["edge_types"],  dtype=object)
 
         if len(ptp_times) != 2:
