@@ -194,7 +194,7 @@ class GPIOEdgeRecorder:
 
         try:
             c = self._camera
-            c.cam.UnregisterEventHandler(self._handler, self._EXPOSURE_END_EVENT)
+            c.cam.UnregisterEventHandler(self._EXPOSURE_END_EVENT)
             c.EventSelector = self._EXPOSURE_END_SELECTOR
             c.EventNotification = "Off"
         except Exception as exc:
