@@ -127,7 +127,17 @@ def import_session(
     # tears down the surrounding transaction. The deferred import here also
     # breaks the sessions <-> subject_extended cycle at module load time.
     if fin is not None:
-        from multi_camera.datajoint.subject_extended import Fin
+        from multi_camera.datajoint.subject_extended import Fin, FIN_MAX_LENGTH
+
+        if len(fin) > FIN_MAX_LENGTH:
+            raise ValueError(
+                f"FIN is {len(fin)} characters; subject_extended.Fin allows at most {FIN_MAX_LENGTH}"
+            )
+
+    # Check the photo file before the transaction so a missing file fails fast
+    # instead of rolling back the (expensive) recording imports.
+    if photo is not None and not os.path.exists(photo.saved_path):
+        raise FileNotFoundError(f"Photo missing on disk: {photo.saved_path}")
 
     dj.conn().start_transaction()
     try:
@@ -152,8 +162,6 @@ def import_session(
             Recording.insert1(key)
 
         if photo is not None:
-            if not os.path.exists(photo.saved_path):
-                raise FileNotFoundError(f"Photo missing on disk: {photo.saved_path}")
             Photo.insert1({
                 **session_key,
                 "photo": photo.saved_path,
