@@ -821,6 +821,17 @@ async def set_session(
         dict: A dictionary with the recording directory and filename
     """
 
+    fin = fin.strip() if fin else None
+    # Mirrors subject_extended.FIN_MAX_LENGTH (varchar(20)), which can't be
+    # imported here: importing that module activates its DataJoint schema,
+    # and /session must work without DataJoint connectivity. Validate before
+    # any side effects so a rejected request leaves no session behind.
+    if fin and len(fin) > 20:
+        raise HTTPException(
+            status_code=422,
+            detail=f"FIN must be at most 20 characters (got {len(fin)})",
+        )
+
     date = datetime.date.today()
     session_dir = os.path.join(RECORDING_BASE, subject_id, date.strftime("%Y%m%d"))
     os.makedirs(session_dir, exist_ok=True)
@@ -842,11 +853,17 @@ async def set_session(
         if saved_salt:
             print(f"Restored config_hash_salt from {_session_salt_path(state.current_session)}")
 
-    if fin and fin.strip():
+    if fin:
         from multi_camera.backend.recording_db import store_fin
 
-        store_fin(db, participant_name=subject_id, fin=fin.strip())
-        print(f"FIN stored for participant {subject_id}")
+        store_fin(
+            db,
+            participant_name=subject_id,
+            session_date=date,
+            session_path=session_dir,
+            fin=fin,
+        )
+        print(f"FIN stored for session {subject_id} / {date}")
 
     return state.current_session
 
