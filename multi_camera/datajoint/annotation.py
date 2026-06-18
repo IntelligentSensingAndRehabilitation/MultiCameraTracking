@@ -72,6 +72,12 @@ class VideoActivityLookup(dj.Lookup):
             "CUET_ManipulateChip",
             "CUET_Calculator",
             "CUET_Phone",
+            "Vertical Hop",
+            "Single Hop Distance",
+            "Triple Hop",
+            "Crossover Hop",
+            "Single Timed Distance Hop",
+            "Single Leg Squat",
             "Other",
         ]
     )
