@@ -679,6 +679,67 @@ EOF
 }
 
 ################################################################################
+# Step 7b: DataJoint Config File
+################################################################################
+
+create_datajoint_config() {
+    print_header "Step 7b: DataJoint Config File"
+
+    local config_file="datajoint_config.json"
+    local template_file="template.datajoint_config.json"
+
+    # The Dockerfile COPYs datajoint_config.json into the image unconditionally,
+    # so the build fails outright if it is missing. It is gitignored (it holds
+    # DB credentials), so a fresh checkout never has it. Generate it here from
+    # the template, injecting the DataJoint credentials collected in Step 7.
+    if [ -f "$config_file" ]; then
+        print_success "$config_file already exists — leaving it untouched"
+        echo ""
+        return 0
+    fi
+
+    if [ ! -f "$template_file" ]; then
+        print_error "$template_file not found — cannot create $config_file"
+        exit 1
+    fi
+
+    if ! command -v python3 &>/dev/null; then
+        print_error "python3 not found — cannot generate $config_file"
+        print_info "Create it by hand: cp $template_file $config_file"
+        print_info "then add database.host/port/user/password from your .env"
+        exit 1
+    fi
+
+    # Step 7 may have been skipped (operator kept an existing .env), so read the
+    # credentials back from .env rather than relying on the in-memory values.
+    local dj_user dj_pass dj_host dj_port
+    dj_user=$(grep '^DJ_USER=' .env | cut -d= -f2-)
+    dj_pass=$(grep '^DJ_PASS=' .env | cut -d= -f2-)
+    dj_host=$(grep '^DJ_HOST=' .env | cut -d= -f2-)
+    dj_port=$(grep '^DJ_PORT=' .env | cut -d= -f2-)
+
+    print_info "Creating $config_file from $template_file..."
+    python3 - "$template_file" "$config_file" "$dj_host" "$dj_port" "$dj_user" "$dj_pass" <<'PY'
+import json
+import sys
+
+template, out, host, port, user, password = sys.argv[1:7]
+with open(template) as f:
+    cfg = json.load(f)
+cfg["database.host"] = host
+cfg["database.port"] = int(port)
+cfg["database.user"] = user
+cfg["database.password"] = password
+with open(out, "w") as f:
+    json.dump(cfg, f, indent=4)
+PY
+
+    chown "$ACTUAL_USER:$ACTUAL_USER" "$config_file"
+    print_success "$config_file created (connects to $dj_host:$dj_port as $dj_user)"
+    echo ""
+}
+
+################################################################################
 # Step 8: Apply Persistence Settings
 ################################################################################
 
@@ -858,6 +919,7 @@ main() {
     setup_dhcp_server
     create_directories
     create_env_file
+    create_datajoint_config
     apply_persistence
     install_sudoers
     download_flir_sdk
