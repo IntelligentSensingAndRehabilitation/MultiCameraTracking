@@ -746,12 +746,18 @@ PY
 apply_persistence() {
     print_header "Step 8: Persistent Network Settings"
 
-    print_info "Making network settings (MTU, buffers, DHCP) persist across reboots"
+    print_info "This makes the camera network settings stick after a restart, so the"
+    print_info "cameras keep working without any manual setup each time the computer"
+    print_info "reboots. If you skip this, the cameras may drop frames or fail to"
+    print_info "connect after a reboot until the settings are applied again by hand."
     echo ""
 
-    if ask_yes_no "Apply persistent settings now?" "y"; then
-        # Run persistence script as actual user
-        sudo -u "$ACTUAL_USER" ./scripts/acquisition/make_settings_persistent.sh
+    if ask_yes_no "Save the camera network settings so they survive a restart?" "y"; then
+        # The wizard already runs as root; run the persistence script directly
+        # rather than via `sudo -u "$ACTUAL_USER"`. It re-invokes sudo internally
+        # to edit system files, which would prompt for a password and hang when
+        # dropped to a user without passwordless sudo. Its writes are root-owned anyway.
+        ./scripts/acquisition/make_settings_persistent.sh
         print_success "Persistence settings applied"
     else
         print_warning "Skipped persistence setup"
@@ -768,12 +774,19 @@ apply_persistence() {
 install_sudoers() {
     print_header "Step 8b: Passwordless-sudo Rules"
 
-    print_info "Without these rules, start_acquisition.sh's auto-remediation"
-    print_info "(MTU/rmem fix, isc-dhcp-server start, nmcli profile activation)"
-    print_info "falls back to printing manual commands instead of actually fixing."
+    print_info "This lets the acquisition system fix common network problems on its"
+    print_info "own — for example restoring the camera network settings or restarting"
+    print_info "the address server — without stopping to ask for a password each time."
+    echo ""
+    print_info "If you skip this, the system can still detect those problems but will"
+    print_info "only print instructions for you to run by hand, instead of fixing them"
+    print_info "automatically."
+    echo ""
+    print_info "You can undo this later by removing the permissions file:"
+    print_info "  sudo rm /etc/sudoers.d/mocap-acquisition"
     echo ""
 
-    if ask_yes_no "Install /etc/sudoers.d/mocap-acquisition now?" "y"; then
+    if ask_yes_no "Allow the system to fix network problems automatically?" "y"; then
         ./scripts/acquisition/install_sudoers.sh "$ACTUAL_USER"
     else
         print_warning "Skipped sudoers install"
