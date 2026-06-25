@@ -1,16 +1,14 @@
 """
-GPIO edge timestamp recording for FlirRecorder via ExposureEnd events.
+GPIO edge timestamp recording for FlirRecorder via background polling thread.
 
 The BFS-PGE-31S4C firmware does not expose Line0 edge events through the
-PySpin EventSelector system. Instead, this module uses ExposureEnd events
-(which ARE supported) to sample Line0 state at the end of every frame
-exposure. Rising and falling edges are detected by comparing the Line0
-state across consecutive frames, and the PTP timestamp of the ExposureEnd
-event is used as the edge timestamp.
+PySpin EventSelector system. A background thread polls LineStatusAll at
+20 Hz (every 50 ms) to detect rising and falling edges on Line0 without
+interfering with frame acquisition.
 
-Precision is one frame period (~33 ms at 30 fps). For SmartWheel alignment
-at 240 Hz this means ~8 samples of uncertainty on the start/stop boundary,
-which is acceptable for most biomechanics analyses.
+Precision is ~50 ms (one poll interval). For SmartWheel alignment at 240 Hz
+this means ~12 samples of uncertainty on the start/stop boundary, which is
+acceptable for most biomechanics analyses.
 
 Line0 (opto-isolated input, Pin 2 on the 6-pin GPIO connector) is used
 because the SmartWheel TTL signal is 5 V, which exceeds the 3.6 V maximum
@@ -45,7 +43,7 @@ is not None:
 After json_queue.join(), patch the result into the written JSON:
 
     if gpio_data and self.video_base_file is not None:
-        import json, pathlib
+        import pathlib
         p = pathlib.Path(self.video_base_file + ".json")
         obj = json.loads(p.read_text())
         obj["gpio_line_0"] = gpio_data
@@ -53,6 +51,7 @@ After json_queue.join(), patch the result into the written JSON:
 """
 
 import threading
+import time
 
 try:
     import PySpin
@@ -61,85 +60,77 @@ except ImportError:
     _PYSPIN_AVAILABLE = False
 
 
-class _ExposureEndHandler(PySpin.DeviceEventHandler if _PYSPIN_AVAILABLE else object):
+class _Line0PollingThread(threading.Thread):
     """
-    PySpin ExposureEnd event handler that detects Line0 edges by sampling
-    LineStatusAll at the end of every frame exposure.
+    Background thread that polls Line0 state at 20 Hz (every 50 ms).
 
-    OnDeviceEvent fires on the PySpin internal callback thread after each
-    frame exposure completes. GetTimestamp() returns nanoseconds in the
-    camera's PTP timebase — the same domain as frame timestamps.
+    Reads LineStatusAll from the camera at a low fixed rate to detect
+    rising and falling edges on Line0. Running this in a separate thread
+    at low frequency avoids interfering with the PySpin acquisition loop.
 
-    Edge detection: compare Line0 bit in LineStatusAll across consecutive
-    callbacks. Record the PTP timestamp of the first low→high transition
-    (rising edge) and the first high→low transition (falling edge).
+    Timestamps are host wall clock (time.time()) and are converted to PTP
+    during DataJoint population using the frame timestamp mapping.
     """
 
-    # Line0 is bit 0 of LineStatusAll
     _LINE0_BIT = 0x1
+    _POLL_INTERVAL_S = 0.05  # 20 Hz
 
-    def __init__(self):
-        if _PYSPIN_AVAILABLE:
-            super().__init__()
+    def __init__(self, camera):
+        super().__init__(name="gpio_line0_poll", daemon=True)
+        self._camera = camera
         self.edges: list[tuple[float, str]] = []
         self.lock = threading.Lock()
+        self._stop_event = threading.Event()
         self._prev_line0: bool | None = None
-        self._cam_ref = None  # set by GPIOEdgeRecorder after construction
-        self._done = False    # stop reading once both edges are captured
 
-    def OnDeviceEvent(self, event_name):
-        if self._cam_ref is None or self._done:
-            return
-        try:
-            import time
-            ts_s = time.time()
-            line0_high = bool(self._cam_ref.LineStatusAll & self._LINE0_BIT)
+    def run(self):
+        while not self._stop_event.is_set():
+            try:
+                line0_high = bool(self._camera.LineStatusAll & self._LINE0_BIT)
+                ts_s = time.time()
 
-            with self.lock:
-                if self._prev_line0 is None:
-                    self._prev_line0 = line0_high
-                    return
+                with self.lock:
+                    if self._prev_line0 is None:
+                        self._prev_line0 = line0_high
+                    elif not self._prev_line0 and line0_high:
+                        self.edges.append((ts_s, "rising"))
+                        print(f"GPIOEdgeRecorder: rising edge at {ts_s:.6f} s")
+                        self._prev_line0 = line0_high
+                    elif self._prev_line0 and not line0_high:
+                        self.edges.append((ts_s, "falling"))
+                        print(f"GPIOEdgeRecorder: falling edge at {ts_s:.6f} s")
+                        self._prev_line0 = line0_high
+                    else:
+                        self._prev_line0 = line0_high
 
-                if not self._prev_line0 and line0_high:
-                    self.edges.append((ts_s, "rising"))
-                    print(f"GPIOEdgeRecorder: rising edge detected at {ts_s:.6f} s")
-                elif self._prev_line0 and not line0_high:
-                    self.edges.append((ts_s, "falling"))
-                    print(f"GPIOEdgeRecorder: falling edge detected at {ts_s:.6f} s")
+            except Exception as exc:
+                print(f"GPIOEdgeRecorder: polling error — {exc}")
 
-                self._prev_line0 = line0_high
+            self._stop_event.wait(self._POLL_INTERVAL_S)
 
-                # Stop polling once we have at least one rising and one falling edge
-                rising  = sum(1 for _, k in self.edges if k == "rising")
-                falling = sum(1 for _, k in self.edges if k == "falling")
-                if rising >= 1 and falling >= 1:
-                    self._done = True
-
-        except Exception as exc:
-            print(f"GPIOEdgeRecorder: error in ExposureEnd callback — {exc}")
+    def stop(self):
+        self._stop_event.set()
 
 
 class GPIOEdgeRecorder:
     """
-    Monitor Line0 on one FLIR camera for rising and falling edges by sampling
-    LineStatusAll on every ExposureEnd event.
+    Monitor Line0 on one FLIR camera for rising and falling edges using a
+    low-frequency background polling thread (20 Hz).
 
     The BFS-PGE-31S4C does not support Line0 edge events in EventSelector,
-    so ExposureEnd events are used instead. Line0 state is sampled at the
-    end of each frame exposure (~33 ms precision at 30 fps).
+    so LineStatusAll is polled at 20 Hz instead. This avoids interfering
+    with frame acquisition by keeping GigE traffic minimal.
 
     Line0 is the opto-isolated input (Pin 2, Opto GND on Pin 5). It accepts
     signals up to 30 V, making it safe for the SmartWheel's 5 V TTL output.
 
-    Timestamps are in the camera's PTP timebase (seconds since epoch),
-    the same domain as frame timestamps in the acquisition JSON.
+    Timestamps are host wall clock time (time.time()). The DataJoint
+    GPIOEdgeTrigger table converts them to PTP using the frame timestamp
+    mapping from the acquisition JSON.
 
     Do not use when line0 = "ArduinoTrigger" — pass line0_used_for_trigger=True
     and the recorder will silently disable itself.
     """
-
-    _EXPOSURE_END_SELECTOR = "ExposureEnd"
-    _EXPOSURE_END_EVENT    = "EventExposureEnd"
 
     def __init__(self, camera, line0_used_for_trigger: bool = False):
         """
@@ -150,7 +141,7 @@ class GPIOEdgeRecorder:
                     the camera config. Disables edge recording.
         """
         self._camera = camera
-        self._handler: _ExposureEndHandler | None = None
+        self._poller: _Line0PollingThread | None = None
         self._enabled = (
             camera is not None
             and _PYSPIN_AVAILABLE
@@ -164,34 +155,29 @@ class GPIOEdgeRecorder:
 
     def start(self) -> None:
         """
-        Enable ExposureEnd events and register the handler. Call this after
-        cameras have started streaming and recording_path is not None.
+        Set Line0 to input mode and start the background polling thread.
+        Call this after cameras have started streaming and only when
+        recording_path is not None.
         """
         if not self._enabled:
             return
         try:
             c = self._camera
-
             c.LineSelector = "Line0"
             c.LineMode = "Input"
 
-            c.EventSelector = self._EXPOSURE_END_SELECTOR
-            c.EventNotification = "On"
-
-            self._handler = _ExposureEndHandler()
-            self._handler._cam_ref = c
-            c.cam.RegisterEventHandler(self._handler, self._EXPOSURE_END_EVENT)
-
-            print("GPIOEdgeRecorder: started — sampling Line0 on ExposureEnd events")
+            self._poller = _Line0PollingThread(c)
+            self._poller.start()
+            print("GPIOEdgeRecorder: started — polling Line0 at 20 Hz")
 
         except Exception as exc:
             print(f"GPIOEdgeRecorder: failed to start — {exc}. Edge recording disabled.")
             self._enabled = False
-            self._handler = None
+            self._poller = None
 
     def stop(self) -> dict:
         """
-        Unregister the ExposureEnd handler and return edge data for JSON storage.
+        Stop the polling thread and return edge data for JSON storage.
 
         Returns a dict with keys host_times, edge_types, rising_time, and
         falling_time if at least one rising and one falling edge were recorded.
@@ -199,20 +185,14 @@ class GPIOEdgeRecorder:
         converted to PTP during DataJoint population. Returns an empty dict
         with a printed warning otherwise.
         """
-        if not self._enabled or self._handler is None:
+        if not self._enabled or self._poller is None:
             return {}
 
-        try:
-            c = self._camera
-            # Note: explicit UnregisterEventHandler causes SWIG signature errors.
-            # The handler will be cleaned up when the camera connection closes.
-            c.EventSelector = self._EXPOSURE_END_SELECTOR
-            c.EventNotification = "Off"
-        except Exception as exc:
-            print(f"GPIOEdgeRecorder: error during stop — {exc}")
+        self._poller.stop()
+        self._poller.join(timeout=1.0)
 
-        with self._handler.lock:
-            edges = list(self._handler.edges)
+        with self._poller.lock:
+            edges = list(self._poller.edges)
 
         print(f"GPIOEdgeRecorder: stop — recorded {len(edges)} edge(s): {edges}")
 
@@ -229,7 +209,6 @@ class GPIOEdgeRecorder:
             )
             return {}
 
-        # Use first rising and last falling edge
         rising_time  = float(rising_times[0])
         falling_time = float(falling_times[-1])
 
