@@ -479,12 +479,21 @@ main() {
         fi
     fi
 
-    # Activate network (laptop mode only)
+    # Activate network (laptop mode only). With --skip-checks the operator may be
+    # starting the GUI with no camera network attached — e.g. from a desk just to
+    # review or push already-recorded data — so a failure here is non-fatal: warn
+    # and continue so the GUI still opens. A normal `make run` stays strict.
     if ! activate_network; then
         echo ""
-        print_error "Network activation failed"
-        echo ""
-        exit 1
+        if $SKIP_CHECKS; then
+            print_warning "Network activation failed — continuing anyway (--skip-checks)"
+            print_info "Cameras will be unavailable; the GUI will still open for data review/push"
+            echo ""
+        else
+            print_error "Network activation failed"
+            echo ""
+            exit 1
+        fi
     fi
 
     # Wait for cameras (optional, non-blocking)
