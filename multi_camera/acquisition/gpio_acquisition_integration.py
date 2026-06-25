@@ -85,9 +85,10 @@ class _ExposureEndHandler(PySpin.DeviceEventHandler if _PYSPIN_AVAILABLE else ob
         self.lock = threading.Lock()
         self._prev_line0: bool | None = None
         self._cam_ref = None  # set by GPIOEdgeRecorder after construction
+        self._done = False    # stop reading once both edges are captured
 
     def OnDeviceEvent(self, event_name):
-        if self._cam_ref is None:
+        if self._cam_ref is None or self._done:
             return
         try:
             import time
@@ -107,6 +108,13 @@ class _ExposureEndHandler(PySpin.DeviceEventHandler if _PYSPIN_AVAILABLE else ob
                     print(f"GPIOEdgeRecorder: falling edge detected at {ts_s:.6f} s")
 
                 self._prev_line0 = line0_high
+
+                # Stop polling once we have at least one rising and one falling edge
+                rising  = sum(1 for _, k in self.edges if k == "rising")
+                falling = sum(1 for _, k in self.edges if k == "falling")
+                if rising >= 1 and falling >= 1:
+                    self._done = True
+
         except Exception as exc:
             print(f"GPIOEdgeRecorder: error in ExposureEnd callback — {exc}")
 
