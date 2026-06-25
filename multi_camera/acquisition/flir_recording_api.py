@@ -354,6 +354,47 @@ class _RecorderInterfaceEventHandler(PySpin.InterfaceEventHandler):
         )
 
 
+def _get_chunk_line_status(chunk_data) -> int | None:
+    """
+    Read LineStatusAll from PySpin chunk data.
+
+    The PySpin getter name varies across SDK versions. Try known variants
+    in order and return the first that succeeds. Returns None if all fail.
+    """
+    _logged = getattr(_get_chunk_line_status, "_logged", False)
+
+    for method_name in (
+        "GetExposureEndLineStatusAll",
+        "GetLineStatusAll",
+        "GetChunkExposureEndLineStatusAll",
+    ):
+        method = getattr(chunk_data, method_name, None)
+        if method is not None:
+            try:
+                val = method()
+                if not _logged:
+                    print(f"GPIOEdgeRecorder: reading LineStatusAll via {method_name}")
+                    _get_chunk_line_status._logged = True
+                return int(val)
+            except Exception:
+                continue
+
+    # Fall back to reading the GenICam node directly
+    try:
+        import PySpin
+        node_map = chunk_data.GetChunkDataNodeMap()
+        node = PySpin.CIntegerPtr(node_map.GetNode("ChunkExposureEndLineStatusAll"))
+        if PySpin.IsAvailable(node) and PySpin.IsReadable(node):
+            if not _logged:
+                print("GPIOEdgeRecorder: reading LineStatusAll via GenICam node")
+                _get_chunk_line_status._logged = True
+            return int(node.GetValue())
+    except Exception:
+        pass
+
+    return None
+
+
 def init_camera(
     c: Camera,
     jumbo_packet: bool = True,
@@ -1801,10 +1842,7 @@ class FlirRecorder:
                         chunk_data = im_ref.GetChunkData()
                         frame_id_abs = chunk_data.GetFrameID()
                         serial_msg, frame_count = self.process_serial_data(camera)
-                        try:
-                            line_status_all = chunk_data.GetExposureEndLineStatusAll()
-                        except Exception:
-                            line_status_all = None
+                        line_status_all = _get_chunk_line_status(chunk_data)
 
                     if frame_id != prev_frame_id + 1 and prev_frame_id != 0:
                         gap = frame_id - prev_frame_id - 1
