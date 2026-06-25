@@ -84,6 +84,18 @@ class _Line0PollingThread(threading.Thread):
         self._prev_line0: bool | None = None
 
     def run(self):
+        # Debug: print valid ChunkSelector entries once at startup
+        try:
+            import PySpin
+            node_map = self._camera.cam.GetNodeMap()
+            selector = PySpin.CEnumerationPtr(node_map.GetNode('ChunkSelector'))
+            entries = selector.GetEntries()
+            print("Valid ChunkSelector values:")
+            for e in entries:
+                print(" ", PySpin.CEnumEntryPtr(e).GetSymbolic())
+        except Exception as exc:
+            print(f"ChunkSelector query failed: {exc}")
+
         while not self._stop_event.is_set():
             try:
                 line0_high = bool(self._camera.LineStatusAll & self._LINE0_BIT)
