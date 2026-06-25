@@ -690,6 +690,7 @@ def write_metadata_queue(
 
     if chunk_data:
         json_data["frame_id_abs"] = []
+        json_data["line_status_all"] = []
     if serial_enabled:
         json_data["chunk_serial_data"] = []
         json_data["serial_msg"] = []
@@ -826,6 +827,7 @@ def write_metadata_queue(
 
             if chunk_data:
                 json_data["frame_id_abs"] = [frame["frame_id_abs"]]
+                json_data["line_status_all"] = [frame.get("line_status_all")]
             if serial_enabled:
                 json_data["chunk_serial_data"] = [frame["chunk_serial_data"]]
                 json_data["serial_msg"] = [frame["serial_msg"]]
@@ -840,6 +842,7 @@ def write_metadata_queue(
 
             if chunk_data:
                 json_data["frame_id_abs"].append(frame["frame_id_abs"])
+                json_data["line_status_all"].append(frame.get("line_status_all"))
             if serial_enabled:
                 json_data["chunk_serial_data"].append(frame["chunk_serial_data"])
                 json_data["serial_msg"].append(frame["serial_msg"])
@@ -1798,6 +1801,10 @@ class FlirRecorder:
                         chunk_data = im_ref.GetChunkData()
                         frame_id_abs = chunk_data.GetFrameID()
                         serial_msg, frame_count = self.process_serial_data(camera)
+                        try:
+                            line_status_all = chunk_data.GetExposureEndLineStatusAll()
+                        except Exception:
+                            line_status_all = None
 
                     if frame_id != prev_frame_id + 1 and prev_frame_id != 0:
                         gap = frame_id - prev_frame_id - 1
@@ -1974,6 +1981,8 @@ class FlirRecorder:
                         frame_data["frame_id_abs"] = frame_id_abs
                         frame_data["serial_msg"] = serial_msg
                         frame_data["frame_count"] = frame_count
+                        if line_status_all is not None:
+                            frame_data["line_status_all"] = line_status_all
 
                     # put the frame data into the acquisition queue
                     self.acquisition_queue[camera_serial].put(frame_data)
@@ -2232,18 +2241,12 @@ class FlirRecorder:
                 self.image_queue_dict[c.DeviceSerialNumber].put(None)
                 self.image_queue_dict[c.DeviceSerialNumber].join()
 
-            gpio_data = self.gpio_recorder.stop() if self.gpio_recorder is not None and recording_path is not None else {}
+            if self.gpio_recorder is not None and recording_path is not None:
+                self.gpio_recorder.stop()
 
             # to allow the json queue to be processed before moving on
             self.json_queue.put(None)
             self.json_queue.join()
-
-            if gpio_data and self.video_base_file is not None:
-                import pathlib
-                p = pathlib.Path(self.video_base_file + ".json")
-                obj = json.loads(p.read_text())
-                obj["gpio_line_0"] = gpio_data
-                p.write_text(json.dumps(obj) + "\n")
 
             # go through the records queue and add the records to a list
             for i in range(self.records_queue.qsize()):

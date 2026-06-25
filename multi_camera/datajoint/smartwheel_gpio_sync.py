@@ -100,62 +100,50 @@ class GPIOEdgeTrigger(dj.Computed):
         with open(metadata_files[0]) as f:
             metadata = json.load(f)
 
-        gpio_data = metadata.get("gpio_line_0")
-        if not gpio_data:
+        # Extract Line0 edges from per-frame ExposureEndLineStatusAll chunk data
+        line_status_all = metadata.get("line_status_all")
+        ptp_timestamps  = metadata.get("timestamps")
+
+        if not line_status_all or not ptp_timestamps:
             raise RuntimeError(
-                "gpio_line_0 key missing from acquisition metadata. "
-                "Ensure GPIOEdgeRecorder is integrated into FlirRecorder "
-                "and Line0 (Pin 2, opto-isolated) is physically connected "
+                "line_status_all or timestamps missing from acquisition metadata. "
+                "Ensure 'ExposureEndLineStatusAll' is in the chunk_data list in the "
+                "camera config YAML and Line0 (Pin 2, opto-isolated) is connected "
                 "to the SmartWheel TTL output with Pin 5 as ground."
             )
 
-        # Convert GPIO timestamps from host time to PTP using frame mapping
-        frames = metadata.get("frames", [])
-        if frames:
-            first_frame = frames[0]
-            last_frame = frames[-1]
-
-            host_time_first = first_frame.get("timestamp")
-            ptp_first = first_frame.get("ptp_timestamp")
-            host_time_last = last_frame.get("timestamp")
-            ptp_last = last_frame.get("ptp_timestamp")
-
-            if (host_time_first is not None and ptp_first is not None and
-                host_time_last is not None and ptp_last is not None):
-                # Linear mapping: ptp = a * host_time + b
-                host_diff = host_time_last - host_time_first
-                ptp_diff = ptp_last - ptp_first
-
-                if host_diff > 0:
-                    a = ptp_diff / host_diff
-                    b = ptp_first - a * host_time_first
-
-                    # Apply mapping to GPIO timestamps (convert from host to PTP)
-                    gpio_data["host_times"] = [
-                        a * ts + b for ts in gpio_data["host_times"]
-                    ]
-                    gpio_data["rising_time"] = a * gpio_data["rising_time"] + b
-                    gpio_data["falling_time"] = a * gpio_data["falling_time"] + b
-
-        ptp_times  = np.array(gpio_data["host_times"],  dtype=np.float64)
-        edge_types = np.array(gpio_data["edge_types"],  dtype=object)
-
-        if len(ptp_times) != 2:
+        if len(line_status_all) != len(ptp_timestamps):
             raise RuntimeError(
-                f"Expected exactly 2 GPIO edges, got {len(ptp_times)}"
+                f"line_status_all length ({len(line_status_all)}) does not match "
+                f"timestamps length ({len(ptp_timestamps)})"
             )
 
-        rising_idx  = np.where(edge_types == "rising")[0]
-        falling_idx = np.where(edge_types == "falling")[0]
+        # Detect rising and falling edges on Line0 (bit 0 of LineStatusAll)
+        from multi_camera.acquisition.gpio_acquisition_integration import LINE0_BIT
 
-        if len(rising_idx) != 1 or len(falling_idx) != 1:
+        rising_time  = None
+        falling_time = None
+        prev_line0   = None
+
+        for ts, status in zip(ptp_timestamps, line_status_all):
+            if status is None:
+                continue
+            line0_high = bool(status & LINE0_BIT)
+            if prev_line0 is None:
+                prev_line0 = line0_high
+                continue
+            if not prev_line0 and line0_high and rising_time is None:
+                rising_time = float(ts) / 1e9  # PTP timestamps are in nanoseconds
+            elif prev_line0 and not line0_high and rising_time is not None and falling_time is None:
+                falling_time = float(ts) / 1e9
+            prev_line0 = line0_high
+
+        if rising_time is None or falling_time is None:
             raise RuntimeError(
-                f"Expected 1 rising + 1 falling edge, "
-                f"got {len(rising_idx)} rising / {len(falling_idx)} falling"
+                f"Could not detect rising and falling edge on Line0 from chunk data. "
+                f"rising_time={rising_time}, falling_time={falling_time}. "
+                f"Ensure SmartWheel TTL signal was active during the recording."
             )
-
-        rising_time  = float(ptp_times[rising_idx[0]])
-        falling_time = float(ptp_times[falling_idx[0]])
 
         if falling_time <= rising_time:
             raise RuntimeError("Falling edge must occur after rising edge")
