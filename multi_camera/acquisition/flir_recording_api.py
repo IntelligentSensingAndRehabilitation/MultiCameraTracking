@@ -355,43 +355,11 @@ class _RecorderInterfaceEventHandler(PySpin.InterfaceEventHandler):
 
 
 def _get_chunk_line_status(chunk_data) -> int | None:
-    """
-    Read LineStatusAll from PySpin chunk data.
-
-    The PySpin getter name varies across SDK versions. Try known variants
-    in order and return the first that succeeds. Returns None if all fail.
-    """
-    for method_name in (
-        "GetExposureEndLineStatusAll",
-        "GetLineStatusAll",
-        "GetChunkExposureEndLineStatusAll",
-    ):
-        method = getattr(chunk_data, method_name, None)
-        if method is not None:
-            try:
-                val = method()
-                try:
-                    return int(val)
-                except (TypeError, ValueError):
-                    try:
-                        return int(val.GetValue())
-                    except Exception:
-                        pass
-                    return None
-            except Exception:
-                continue
-
-    # Fall back to reading the GenICam node directly
+    """Read ExposureEndLineStatusAll from PySpin chunk data, or None on failure."""
     try:
-        import PySpin
-        node_map = chunk_data.GetChunkDataNodeMap()
-        node = PySpin.CIntegerPtr(node_map.GetNode("ChunkExposureEndLineStatusAll"))
-        if PySpin.IsAvailable(node) and PySpin.IsReadable(node):
-            return int(node.GetValue())
+        return int(chunk_data.GetExposureEndLineStatusAll())
     except Exception:
-        pass
-
-    return None
+        return None
 
 
 def init_camera(
@@ -728,8 +696,10 @@ def write_metadata_queue(
     json_data["frame_id_cross_delta"] = []
     json_data["sync_bottleneck_cameras"] = []
 
+    smartwheel_enabled = "ExposureEndLineStatusAll" in chunk_data
     if chunk_data:
         json_data["frame_id_abs"] = []
+    if smartwheel_enabled:
         json_data["line_status_all"] = []
     if serial_enabled:
         json_data["chunk_serial_data"] = []
@@ -867,6 +837,7 @@ def write_metadata_queue(
 
             if chunk_data:
                 json_data["frame_id_abs"] = [frame["frame_id_abs"]]
+            if smartwheel_enabled:
                 json_data["line_status_all"] = [frame.get("line_status_all")]
             if serial_enabled:
                 json_data["chunk_serial_data"] = [frame["chunk_serial_data"]]
@@ -882,6 +853,7 @@ def write_metadata_queue(
 
             if chunk_data:
                 json_data["frame_id_abs"].append(frame["frame_id_abs"])
+            if smartwheel_enabled:
                 json_data["line_status_all"].append(frame.get("line_status_all"))
             if serial_enabled:
                 json_data["chunk_serial_data"].append(frame["chunk_serial_data"])
@@ -949,7 +921,7 @@ class FlirRecorder:
 
         self.preview_callback = None
         self.cams = []
-        self.gpio_recorder = None
+        self.smartwheel_enabled = False
         self.image_queue_dict = {}
         self.config_file = None
         self.iface = None
@@ -1313,11 +1285,10 @@ class FlirRecorder:
         self.cams.sort(key=lambda x: x.DeviceSerialNumber)
 
         if self.gpio_settings.get("line0") == "SmartWheel":
+            self.smartwheel_enabled = True
             if "ExposureEndLineStatusAll" not in self.chunk_data:
                 self.chunk_data.append("ExposureEndLineStatusAll")
-            from multi_camera.acquisition.gpio_acquisition_integration import GPIOEdgeRecorder
-            self.gpio_recorder = GPIOEdgeRecorder(self.cams[0] if self.cams else None)
-            print("GPIOEdgeRecorder: SmartWheel GPIO sync enabled (line0=SmartWheel)")
+            print("SmartWheel GPIO sync enabled — ExposureEndLineStatusAll added to chunk data")
 
         # Get the pixel format for each camera
         pixel_formats = [c.PixelFormat for c in self.cams]
@@ -1469,6 +1440,7 @@ class FlirRecorder:
 
         if self.chunk_data:
             frame_metadata["frame_id_abs"] = []
+        if self.smartwheel_enabled:
             frame_metadata["line_status_all"] = []
         if self.serial_enabled:
             frame_metadata["chunk_serial_data"] = []
@@ -1699,8 +1671,8 @@ class FlirRecorder:
         ) as executor:
             l = list(executor.map(start_cam, range(len(self.cams))))
 
-        if self.gpio_recorder is not None and recording_path is not None:
-            self.gpio_recorder.start()
+        if self.smartwheel_enabled and recording_path is not None:
+            print("SmartWheel GPIO sync active — Line0 state recorded via ExposureEndLineStatusAll each frame")
 
         self.frame_diff = {}
         self.prev_timestamp = {}
@@ -1842,7 +1814,8 @@ class FlirRecorder:
                         chunk_data = im_ref.GetChunkData()
                         frame_id_abs = chunk_data.GetFrameID()
                         serial_msg, frame_count = self.process_serial_data(camera)
-                        line_status_all = _get_chunk_line_status(chunk_data)
+                        if self.smartwheel_enabled:
+                            line_status_all = _get_chunk_line_status(chunk_data)
 
                     if frame_id != prev_frame_id + 1 and prev_frame_id != 0:
                         gap = frame_id - prev_frame_id - 1
@@ -2019,7 +1992,7 @@ class FlirRecorder:
                         frame_data["frame_id_abs"] = frame_id_abs
                         frame_data["serial_msg"] = serial_msg
                         frame_data["frame_count"] = frame_count
-                        if line_status_all is not None:
+                        if self.smartwheel_enabled and line_status_all is not None:
                             frame_data["line_status_all"] = line_status_all
 
                     # put the frame data into the acquisition queue
@@ -2132,6 +2105,7 @@ class FlirRecorder:
                         self.frame_metadata["frame_id_abs"].append(
                             frame_data["frame_id_abs"]
                         )
+                    if self.smartwheel_enabled:
                         self.frame_metadata["line_status_all"].append(
                             frame_data.get("line_status_all")
                         )
@@ -2282,8 +2256,8 @@ class FlirRecorder:
                 self.image_queue_dict[c.DeviceSerialNumber].put(None)
                 self.image_queue_dict[c.DeviceSerialNumber].join()
 
-            if self.gpio_recorder is not None and recording_path is not None:
-                self.gpio_recorder.stop()
+            if self.smartwheel_enabled and recording_path is not None:
+                print("SmartWheel GPIO sync stopped — edge timestamps in line_status_all will be extracted during DataJoint population")
 
             # to allow the json queue to be processed before moving on
             self.json_queue.put(None)
