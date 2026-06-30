@@ -506,7 +506,7 @@ def init_camera(
             c.TriggerOverlap = "ReadOut"
             c.TriggerMode = "On"
         else:
-            if line0 != "Off":
+            if line0 not in ("Off", "SmartWheel"):
                 print(f"{line0} is not valid for line0. Setting to 'Off'")
             c.TriggerMode = "Off"
             c.TriggerSelector = "AcquisitionStart"  # Need to select AcquisitionStart for real time clock
@@ -1312,12 +1312,12 @@ class FlirRecorder:
 
         self.cams.sort(key=lambda x: x.DeviceSerialNumber)
 
-        from multi_camera.acquisition.gpio_acquisition_integration import GPIOEdgeRecorder
-        line0_is_trigger = self.gpio_settings.get("line0") == "ArduinoTrigger"
-        self.gpio_recorder = GPIOEdgeRecorder(
-            self.cams[0] if self.cams else None,
-            line0_used_for_trigger=line0_is_trigger,
-        )
+        if self.gpio_settings.get("line0") == "SmartWheel":
+            if "ExposureEndLineStatusAll" not in self.chunk_data:
+                self.chunk_data.append("ExposureEndLineStatusAll")
+            from multi_camera.acquisition.gpio_acquisition_integration import GPIOEdgeRecorder
+            self.gpio_recorder = GPIOEdgeRecorder(self.cams[0] if self.cams else None)
+            print("GPIOEdgeRecorder: SmartWheel GPIO sync enabled (line0=SmartWheel)")
 
         # Get the pixel format for each camera
         pixel_formats = [c.PixelFormat for c in self.cams]
