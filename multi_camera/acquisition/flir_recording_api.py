@@ -1240,6 +1240,12 @@ class FlirRecorder:
 
         self.serial_enabled = self.gpio_settings.get("line3") == "SerialOn"
 
+        if self.gpio_settings.get("line0") == "SmartWheel":
+            self.smartwheel_enabled = True
+            if "ExposureEndLineStatusAll" not in self.chunk_data:
+                self.chunk_data.append("ExposureEndLineStatusAll")
+            print("SmartWheel GPIO sync enabled — ExposureEndLineStatusAll added to chunk data")
+
         # Updating the binning needed to run at 60 Hz.
         # TODO: make this check more robust in the future
         if frame_rate == 60:
@@ -1283,12 +1289,6 @@ class FlirRecorder:
         await self.synchronize_cameras()
 
         self.cams.sort(key=lambda x: x.DeviceSerialNumber)
-
-        if self.gpio_settings.get("line0") == "SmartWheel":
-            self.smartwheel_enabled = True
-            if "ExposureEndLineStatusAll" not in self.chunk_data:
-                self.chunk_data.append("ExposureEndLineStatusAll")
-            print("SmartWheel GPIO sync enabled — ExposureEndLineStatusAll added to chunk data")
 
         # Get the pixel format for each camera
         pixel_formats = [c.PixelFormat for c in self.cams]
