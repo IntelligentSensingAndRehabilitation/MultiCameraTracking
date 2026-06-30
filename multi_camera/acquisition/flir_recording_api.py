@@ -373,10 +373,21 @@ def _get_chunk_line_status(chunk_data) -> int | None:
             try:
                 val = method()
                 if not _logged:
-                    print(f"GPIOEdgeRecorder: reading LineStatusAll via {method_name}")
+                    print(f"GPIOEdgeRecorder: {method_name}() returned val={val!r}, type={type(val).__name__}")
                     _get_chunk_line_status._logged = True
-                return int(val)
-            except Exception:
+                try:
+                    return int(val)
+                except (TypeError, ValueError) as cast_err:
+                    if not _logged:
+                        print(f"GPIOEdgeRecorder: int() cast failed: {cast_err}")
+                    # Try .GetValue() in case val is a PySpin node object
+                    try:
+                        return int(val.GetValue())
+                    except Exception:
+                        pass
+                    return None
+            except Exception as exc:
+                print(f"GPIOEdgeRecorder: {method_name}() call failed: {exc}")
                 continue
 
     # Fall back to reading the GenICam node directly
@@ -389,8 +400,11 @@ def _get_chunk_line_status(chunk_data) -> int | None:
                 print("GPIOEdgeRecorder: reading LineStatusAll via GenICam node")
                 _get_chunk_line_status._logged = True
             return int(node.GetValue())
-    except Exception:
-        pass
+        else:
+            if not _logged:
+                print("GPIOEdgeRecorder: GenICam node ChunkExposureEndLineStatusAll not available/readable")
+    except Exception as exc:
+        print(f"GPIOEdgeRecorder: GenICam node fallback failed: {exc}")
 
     return None
 
