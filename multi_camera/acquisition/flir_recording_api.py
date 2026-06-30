@@ -1484,6 +1484,7 @@ class FlirRecorder:
 
         if self.chunk_data:
             frame_metadata["frame_id_abs"] = []
+            frame_metadata["line_status_all"] = []
         if self.serial_enabled:
             frame_metadata["chunk_serial_data"] = []
             frame_metadata["serial_msg"] = []
@@ -2145,6 +2146,9 @@ class FlirRecorder:
                     if self.chunk_data:
                         self.frame_metadata["frame_id_abs"].append(
                             frame_data["frame_id_abs"]
+                        )
+                        self.frame_metadata["line_status_all"].append(
+                            frame_data.get("line_status_all")
                         )
                     if self.serial_enabled:
                         self.frame_metadata["chunk_serial_data"].append(
