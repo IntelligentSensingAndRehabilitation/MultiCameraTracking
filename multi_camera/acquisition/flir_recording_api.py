@@ -361,8 +361,6 @@ def _get_chunk_line_status(chunk_data) -> int | None:
     The PySpin getter name varies across SDK versions. Try known variants
     in order and return the first that succeeds. Returns None if all fail.
     """
-    _logged = getattr(_get_chunk_line_status, "_logged", False)
-
     for method_name in (
         "GetExposureEndLineStatusAll",
         "GetLineStatusAll",
@@ -372,22 +370,15 @@ def _get_chunk_line_status(chunk_data) -> int | None:
         if method is not None:
             try:
                 val = method()
-                if not _logged:
-                    print(f"GPIOEdgeRecorder: {method_name}() returned val={val!r}, type={type(val).__name__}")
-                    _get_chunk_line_status._logged = True
                 try:
                     return int(val)
-                except (TypeError, ValueError) as cast_err:
-                    if not _logged:
-                        print(f"GPIOEdgeRecorder: int() cast failed: {cast_err}")
-                    # Try .GetValue() in case val is a PySpin node object
+                except (TypeError, ValueError):
                     try:
                         return int(val.GetValue())
                     except Exception:
                         pass
                     return None
-            except Exception as exc:
-                print(f"GPIOEdgeRecorder: {method_name}() call failed: {exc}")
+            except Exception:
                 continue
 
     # Fall back to reading the GenICam node directly
@@ -396,15 +387,9 @@ def _get_chunk_line_status(chunk_data) -> int | None:
         node_map = chunk_data.GetChunkDataNodeMap()
         node = PySpin.CIntegerPtr(node_map.GetNode("ChunkExposureEndLineStatusAll"))
         if PySpin.IsAvailable(node) and PySpin.IsReadable(node):
-            if not _logged:
-                print("GPIOEdgeRecorder: reading LineStatusAll via GenICam node")
-                _get_chunk_line_status._logged = True
             return int(node.GetValue())
-        else:
-            if not _logged:
-                print("GPIOEdgeRecorder: GenICam node ChunkExposureEndLineStatusAll not available/readable")
-    except Exception as exc:
-        print(f"GPIOEdgeRecorder: GenICam node fallback failed: {exc}")
+    except Exception:
+        pass
 
     return None
 
