@@ -31,7 +31,7 @@ _docker-run:
 # Start acquisition with isolated test data (TEST_DATA_VOLUME, default /data-test).
 # Cannot run simultaneously with 'make run' — both bind host ports 8000 and 3000.
 run-mocap-test:
-	docker compose run --rm mocap-test
+	if [ -f .env ]; then set -a; . ./.env; set +a; fi; docker compose run --rm mocap-test
 
 # Run all acquisition tests (cameras required for test matrix)
 test:
@@ -118,8 +118,11 @@ init-dj-test:
 # Run 'make init-dj-test' once before first use.
 # --build rebuilds the image so Python source changes under multi_camera/ are picked up
 # (the Dockerfile bakes source in via COPY; there is no source bind mount on this service).
+# Source .env first (same as start_acquisition.sh does for `make run`) so the container
+# inherits REACT_APP_BASE_URL / NETWORK_INTERFACE / etc. instead of the compose defaults —
+# otherwise the GUI bundle is built for localhost and only works in a browser on the server.
 run-mocap-test-dj:
-	docker compose run --rm --build mocap-test-dj
+	if [ -f .env ]; then set -a; . ./.env; set +a; fi; docker compose run --rm --build mocap-test-dj
 
 # Drop and recreate the test DataJoint database (clean-slate testing).
 # Stops the container, removes the data volume, and restarts.
