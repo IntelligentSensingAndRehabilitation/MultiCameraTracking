@@ -54,7 +54,7 @@ const PriorRecordingsTable = ({ api }) => {
                                         suppressContentEditableWarning
                                         // onBlur={(e) => hangeComment(recording.participant, recording.filename, e.target.textContent)}
                                         onKeyDown={(e) => handleKeyPress(e, recording.participant, recording.filename, e.target.textContent)}
-                                    >{recording.metadata?.comment ?? ''}</td>
+                                    >{(recording.metadata || {}).comment || ''}</td>
                                     {/* <td>{recording.config_file}</td> */}
                                     <td>{recording.duration != null ? recording.duration.toFixed(1) + ' s' : '—'}</td>
                                     {/* round recording.timestamp_spread to 2 decimal places */}

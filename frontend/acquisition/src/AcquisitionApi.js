@@ -574,8 +574,8 @@ export const AcquisitionApi = (props) => {
     const changeComment = async (participant, filename, newComment) => {
         console.log(`Comment changed for ${participant} ${filename}: ${newComment}`);
         const matchedRecording = await getMatchingPriorRecordings(participant, filename);
-        // Mutate only the comment element; spread preserves other container keys (e.g. 10mwt_time)
-        matchedRecording.metadata = { ...(matchedRecording.metadata || {}), comment: newComment };
+        // Mutate only the comment element; Object.assign preserves other container keys (e.g. 10mwt_time)
+        matchedRecording.metadata = Object.assign({}, matchedRecording.metadata || {}, { comment: newComment });
         await axios.post(`${API_BASE_URL}/update_recording`, matchedRecording);
         fetchRecordings();
     };

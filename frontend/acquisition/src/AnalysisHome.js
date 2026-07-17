@@ -38,7 +38,8 @@ const RecordingTable = ({ recordings, participant, session_date, imported, callb
                 </thead>
                 <tbody>
                     {recordings.map((recording, index) => {
-                        const comment = recording.metadata?.comment ?? '';
+                        const metadata = recording.metadata || {};
+                        const comment = metadata.comment || '';
                         return (
                         <tr key={recording.filename}>
                             <td>{stripPath(recording.filename)}</td>
