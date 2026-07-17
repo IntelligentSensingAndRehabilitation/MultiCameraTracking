@@ -18,7 +18,7 @@ from starlette.concurrency import run_in_threadpool
 from uvicorn.main import Server
 from websockets.exceptions import ConnectionClosedOK
 from datetime import date
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from contextlib import asynccontextmanager
 from typing import List, Dict, Optional
 from dataclasses import dataclass, field
@@ -63,6 +63,7 @@ from multi_camera.backend.recording_db import (
     push_to_datajoint,
     ParticipantOut,
     SessionOut,
+    RecordingMetadata,
     RecordingOut,
 )
 
@@ -575,10 +576,13 @@ class PriorRecordings(BaseModel):
     participant: str
     filename: str
     recording_timestamp: datetime.datetime
-    comment: str
+    # Metadata container (#28): {"comment": str, "10mwt_time": float, ...}. Clients must
+    # round-trip unknown keys: fetch, mutate known elements, send the whole object back.
+    metadata: RecordingMetadata = Field(default_factory=RecordingMetadata)
     config_file: str
     should_process: bool
     timestamp_spread: float
+    duration: Optional[float] = None  # seconds; server-computed (#25), ignored on update
 
 
 class ImageUploadResponse(BaseModel):
@@ -1094,6 +1098,7 @@ async def new_trial(data: NewTrialData, db: Session = Depends(db_dependency)):
                     config_file=config,
                     comment=comment,
                     timestamp_spread=record["timestamp_spread"],
+                    duration=record.get("duration"),
                 )
             _broadcast_new_session_insights()
         except Exception as e:
@@ -1198,10 +1203,11 @@ async def get_prior_recordings(db=Depends(db_dependency)) -> List[PriorRecording
                         participant=participant.name,
                         filename=recording.filename,
                         recording_timestamp=recording.recording_timestamp,
-                        comment=recording.comment,
+                        metadata=recording.metadata,
                         config_file=recording.config_file,
                         should_process=recording.should_process,
                         timestamp_spread=recording.timestamp_spread,
+                        duration=recording.duration,
                     )
                 )
 
@@ -1215,16 +1221,21 @@ async def update_recording(recording: PriorRecordings, db=Depends(db_dependency)
     print("Updating recording: ", recording)
 
     participant = ParticipantOut(name=recording.participant, sessions=[])
+    # duration is deliberately not forwarded — it is server-computed (#25) and
+    # modify_recording_entry only persists the metadata container + should_process.
     recording = RecordingOut(
         filename=recording.filename,
         recording_timestamp=recording.recording_timestamp,
-        comment=recording.comment,
+        metadata=recording.metadata,
         config_file=recording.config_file,
         should_process=recording.should_process,
         timestamp_spread=recording.timestamp_spread,
     )
 
-    modify_recording_entry(db, participant, recording)
+    try:
+        modify_recording_entry(db, participant, recording)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
     return {}
 

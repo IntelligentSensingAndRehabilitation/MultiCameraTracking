@@ -808,6 +808,9 @@ def write_metadata_queue(
                     "filename": current_filename,
                     "timestamp_spread": max_timespread,
                     "recording_timestamp": local_times[0],
+                    # Wall-clock span of the synced frames in this file (#25); the
+                    # per-frame camera frame_rates arrays are not trustworthy here.
+                    "duration": (local_times[-1] - local_times[0]).total_seconds(),
                     "frame_skip_count": len(trial_skips),
                 }
             )
@@ -881,6 +884,7 @@ def write_metadata_queue(
             "filename": current_filename,
             "timestamp_spread": max_timespread,
             "recording_timestamp": local_times[0],
+            "duration": (local_times[-1] - local_times[0]).total_seconds(),
             "frame_skip_count": len(trial_skips),
         }
     )

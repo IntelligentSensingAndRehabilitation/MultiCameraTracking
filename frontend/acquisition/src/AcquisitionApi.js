@@ -548,10 +548,12 @@ export const AcquisitionApi = (props) => {
                         participant: participant,
                         filename: filename,
                         recording_timestamp: matchedRecording[0].recording_timestamp,
-                        comment: matchedRecording[0].comment,
+                        // Whole metadata container — must round-trip unknown keys on update
+                        metadata: matchedRecording[0].metadata,
                         config_file: matchedRecording[0].config_file,
                         should_process: matchedRecording[0].should_process,
-                        timestamp_spread: matchedRecording[0].timestamp_spread
+                        timestamp_spread: matchedRecording[0].timestamp_spread,
+                        duration: matchedRecording[0].duration
                     }
                     console.log("prior_recording: ", prior_recording)
                     return prior_recording;
@@ -572,7 +574,8 @@ export const AcquisitionApi = (props) => {
     const changeComment = async (participant, filename, newComment) => {
         console.log(`Comment changed for ${participant} ${filename}: ${newComment}`);
         const matchedRecording = await getMatchingPriorRecordings(participant, filename);
-        matchedRecording.comment = newComment;
+        // Mutate only the comment element; spread preserves other container keys (e.g. 10mwt_time)
+        matchedRecording.metadata = { ...(matchedRecording.metadata || {}), comment: newComment };
         await axios.post(`${API_BASE_URL}/update_recording`, matchedRecording);
         fetchRecordings();
     };

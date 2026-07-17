@@ -79,6 +79,7 @@ class Recording(dj.Manual):
     -> MultiCameraRecording
     ---
     comment: varchar(255)
+    metadata=null: json   # opaque copy of the SQLite per-recording metadata container (#28); requires MySQL 8.0+
     """
 
 
@@ -100,7 +101,7 @@ def import_session(
     participant_id: str,
     session_date: date,
     video_project: str,
-    recordings: List[Tuple[str, str]],
+    recordings: List[Tuple[str, str, Optional[dict]]],
     fin: Optional[str] = None,
     photo: Optional[PhotoSpec] = None,
 ):
@@ -111,7 +112,9 @@ def import_session(
         participant_id (str): subject id
         session_date (date): session date
         video_project (str): video project
-        recordings (List[Tuple(str, str)]): list of recording tuples
+        recordings (List[Tuple(str, str, Optional[dict])]): list of
+            (video_base_path, comment, metadata_container) tuples; the container
+            is stored whole-hog in Recording.metadata (#28)
         fin (Optional[str]): hospital FIN for this session (pushed to subject_extended.Fin)
         photo (Optional[PhotoSpec]): most recent patient identification photo for this session
 
@@ -148,7 +151,7 @@ def import_session(
 
         for recording in recordings:
             print("processing recording", recording)
-            vid_base, comment = recording
+            vid_base, comment, metadata = recording
 
             vid_dir, vid_base = os.path.split(vid_base)
             print("vid_dir", vid_dir, "vid_base", vid_base)
@@ -158,6 +161,7 @@ def import_session(
             key = (MultiCameraRecording & key).fetch1("KEY")
             key.update(session_key)
             key["comment"] = comment
+            key["metadata"] = metadata
 
             Recording.insert1(key)
 

@@ -32,23 +32,28 @@ const RecordingTable = ({ recordings, participant, session_date, imported, callb
                         <th>Filename</th>
                         <th>Comment</th>
                         {/* <th>Config File</th> */}
+                        <th>Duration</th>
                         <th>Should Process</th>
                     </tr>
                 </thead>
                 <tbody>
-                    {recordings.map((recording, index) => (
+                    {recordings.map((recording, index) => {
+                        const comment = recording.metadata?.comment ?? '';
+                        return (
                         <tr key={recording.filename}>
                             <td>{stripPath(recording.filename)}</td>
 
 
-                            {/* If recording.comment == "calibration" add button for run calibration, otherwise show comment */}
-                            {recording.comment === "calibration" ? (
+                            {/* If the metadata comment is "calibration" add button for run calibration, otherwise show comment */}
+                            {comment === "calibration" ? (
                                 <td><Button variant="primary" onClick={() => calibrate(recording.filename, false)}>Checkerboard Calibration</Button></td>
-                            ) : recording.comment === "charuco" ? (
+                            ) : comment === "charuco" ? (
                                 <td><Button variant="primary" onClick={() => calibrate(recording.filename, true)}>Charuco Calibration</Button></td>
                             ) : (
-                                <td>{recording.comment}</td>
+                                <td>{comment}</td>
                             )}
+
+                            <td>{recording.duration != null ? recording.duration.toFixed(1) + ' s' : '—'}</td>
 
 
                             {/* <td>{recording.config_file}</td> */}
@@ -65,7 +70,8 @@ const RecordingTable = ({ recordings, participant, session_date, imported, callb
 
                             </td>
                         </tr>
-                    ))}
+                        );
+                    })}
                 </tbody>
             </Table>
             {/* Button that pushes a recording to DataJoint */}
