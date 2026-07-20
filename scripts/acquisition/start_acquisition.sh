@@ -479,22 +479,37 @@ main() {
         fi
     fi
 
-    # Activate network (laptop mode only)
+    # Activate network (laptop mode only). With --skip-checks the operator may be
+    # starting the GUI with no camera network attached — e.g. from a desk just to
+    # review or push already-recorded data — so a failure here is non-fatal: warn
+    # and continue so the GUI still opens. A normal `make run` stays strict.
     if ! activate_network; then
         echo ""
-        print_error "Network activation failed"
-        echo ""
-        exit 1
+        if $SKIP_CHECKS; then
+            print_warning "Network activation failed — continuing anyway (--skip-checks)"
+            print_info "Cameras will be unavailable; the GUI will still open for data review/push"
+            echo ""
+        else
+            print_error "Network activation failed"
+            echo ""
+            exit 1
+        fi
     fi
 
-    # Wait for cameras (optional, non-blocking)
-    if [ "$DEPLOYMENT_MODE" = "laptop" ]; then
+    # Wait for cameras (laptop mode only). Skipped under --skip-checks: it is a
+    # 30s pre-flight wait that only makes sense when cameras are expected, and the
+    # operator has opted out of pre-flight (e.g. opening the GUI just to push data).
+    if ! $SKIP_CHECKS && [ "$DEPLOYMENT_MODE" = "laptop" ]; then
         wait_for_cameras
     fi
 
     # Start acquisition software
     echo ""
-    print_success "All checks passed - ready to start acquisition"
+    if $SKIP_CHECKS; then
+        print_success "Ready to start acquisition (checks skipped)"
+    else
+        print_success "All checks passed - ready to start acquisition"
+    fi
     echo ""
 
     start_acquisition

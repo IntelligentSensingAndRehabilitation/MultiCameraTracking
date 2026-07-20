@@ -14,6 +14,12 @@ services:
       DHCP_LEASE_FILE: ${DHCP_LEASE_FILE:-/var/lib/dhcp/dhcpd.leases}
       DISK_SPACE_WARNING_THRESHOLD_GB: ${DISK_SPACE_WARNING_THRESHOLD_GB:-50}
       HEALTH_IDLE_POLL_S: ${HEALTH_IDLE_POLL_S:-30}
+      # DataJoint credentials. DataJoint reads DJ_HOST/DJ_USER/DJ_PASS natively and
+      # they override the baked /root/.datajoint_config.json, so creds live in .env
+      # instead of the image. database.port is not env-driven; it stays in the config file.
+      DJ_HOST: ${DJ_HOST}
+      DJ_USER: ${DJ_USER}
+      DJ_PASS: ${DJ_PASS}
     volumes:
       - ${DATA_VOLUME:-/data}:/data
       - ${CAMERA_CONFIGS:-/camera_configs}:/configs
@@ -39,6 +45,12 @@ services:
       DHCP_LEASE_FILE: ${DHCP_LEASE_FILE:-/var/lib/dhcp/dhcpd.leases}
       DISK_SPACE_WARNING_THRESHOLD_GB: ${DISK_SPACE_WARNING_THRESHOLD_GB:-50}
       HEALTH_IDLE_POLL_S: ${HEALTH_IDLE_POLL_S:-30}
+      # DataJoint credentials. DataJoint reads DJ_HOST/DJ_USER/DJ_PASS natively and
+      # they override the baked /root/.datajoint_config.json, so creds live in .env
+      # instead of the image. database.port is not env-driven; it stays in the config file.
+      DJ_HOST: ${DJ_HOST}
+      DJ_USER: ${DJ_USER}
+      DJ_PASS: ${DJ_PASS}
     volumes:
       - ${TEST_DATA_VOLUME:-/data-test}:/data
       - ${CAMERA_CONFIGS:-/camera_configs}:/configs

@@ -89,10 +89,16 @@ log_format = colorlog.ColoredFormatter(
     log_colors=log_colors_config,
 )
 acquisition_logger = logging.getLogger("acquisition")
-streamHandler = logging.StreamHandler()
-streamHandler.setFormatter(log_format)
-acquisition_logger.addHandler(streamHandler)
+# This module is imported twice under `python -m ...fastapi`: once as __main__,
+# then again when uvicorn resolves the "...:app" import string. The "acquisition"
+# logger is a process-global singleton, so guard the handler add (otherwise every
+# line is emitted twice) and keep records off the root logger.
+if not acquisition_logger.handlers:
+    streamHandler = logging.StreamHandler()
+    streamHandler.setFormatter(log_format)
+    acquisition_logger.addHandler(streamHandler)
 acquisition_logger.setLevel(logging.DEBUG)
+acquisition_logger.propagate = False
 
 
 class Session(BaseModel):
