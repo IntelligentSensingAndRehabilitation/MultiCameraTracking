@@ -496,14 +496,20 @@ main() {
         fi
     fi
 
-    # Wait for cameras (optional, non-blocking)
-    if [ "$DEPLOYMENT_MODE" = "laptop" ]; then
+    # Wait for cameras (laptop mode only). Skipped under --skip-checks: it is a
+    # 30s pre-flight wait that only makes sense when cameras are expected, and the
+    # operator has opted out of pre-flight (e.g. opening the GUI just to push data).
+    if ! $SKIP_CHECKS && [ "$DEPLOYMENT_MODE" = "laptop" ]; then
         wait_for_cameras
     fi
 
     # Start acquisition software
     echo ""
-    print_success "All checks passed - ready to start acquisition"
+    if $SKIP_CHECKS; then
+        print_success "Ready to start acquisition (checks skipped)"
+    else
+        print_success "All checks passed - ready to start acquisition"
+    fi
     echo ""
 
     start_acquisition
