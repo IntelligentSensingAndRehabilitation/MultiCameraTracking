@@ -1,9 +1,11 @@
+import json
 import os
+import re
 
-from sqlalchemy import create_engine, Boolean, Column, Float, Integer, String, Date, DateTime, ForeignKey
+from sqlalchemy import create_engine, Boolean, Column, Float, Integer, JSON, String, Date, DateTime, ForeignKey
 from sqlalchemy.orm import relationship, declarative_base, joinedload
 from typing import Union, Tuple, List, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 from datetime import date, datetime
 
 Base = declarative_base()
@@ -41,10 +43,15 @@ class Recording(Base):
     session_id = Column(Integer, ForeignKey("sessions.id"))
     filename = Column(String)
     recording_timestamp = Column(DateTime)  # Add recording_timestamp field
-    comment = Column(String, nullable=True)  # Add comment field
+    comment = Column(String, nullable=True)  # DEPRECATED (#28): moved into recording_metadata["comment"];
+    # kept read-only for one release to support rollback, migrated by _ensure_recording_metadata_columns.
     config_file = Column(String, nullable=True)  # Add config_file field
     should_process = Column(Boolean, default=True)  # Add should_process field with a default value of True
     timestamp_spread = Column(Integer, nullable=True)  # Add timestamp_spread field
+    # Per-recording metadata container (#28): {"comment": str, "10mwt_time": float, ...}.
+    # Writes must REASSIGN a whole new dict — SQLAlchemy's JSON type does not track nested mutation.
+    recording_metadata = Column(JSON, nullable=True)
+    duration = Column(Float, nullable=True)  # #25: seconds, computed at file finalization; historical rows NULL
 
     session = relationship("Session", back_populates="recordings")
 
@@ -159,6 +166,7 @@ def add_recording(
     comment: Optional[str] = None,
     should_process: Optional[bool] = True,
     timestamp_spread: Optional[int] = None,
+    duration: Optional[float] = None,
 ):
     print(
         "Adding recording to database: ",
@@ -171,6 +179,7 @@ def add_recording(
         config_file,
         should_process,
         timestamp_spread,
+        duration,
     )
 
     session = _get_or_create_session(db, participant_name, session_date, session_path)
@@ -179,10 +188,11 @@ def add_recording(
         session_id=session.id,
         filename=filename,
         recording_timestamp=recording_timestamp,
-        comment=comment,
+        recording_metadata={"comment": comment or ""},
         config_file=config_file,
         should_process=should_process,
         timestamp_spread=timestamp_spread,
+        duration=duration,
     )
     db.add(new_recording)
     db.commit()
@@ -222,13 +232,29 @@ def add_photo(
 ### Data access API with Pydantic models
 
 
+class RecordingMetadata(BaseModel):
+    """Per-recording metadata container (#28).
+
+    `extra="allow"` round-trips unknown keys so future elements (e.g. trial type,
+    stopwatch time from #26) survive clients that predate them. The wire key for
+    the walk-test time is "10mwt_time" (not a valid Python identifier, hence the
+    alias); FastAPI serializes response models by alias.
+    """
+
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+    comment: str = ""
+    ten_mwt_time: Optional[float] = Field(default=None, alias="10mwt_time")
+
+
 class RecordingOut(BaseModel):
     filename: str
     recording_timestamp: datetime
-    comment: Optional[str]
+    metadata: RecordingMetadata = Field(default_factory=RecordingMetadata)
     config_file: Optional[str]
     should_process: bool
     timestamp_spread: Optional[float]
+    duration: Optional[float] = None  # seconds; server-computed, None for historical rows
 
 
 class PhotoOut(BaseModel):
@@ -251,6 +277,19 @@ class SessionOut(BaseModel):
 class ParticipantOut(BaseModel):
     name: str
     sessions: List[SessionOut]
+
+
+def _recording_to_out(recording: Recording) -> RecordingOut:
+    """Map an ORM Recording row to RecordingOut.
+
+    Rows written by a pre-#28 binary after the column migration ran may have a
+    NULL container; fall back to wrapping the legacy comment column. The stale
+    top-level "comment" key left in `data` is ignored by pydantic.
+    """
+    data = {k: v for k, v in recording.__dict__.items() if k != "_sa_instance_state"}
+    raw = data.pop("recording_metadata", None)
+    data["metadata"] = raw if raw is not None else {"comment": data.get("comment") or ""}
+    return RecordingOut(**data)
 
 
 def get_recordings(
@@ -276,10 +315,7 @@ def get_recordings(
             if filter_by_session_date and session.session_date != filter_by_session_date:
                 continue
 
-            recording_out_list = [
-                RecordingOut(**{k: v for k, v in recording.__dict__.items() if k != "_sa_instance_state"})
-                for recording in session.recordings
-            ]
+            recording_out_list = [_recording_to_out(recording) for recording in session.recordings]
 
             photo_out_list = [
                 PhotoOut(**{k: v for k, v in photo.__dict__.items() if k != "_sa_instance_state"})
@@ -330,9 +366,15 @@ def modify_recording_entry(db: Session, participant: ParticipantOut, updated_rec
 
     # get the recording entry
     recording = query.first()
+    if recording is None:
+        raise ValueError(
+            f"Recording not found: participant={participant.name}, filename={updated_recording.filename}"
+        )
 
-    # now update the comment and should process fields
-    recording.comment = updated_recording.comment
+    # Replace the metadata container wholesale (clients round-trip unknown keys) and
+    # the should_process flag. duration/timestamp_spread are server-computed — never
+    # written here. Whole-dict reassignment is required for the JSON column to persist.
+    recording.recording_metadata = updated_recording.metadata.model_dump(by_alias=True)
     recording.should_process = updated_recording.should_process
 
     # commit the changes
@@ -616,15 +658,17 @@ def push_to_datajoint(db: Session, participant_id: str, session_date: date, vide
     # Split into trial recordings (push to DataJoint Recording chain) and calibration
     # recordings (push raw videos only; Calibration computation still happens in the
     # notebook via run_calibration_and_insert, which is idempotent on Video rows).
+    # Trial tuples carry the whole metadata container (#28) so DataJoint stores it
+    # whole-hog alongside the plain comment string.
     trial_recordings = [
-        (rec.filename, rec.comment)
+        (rec.filename, rec.metadata.comment, rec.metadata.model_dump(by_alias=True))
         for rec in recordings
-        if rec.should_process and not _is_calibration_comment(rec.comment)
+        if rec.should_process and not _is_calibration_comment(rec.metadata.comment)
     ]
     calibration_recordings = [
-        (rec.filename, rec.comment)
+        (rec.filename, rec.metadata.comment)
         for rec in recordings
-        if rec.should_process and _is_calibration_comment(rec.comment)
+        if rec.should_process and _is_calibration_comment(rec.metadata.comment)
     ]
 
     print("Processing trial recordings: ", trial_recordings)
@@ -685,6 +729,60 @@ def _ensure_session_fin_column(engine):
             """))
 
 
+_TEN_MWT_COMMENT_RE = re.compile(r"\s*10MWT:\s*([\d.]+)\s*s", re.IGNORECASE)
+
+
+def _wrap_legacy_comment(comment: Optional[str]) -> dict:
+    """Build a metadata container from a pre-#28 free-text comment.
+
+    The capture-app's 10MWT timer used to append exactly "10MWT: <n>s" to the
+    comment. Parse-&-strip (user-approved): the last match becomes the structured
+    "10mwt_time" element and all matches are removed from the comment text.
+    """
+    container = {"comment": comment or ""}
+    matches = _TEN_MWT_COMMENT_RE.findall(container["comment"])
+    if matches:
+        try:
+            container["10mwt_time"] = float(matches[-1])  # last match wins
+        except ValueError:
+            return container  # malformed number (e.g. "1.2.3") — leave text untouched
+        stripped = _TEN_MWT_COMMENT_RE.sub("", container["comment"])
+        container["comment"] = " ".join(stripped.split())  # collapse leftover whitespace
+    return container
+
+
+def _ensure_recording_metadata_columns(engine):
+    """Add `recordings.recording_metadata` (JSON) and `recordings.duration` (FLOAT) — #28/#25.
+
+    Same ALTER-on-startup idiom as _ensure_session_fin_column: create_all only
+    creates missing tables, not columns. Idempotent (cheap inspect + early return
+    per column). The one-time backfill wraps each legacy comment into the JSON
+    container via _wrap_legacy_comment; duration stays NULL for historical rows.
+    Backfill runs in Python (json.dumps) so the stored text is exactly what
+    SQLAlchemy's JSON deserializer expects.
+    """
+    from sqlalchemy import inspect, text
+
+    insp = inspect(engine)
+    if "recordings" not in insp.get_table_names():
+        return
+    cols = [c["name"] for c in insp.get_columns("recordings")]
+
+    if "duration" not in cols:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE recordings ADD COLUMN duration FLOAT"))
+
+    if "recording_metadata" not in cols:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE recordings ADD COLUMN recording_metadata JSON"))
+            rows = conn.execute(text("SELECT id, comment FROM recordings")).fetchall()
+            for row_id, comment in rows:
+                conn.execute(
+                    text("UPDATE recordings SET recording_metadata = :meta WHERE id = :id"),
+                    {"meta": json.dumps(_wrap_legacy_comment(comment)), "id": row_id},
+                )
+
+
 def get_db():
     from sqlalchemy.orm import Session, sessionmaker
 
@@ -693,6 +791,7 @@ def get_db():
     engine = create_engine(DATABASE_URL)
     Base.metadata.create_all(bind=engine)
     _ensure_session_fin_column(engine)
+    _ensure_recording_metadata_columns(engine)
 
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 

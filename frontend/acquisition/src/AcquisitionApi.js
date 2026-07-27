@@ -2,9 +2,16 @@ import React from 'react';
 import { useState, useEffect, useRef, createContext } from 'react';
 import axios from 'axios';
 
-// get first part of base url from environment variable
-// if not set, then use localhost
-const BASE_HOSTNAME = process.env.REACT_APP_BASE_URL || 'localhost';
+// API host resolution. Prefer an explicitly-configured, non-localhost host; but
+// otherwise use the host the page is being served from, so the GUI works from any
+// machine without a build-time base URL (the same way the FastAPI-served page does
+// with relative calls). A bare 'localhost' — the default .env value — is treated as
+// unset, so a browser on another machine still reaches the server instead of itself.
+const _configuredHost = process.env.REACT_APP_BASE_URL;
+const BASE_HOSTNAME =
+    _configuredHost && _configuredHost !== 'localhost'
+        ? _configuredHost
+        : (typeof window !== 'undefined' && window.location.hostname) || 'localhost';
 
 const BASE_URL = `${BASE_HOSTNAME}:8000/api/v1`;
 const API_BASE_URL = `http://${BASE_URL}`;
@@ -548,10 +555,12 @@ export const AcquisitionApi = (props) => {
                         participant: participant,
                         filename: filename,
                         recording_timestamp: matchedRecording[0].recording_timestamp,
-                        comment: matchedRecording[0].comment,
+                        // Whole metadata container — must round-trip unknown keys on update
+                        metadata: matchedRecording[0].metadata,
                         config_file: matchedRecording[0].config_file,
                         should_process: matchedRecording[0].should_process,
-                        timestamp_spread: matchedRecording[0].timestamp_spread
+                        timestamp_spread: matchedRecording[0].timestamp_spread,
+                        duration: matchedRecording[0].duration
                     }
                     console.log("prior_recording: ", prior_recording)
                     return prior_recording;
@@ -572,7 +581,8 @@ export const AcquisitionApi = (props) => {
     const changeComment = async (participant, filename, newComment) => {
         console.log(`Comment changed for ${participant} ${filename}: ${newComment}`);
         const matchedRecording = await getMatchingPriorRecordings(participant, filename);
-        matchedRecording.comment = newComment;
+        // Mutate only the comment element; Object.assign preserves other container keys (e.g. 10mwt_time)
+        matchedRecording.metadata = Object.assign({}, matchedRecording.metadata || {}, { comment: newComment });
         await axios.post(`${API_BASE_URL}/update_recording`, matchedRecording);
         fetchRecordings();
     };

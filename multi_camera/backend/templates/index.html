@@ -224,7 +224,7 @@
                 const filenameCell = row.insertCell(0);
                 const commentCell = row.insertCell(1);
                 filenameCell.innerHTML = recording.filename;
-                commentCell.innerHTML = recording.comment;
+                commentCell.innerHTML = (recording.metadata || {}).comment || '';
             });
         }
 
@@ -264,7 +264,7 @@
                     const commentCell = row.insertCell(2);
                     participantCell.innerHTML = recording.participant;
                     filenameCell.innerHTML = recording.filename;
-                    commentCell.innerHTML = recording.comment;
+                    commentCell.innerHTML = (recording.metadata || {}).comment || '';
                 });
             });
 
