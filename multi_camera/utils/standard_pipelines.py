@@ -61,7 +61,7 @@ def reconstruction_pipeline(
                 pose_pipelines.bottomup_to_topdown([v], top_down_method_name, tracking_method_name, reserve_jobs=reserve_jobs)
 
                 if hand_estimation:
-                    if (TopDownPerson & v & 'top_down_method = 12'):
+                    if (TopDownPerson & v & 'top_down_method in (12, 41)'):
                     # Hand keypoints requires Bridging keypoints to be populated first
                         pose_pipelines.hand_estimation_pipeline([v], detection_method_name="MoviTopDown",
                                                                 estimation_method_name="RTMPoseHand5", reserve_jobs=reserve_jobs)
