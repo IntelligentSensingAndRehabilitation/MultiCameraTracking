@@ -74,7 +74,7 @@ def _try_tracking_configs(dataset, tracking_fn) -> TrackingResult:
 
 
 # Hardcoding a selected method
-bottom_up = BottomUpPeople & {"bottom_up_method_name": "Bridging_OpenPose"}
+bottom_up = BottomUpPeople & {"bottom_up_method_name": "Bridging_OpenPose_pt"}
 # bottom_up = (BottomUpPeople & {'bottom_up_method_name': 'OpenPose_HR'})
 
 try:

@@ -83,7 +83,7 @@ def preannotation_session_pipeline(keys: List[Dict] = None, bottom_up: bool = Tr
 
     if bottom_up:
         if bridging:
-            bottom_up_pipeline(keys, bottom_up_method_name="Bridging_OpenPose", reserve_jobs=True)
+            bottom_up_pipeline(keys, bottom_up_method_name="Bridging_OpenPose_pt", reserve_jobs=True)
         else:
             bottom_up_pipeline(keys, bottom_up_method_name="OpenPose_HR", reserve_jobs=True)
 
@@ -98,7 +98,7 @@ def preannotation_session_pipeline(keys: List[Dict] = None, bottom_up: bool = Tr
 def postannotation_session_pipeline(
     keys: List[Dict],
     tracking_method_name: str = "Easymocap",
-    top_down_method_name: str = "Bridging_bml_movi_87",
+    top_down_method_name: str = "Bridging_bml_movi_87_pt",
     reconstruction_method_name: str = "Robust Triangulation",
     hand_estimation: bool = False,
 ):
@@ -108,7 +108,7 @@ def postannotation_session_pipeline(
     Args:
         keys (List[Dict]): Datajoint Table Object.
         tracking_method_name (str, optional): name of the tracking method. Defaults to "Easymocap".
-        top_down_method_name (str, optional): name of the top down method. Defaults to "Bridging_bml_movi_87".
+        top_down_method_name (str, optional): name of the top down method. Defaults to "Bridging_bml_movi_87_pt".
         reconstruction_method_name (str, optional): name of the reconstruction method. Defaults to "Implicit Optimization KP Conf, MaxHuber=10".
         hand_estimation (bool, optional): whether to include hand keypoints in the reconstruction. Defaults to False.
     """
@@ -144,7 +144,7 @@ if __name__ == "__main__":
     parser.add_argument("--post_annotation", action="store_true", help="Run post-annotation pipeline")
     parser.add_argument("--bottom_up", action="store_true", help="Run bottom up pipeline")
     parser.add_argument("--run_easymocap", action="store_true", help="Run the EasyMocap steps")
-    parser.add_argument("--top_down_method_name", type=str, default="Bridging_bml_movi_87", help="Top down method name")
+    parser.add_argument("--top_down_method_name", type=str, default="Bridging_bml_movi_87_pt", help="Top down method name")
     parser.add_argument("--reconstruction_method_name", type=str, default="Robust Triangulation", help="Reconstruction method name")
     parser.add_argument("--tracking_method_name", type=str, default="Easymocap", help="Tracking method name")
     parser.add_argument("--hand_estimation", action="store_true", help="Run hand estimation")

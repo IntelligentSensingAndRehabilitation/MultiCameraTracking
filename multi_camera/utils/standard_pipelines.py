@@ -55,6 +55,8 @@ def reconstruction_pipeline(
                 "OpenPose_HR",
                 "Bridging_COCO_25",
                 "Bridging_bml_movi_87",
+                "Bridging_COCO_25_pt",
+                "Bridging_bml_movi_87_pt",
             ]:
                 pose_pipelines.bottomup_to_topdown([v], top_down_method_name, tracking_method_name, reserve_jobs=reserve_jobs)
 

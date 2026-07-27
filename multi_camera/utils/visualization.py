@@ -203,7 +203,7 @@ def skeleton_video(keypoints3d, filename, method, fps=30.0):
             "Right elbow",
             "Right wrist",
         ]
-    elif method in ["Bridging_COCO_25", "Bridging_bml_movi_87"]:
+    elif method in ["Bridging_COCO_25", "Bridging_bml_movi_87", "Bridging_COCO_25_pt", "Bridging_bml_movi_87_pt"]:
         joints = TopDownPerson.joint_names(method)
         left = [
             "Left Ankle",
@@ -545,7 +545,10 @@ def make_reprojection_video(
     else:
         kp2d_detected = np.array([(TopDownPerson & v).fetch1("keypoints")[:total_frames] for v in video_keys])
 
-    bml_movi_87 = (TopDownMethodLookup & key).fetch1("top_down_method_name") == "Bridging_bml_movi_87"
+    bml_movi_87 = (TopDownMethodLookup & key).fetch1("top_down_method_name") in (
+        "Bridging_bml_movi_87",
+        "Bridging_bml_movi_87_pt",
+    )
 
     def make_frames(video_idx):
         video = videos[video_idx]

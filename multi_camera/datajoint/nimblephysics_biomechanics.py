@@ -19,7 +19,7 @@ schema = dj.schema("mocap_sessions_nimblephysics")
 
 reconstruction_settings = {
     "reconstruction_method_name": "Implicit Optimization KP Conf, MaxHuber=10",
-    "top_down_method_name": "Bridging_bml_movi_87",
+    "top_down_method_name": "Bridging_bml_movi_87_pt",
     "model_name": "Rajagopal_Neck_mbl_movi_87_rev15",
     "max_marker_offset": 0.05,
     "regularize_all_body_scales": 0.2,

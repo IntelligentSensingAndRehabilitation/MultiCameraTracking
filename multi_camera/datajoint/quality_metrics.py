@@ -231,6 +231,6 @@ class FloorLevel(dj.Computed):
         # forcing this to use our most common implicit method, as this produces more stable results
         method = (
             PersonKeypointReconstructionMethodLookup * TopDownMethodLookup
-            & 'reconstruction_method_name="Implicit Optimization KP Conf, MaxHuber=10" and top_down_method_name="Bridging_bml_movi_87"'
+            & 'reconstruction_method_name="Implicit Optimization KP Conf, MaxHuber=10" and top_down_method_name in ("Bridging_bml_movi_87", "Bridging_bml_movi_87_pt")'
         )
         return PersonKeypointReconstruction & method
