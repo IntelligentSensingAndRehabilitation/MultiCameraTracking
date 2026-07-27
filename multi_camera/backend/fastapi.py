@@ -1098,7 +1098,7 @@ async def new_trial(data: NewTrialData, db: Session = Depends(db_dependency)):
                     config_file=config,
                     comment=comment,
                     timestamp_spread=record["timestamp_spread"],
-                    duration=record.get("duration"),
+                    duration=record["duration"],
                 )
             _broadcast_new_session_insights()
         except Exception as e:
