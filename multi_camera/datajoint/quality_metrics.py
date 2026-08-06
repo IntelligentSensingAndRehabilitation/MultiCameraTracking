@@ -1,4 +1,5 @@
 import datajoint as dj
+from pose_pipeline.dj_schema import TimestampedSchema
 import numpy as np
 
 from multi_camera.datajoint.multi_camera_dj import (
@@ -10,7 +11,7 @@ from multi_camera.datajoint.multi_camera_dj import (
 )
 from pose_pipeline import TopDownPerson, TopDownMethodLookup, PersonBbox
 
-schema = dj.schema("multicamera_tracking")
+schema = TimestampedSchema("multicamera_tracking")
 
 
 def interpolate_nan(x):
