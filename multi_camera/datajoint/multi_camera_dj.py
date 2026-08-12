@@ -1,10 +1,11 @@
 import datajoint as dj
+from pose_pipeline.dj_schema import TimestampedSchema
 import numpy as np
 
 from .calibrate_cameras import Calibration
 from pose_pipeline import Video, VideoInfo, TopDownPerson, TopDownMethodLookup, BestDetectedFrames, BlurredVideo
 
-schema = dj.schema("multicamera_tracking")
+schema = TimestampedSchema("multicamera_tracking")
 
 
 def calibration_video_project(trial_video_project: str) -> str:

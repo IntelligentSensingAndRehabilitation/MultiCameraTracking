@@ -1,7 +1,8 @@
 import numpy as np
 import datajoint as dj
+from pose_pipeline.dj_schema import TimestampedSchema
 
-schema = dj.schema("multicamera_tracking")
+schema = TimestampedSchema("multicamera_tracking")
 
 
 # keeping this class definition in this file to avoid it needing to depend

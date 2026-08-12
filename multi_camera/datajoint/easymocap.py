@@ -249,7 +249,6 @@ class SkippedRecording(dj.Manual):
     recording_comment      : varchar(255)
     skip_reason            : varchar(255)
     configs_tried          : longblob
-    insertion_time = CURRENT_TIMESTAMP : timestamp
     """
 
 

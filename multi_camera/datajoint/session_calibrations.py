@@ -9,7 +9,6 @@ class SessionCalibration(dj.Computed):
     definition = """
     -> Session
     ---
-    entry_time = CURRENT_TIMESTAMP : timestamp
     """
 
     class Grouping(dj.Part):

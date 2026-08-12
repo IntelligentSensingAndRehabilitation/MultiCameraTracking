@@ -31,9 +31,10 @@ from datetime import date, datetime
 from typing import List, Optional, Tuple
 
 import datajoint as dj
+from pose_pipeline.dj_schema import TimestampedSchema
 from .multi_camera_dj import import_recording, MultiCameraRecording
 
-schema = dj.schema("mocap_sessions")
+schema = TimestampedSchema("mocap_sessions")
 
 
 @dataclass

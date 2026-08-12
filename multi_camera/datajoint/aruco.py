@@ -10,12 +10,13 @@ any calibration whose recording comment contains the substring ``"aruco"``
 
 import cv2
 import datajoint as dj
+from pose_pipeline.dj_schema import TimestampedSchema
 
 from .calibrate_cameras import Calibration
 from .multi_camera_dj import CalibrationVideos, MultiCameraCalibration
 from pose_pipeline import Video
 
-schema = dj.schema("multicamera_tracking")
+schema = TimestampedSchema("multicamera_tracking")
 
 
 DEFAULT_FRAME_STEP = 10
