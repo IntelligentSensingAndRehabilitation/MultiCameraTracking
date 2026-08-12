@@ -36,6 +36,7 @@ class CalibrationArucoDetection(dj.Computed):
     frame_step                 : int         # frames sampled (every Nth)
     marker_position_spread_mm  : longblob    # dict[marker_id -> median absolute deviation (mm) of triangulated positions across frames]
     marker_n_frames_detected   : longblob    # dict[marker_id -> int] frames each marker was triangulatable in (>= min_cameras visible)
+    copied_from_cal_timestamp=NULL  : timestamp    # copied from Calibration.cal_timestamp. 
     """
 
     @property
