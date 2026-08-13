@@ -8,6 +8,8 @@ any calibration whose recording comment contains the substring ``"aruco"``
 ``MultiCameraCalibration.comment``).
 """
 
+import tempfile
+
 import cv2
 import datajoint as dj
 from pose_pipeline.dj_schema import TimestampedSchema
@@ -58,32 +60,38 @@ class CalibrationArucoDetection(dj.Computed):
         dictionary_id = DEFAULT_DICTIONARY_ID
         dictionary_name = aruco_dictionary_name(dictionary_id)
 
-        # Fetch per-camera video paths via CalibrationVideos → Video
         video_query = (Video & (CalibrationVideos & key)).proj("video", "filename")
-        video_rows = video_query.fetch(as_dict=True)
-        if not video_rows:
+        if not video_query:
             raise FileNotFoundError(
                 f"No CalibrationVideos rows linked to {key} — push calibration videos first."
             )
 
-        video_paths: dict[str, str] = {}
-        for row in video_rows:
-            # Filename is "{recording_base}.{camera_serial}" — last dot-segment is the serial
-            cam_serial = row["filename"].rsplit(".", 1)[-1]
-            video_paths[cam_serial] = row["video"]
-
         cal_entry = (Calibration & key).fetch1()
         cgroup = recreate_cgroup_from_entry(cal_entry)
 
-        print(f"[CalibrationArucoDetection] Detecting ArUco markers for {key}")
-        print(f"  {len(video_paths)} cameras, dictionary={dictionary_name}, frame_step={frame_step}")
+        # fetch() copies attachments to download_path, which defaults to the
+        # current working directory — running this from a notebook leaves half
+        # a gigabyte of .mp4 per calibration wherever the kernel was started.
+        # Detection reads each video once, so stage them somewhere temporary
+        # and let them go afterwards.
+        with tempfile.TemporaryDirectory(prefix="aruco_detect_") as staging:
+            video_rows = video_query.fetch(as_dict=True, download_path=staging)
 
-        pixel_detections = detect_markers_multi_camera(
-            video_paths,
-            expected_ids=None,  # generic: keep every marker the detector finds
-            dictionary_id=dictionary_id,
-            frame_step=frame_step,
-        )
+            video_paths: dict[str, str] = {}
+            for row in video_rows:
+                # Filename is "{recording_base}.{camera_serial}" — last dot-segment is the serial
+                cam_serial = row["filename"].rsplit(".", 1)[-1]
+                video_paths[cam_serial] = row["video"]
+
+            print(f"[CalibrationArucoDetection] Detecting ArUco markers for {key}")
+            print(f"  {len(video_paths)} cameras, dictionary={dictionary_name}, frame_step={frame_step}")
+
+            pixel_detections = detect_markers_multi_camera(
+                video_paths,
+                expected_ids=None,  # generic: keep every marker the detector finds
+                dictionary_id=dictionary_id,
+                frame_step=frame_step,
+            )
 
         # Triangulate every detected marker, recording per-marker spatial spread.
         # Stable markers (physically fixed) have low spread; transient markers
