@@ -2468,43 +2468,62 @@ class FlirRecorder:
         return {"mac": mac, "ip": ip}
 
     async def reset_cameras(self):
-        """Reset all the cameras and reopen the system"""
+        """Reset all the cameras and reopen the system."""
 
         self.set_status("Resetting")
         await asyncio.sleep(0.1)  # let the web service update with this message
 
-        # store the serial numbers to get and reset
-        serials = [c.DeviceSerialNumber for c in self.cams]
         config_file = self.config_file  # grab this before closing as it is cleared
 
-        # this releases all the handles to the pyspin system.
         self.close()
 
         print("Reopening and resetting")
-        ########## working with new, temporary, reference to PySpin system
-        # this seems important for reliability
-
-        # find the set of cameras and trigger a reset on them
+        # Local Get/Release pair, separate from the simple_pyspin singleton.
         system = PySpin.System.GetInstance()
         cams = system.GetCameras()
 
-        def reset_cam(s):
-            print("Opening and resetting camera", s)
-            c = cams.GetBySerial(s)
-            c.Init()
-            c.DeviceReset()
-            c.DeInit()
-            del c  # force release of the handle
+        try:
+            n_cams = cams.GetSize()
+            print(f"Resetting {n_cams} cameras.")
 
-        with concurrent.futures.ThreadPoolExecutor(
-            max_workers=len(serials)
-        ) as executor:
-            executor.map(reset_cam, serials)
+            def reset_cam_by_index(i: int) -> tuple[str, str | None]:
+                try:
+                    c = cams[i]
+                    serial = c.TLDevice.DeviceSerialNumber.GetValue()
+                except Exception as e:
+                    return f"index={i}", f"could not read serial: {e}"
+                try:
+                    print(f"Opening and resetting camera {serial}")
+                    c.Init()
+                    c.DeviceReset()
+                    c.DeInit()
+                    del c
+                    return serial, None
+                except Exception as e:
+                    return serial, str(e)
 
-        cams.Clear()
-        system.ReleaseInstance()
+            if n_cams > 0:
+                with concurrent.futures.ThreadPoolExecutor(
+                    max_workers=n_cams
+                ) as executor:
+                    results = list(
+                        executor.map(reset_cam_by_index, range(n_cams))
+                    )
+            else:
+                results = []
 
-        ########## go back to the original reference to the PySpin system
+            failures = [(s, err) for s, err in results if err is not None]
+            for serial, err in failures:
+                print(f"  ! Failed to reset {serial}: {err}")
+            if failures:
+                print(
+                    f"WARNING: {len(failures)} of {n_cams} cameras failed to "
+                    "reset. Power-cycle those cameras manually if they remain "
+                    "unresponsive."
+                )
+        finally:
+            cams.Clear()
+            system.ReleaseInstance()
 
         self.set_status("Reset complete. Waiting to reconfigure.")
         await asyncio.sleep(15)

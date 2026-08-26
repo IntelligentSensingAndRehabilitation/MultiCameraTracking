@@ -574,6 +574,29 @@ class TestJsonCompaction:
         assert report.trials[0].has_diagnostics is True
 
 
+class TestSingleCameraTrial:
+    """1-camera trials produce shape-(N, 0) cross-camera deltas; the spread
+    properties must return 0.0 instead of raising on np.max of an empty
+    array, so post-trial diagnostics don't spam the log in single-camera
+    clinics."""
+
+    def test_single_camera_spread_returns_zero(self, tmp_path: Path) -> None:
+        data = _make_json_data(camera_ids=["CAM_SOLO"], n_frames=10)
+        _write_json(tmp_path, data)
+        report = load_session(tmp_path)
+        trial = report.trials[0]
+        assert trial.timestamp_delta_ms.shape == (10, 0)
+        assert trial.max_timestamp_spread_ms == 0.0
+        assert trial.mean_timestamp_spread_ms == 0.0
+
+    def test_single_camera_diagnose_sync_does_not_raise(self, tmp_path: Path) -> None:
+        data = _make_json_data(camera_ids=["CAM_SOLO"], n_frames=10)
+        _write_json(tmp_path, data)
+        report = load_session(tmp_path)
+        diagnose_sync_issues(report)
+        diagnose_session_issues(report)
+
+
 class TestTrialLabel:
     def test_format_trial_time_converts_to_hms(self) -> None:
         assert format_trial_time("20260521_133418") == "13:34:18"
@@ -642,9 +665,7 @@ class TestFrameSkipInsight:
         assert "none recovered" in skip_insights[0]
         assert "skipped 2 frames" in skip_insights[0]
 
-    def test_many_events_aggregate_to_one_line_per_camera(
-        self, tmp_path: Path
-    ) -> None:
+    def test_many_events_aggregate_to_one_line_per_camera(self, tmp_path: Path) -> None:
         """A trial with hundreds of skip events must produce one summary
         line per camera, not one line per event — this is the core fix.
         """
