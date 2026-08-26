@@ -2468,29 +2468,17 @@ class FlirRecorder:
         return {"mac": mac, "ip": ip}
 
     async def reset_cameras(self):
-        """Reset all the cameras and reopen the system.
-
-        Enumerates fresh from the PySpin system rather than reading
-        serials off ``self.cams``. The wrappers in ``self.cams`` may hold
-        dead handles after a failed configure or a mid-trial disconnect;
-        ``simple_pyspin``'s attribute access raises ``CameraError`` on
-        those, which previously crashed the very recovery path the
-        operator reaches for after such a failure.
-        """
+        """Reset all the cameras and reopen the system."""
 
         self.set_status("Resetting")
         await asyncio.sleep(0.1)  # let the web service update with this message
 
         config_file = self.config_file  # grab this before closing as it is cleared
 
-        # Release all the handles in self.cams; we'll enumerate fresh below.
         self.close()
 
         print("Reopening and resetting")
-        # Local temporary reference to PySpin — separate Get/Release pair
-        # from the cached singleton that _get_pyspin_system() holds. We
-        # need a fresh enumeration here because the camera list may have
-        # changed since configure_cameras (disconnects, hot-plugs, etc.).
+        # Local Get/Release pair, separate from the simple_pyspin singleton.
         system = PySpin.System.GetInstance()
         cams = system.GetCameras()
 
@@ -2499,12 +2487,6 @@ class FlirRecorder:
             print(f"Resetting {n_cams} cameras.")
 
             def reset_cam_by_index(i: int) -> tuple[str, str | None]:
-                """Reset one camera by index; return (serial, error_or_None).
-
-                Reads the serial via TLDevice.DeviceSerialNumber.GetValue(),
-                which works pre-Init — unlike simple_pyspin's attribute
-                accessor that requires Init.
-                """
                 try:
                     c = cams[i]
                     serial = c.TLDevice.DeviceSerialNumber.GetValue()
@@ -2515,7 +2497,7 @@ class FlirRecorder:
                     c.Init()
                     c.DeviceReset()
                     c.DeInit()
-                    del c  # force release of the handle
+                    del c
                     return serial, None
                 except Exception as e:
                     return serial, str(e)
@@ -2524,8 +2506,6 @@ class FlirRecorder:
                 with concurrent.futures.ThreadPoolExecutor(
                     max_workers=n_cams
                 ) as executor:
-                    # list(...) forces consumption so per-camera failures
-                    # surface instead of disappearing silently.
                     results = list(
                         executor.map(reset_cam_by_index, range(n_cams))
                     )
@@ -2544,8 +2524,6 @@ class FlirRecorder:
         finally:
             cams.Clear()
             system.ReleaseInstance()
-
-        # Back to the cached PySpin system reference.
 
         self.set_status("Reset complete. Waiting to reconfigure.")
         await asyncio.sleep(15)
