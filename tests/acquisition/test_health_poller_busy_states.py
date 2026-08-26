@@ -154,7 +154,7 @@ class TestFlirRecorderConfigureCameras:
         recorder.set_status = lambda status: seen.append(status)
         recorder.config_file = None
         recorder.excluded_serials = set()
-        # Make the first PySpin call inside _configure_cameras_impl raise,
+        # Make the first PySpin call inside _configure_cameras raise,
         # mimicking the wrong-subnet / dead-system failure mode.
         recorder.system = mock.MagicMock()
         recorder.system.GetInterfaces.side_effect = RuntimeError(
