@@ -26,6 +26,61 @@ import os
 import re
 import subprocess
 import sys
+from pathlib import Path
+
+DEFAULT_LEASE_FILE = Path("/var/lib/dhcp/dhcpd.leases")
+
+
+def _parse_active_leases(lease_file=DEFAULT_LEASE_FILE):
+    """Return a dict mapping MAC address to leased IP from the ISC lease file.
+
+    Only returns leases with ``binding state active``.
+    """
+    mac_to_ip = {}
+    if not lease_file.exists():
+        return mac_to_ip
+
+    try:
+        text = lease_file.read_text()
+    except OSError:
+        return mac_to_ip
+
+    current_ip = None
+    current_mac = None
+    active = False
+    for line in text.splitlines():
+        stripped = line.strip()
+        m = re.match(r"lease\s+([\d.]+)\s*\{", stripped)
+        if m:
+            current_ip = m.group(1)
+            current_mac = None
+            active = False
+            continue
+        if stripped == "}":
+            if current_ip and current_mac and active:
+                mac_to_ip[current_mac] = current_ip
+            current_ip = None
+            continue
+        if current_ip is None:
+            continue
+        m = re.match(r"hardware ethernet\s+([\da-fA-F:]+)\s*;", stripped)
+        if m:
+            current_mac = m.group(1).lower()
+        elif stripped == "binding state active;":
+            active = True
+
+    return mac_to_ip
+
+
+def _extract_mac(chassis_id):
+    """Extract a bare MAC string from an LLDP ChassisID value.
+
+    LLDP ChassisID may be ``mac 28:80:88:73:4c:70`` or just
+    ``28:80:88:73:4c:70``.
+    """
+    parts = chassis_id.split()
+    raw = parts[-1] if parts else chassis_id
+    return raw.lower()
 
 
 def parse_lldp_neighbors(text):
@@ -59,8 +114,12 @@ def parse_lldp_neighbors(text):
     return neighbors
 
 
-def discover_switches(interface=None):
-    """Return LLDP neighbors, optionally filtered to one interface."""
+def discover_switches(interface=None, lease_file=DEFAULT_LEASE_FILE):
+    """Return LLDP neighbors, optionally filtered to one interface.
+
+    When a neighbor advertises a ChassisID MAC but no MgmtIP, the DHCP
+    lease table is checked to resolve the MAC to an IP.
+    """
     try:
         result = subprocess.run(
             ["lldpcli", "show", "neighbors"],
@@ -85,6 +144,18 @@ def discover_switches(interface=None):
     neighbors = parse_lldp_neighbors(result.stdout)
     if interface:
         neighbors = [n for n in neighbors if n.get("interface") == interface]
+
+    # Fill in missing mgmt_ip from the DHCP lease table.
+    leases = None
+    for n in neighbors:
+        if "mgmt_ip" not in n and "chassis_id" in n:
+            if leases is None:
+                leases = _parse_active_leases(lease_file)
+            mac = _extract_mac(n["chassis_id"])
+            ip = leases.get(mac)
+            if ip:
+                n["mgmt_ip"] = ip
+                n["mgmt_ip_source"] = "dhcp"
 
     return neighbors
 
@@ -112,7 +183,8 @@ def main():
     for n in neighbors:
         print(f"  {n.get('description', 'unknown')}")
         if "mgmt_ip" in n:
-            print(f"    IP:        {n['mgmt_ip']}")
+            source = n.get("mgmt_ip_source", "lldp")
+            print(f"    IP:        {n['mgmt_ip']}  (via {source})")
         if "chassis_id" in n:
             print(f"    MAC:       {n['chassis_id']}")
         if "port_id" in n:

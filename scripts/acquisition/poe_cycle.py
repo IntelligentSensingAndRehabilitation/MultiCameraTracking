@@ -36,10 +36,12 @@ import re
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 POE_ADMIN_OID = "1.3.6.1.2.1.105.1.1.1.3"
 POE_PORTS = range(1, 9)
 DEFAULT_DELAY = 5
+DEFAULT_LEASE_FILE = Path("/var/lib/dhcp/dhcpd.leases")
 
 
 def die(msg):
@@ -78,8 +80,50 @@ def _parse_lldp_neighbors(text):
     return neighbors
 
 
+def _parse_active_leases(lease_file=DEFAULT_LEASE_FILE):
+    """Map MAC to IP from active ISC DHCP leases."""
+    mac_to_ip = {}
+    if not lease_file.exists():
+        return mac_to_ip
+    try:
+        text = lease_file.read_text()
+    except OSError:
+        return mac_to_ip
+
+    current_ip = None
+    current_mac = None
+    active = False
+    for line in text.splitlines():
+        stripped = line.strip()
+        m = re.match(r"lease\s+([\d.]+)\s*\{", stripped)
+        if m:
+            current_ip = m.group(1)
+            current_mac = None
+            active = False
+            continue
+        if stripped == "}":
+            if current_ip and current_mac and active:
+                mac_to_ip[current_mac] = current_ip
+            current_ip = None
+            continue
+        if current_ip is None:
+            continue
+        m = re.match(r"hardware ethernet\s+([\da-fA-F:]+)\s*;", stripped)
+        if m:
+            current_mac = m.group(1).lower()
+        elif stripped == "binding state active;":
+            active = True
+    return mac_to_ip
+
+
+def _extract_mac(chassis_id):
+    """Extract bare MAC from LLDP ChassisID (e.g. ``mac aa:bb:...``)."""
+    parts = chassis_id.split()
+    return (parts[-1] if parts else chassis_id).lower()
+
+
 def discover_switches(interface):
-    """Find switches via LLDP on the given interface."""
+    """Find switches via LLDP, with DHCP lease fallback for the IP."""
     try:
         result = subprocess.run(
             ["lldpcli", "show", "neighbors"],
@@ -98,6 +142,16 @@ def discover_switches(interface):
     neighbors = _parse_lldp_neighbors(result.stdout)
     if interface:
         neighbors = [n for n in neighbors if n.get("interface") == interface]
+
+    leases = None
+    for n in neighbors:
+        if "mgmt_ip" not in n and "chassis_id" in n:
+            if leases is None:
+                leases = _parse_active_leases()
+            mac = _extract_mac(n["chassis_id"])
+            ip = leases.get(mac)
+            if ip:
+                n["mgmt_ip"] = ip
 
     return [n for n in neighbors if "mgmt_ip" in n]
 
