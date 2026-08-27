@@ -80,18 +80,22 @@ def _parse_lldp_neighbors(text):
     return neighbors
 
 
+SWITCH_VENDOR_CLASSES = {"MS510TXPP", "MS510TXUP", "Switch"}
+
+
 def _parse_active_leases(lease_file=DEFAULT_LEASE_FILE):
-    """Map MAC to IP from active ISC DHCP leases."""
-    mac_to_ip = {}
+    """Parse active leases from the ISC DHCP lease file."""
+    leases = []
     if not lease_file.exists():
-        return mac_to_ip
+        return leases
     try:
         text = lease_file.read_text()
     except OSError:
-        return mac_to_ip
+        return leases
 
     current_ip = None
     current_mac = None
+    current_vendor = None
     active = False
     for line in text.splitlines():
         stripped = line.strip()
@@ -99,11 +103,15 @@ def _parse_active_leases(lease_file=DEFAULT_LEASE_FILE):
         if m:
             current_ip = m.group(1)
             current_mac = None
+            current_vendor = None
             active = False
             continue
         if stripped == "}":
             if current_ip and current_mac and active:
-                mac_to_ip[current_mac] = current_ip
+                entry = {"ip": current_ip, "mac": current_mac}
+                if current_vendor:
+                    entry["vendor_class"] = current_vendor
+                leases.append(entry)
             current_ip = None
             continue
         if current_ip is None:
@@ -113,7 +121,13 @@ def _parse_active_leases(lease_file=DEFAULT_LEASE_FILE):
             current_mac = m.group(1).lower()
         elif stripped == "binding state active;":
             active = True
-    return mac_to_ip
+        else:
+            m = re.match(
+                r'set vendor-class-identifier\s*=\s*"([^"]+)"\s*;', stripped
+            )
+            if m:
+                current_vendor = m.group(1)
+    return leases
 
 
 def _extract_mac(chassis_id):
@@ -123,7 +137,13 @@ def _extract_mac(chassis_id):
 
 
 def discover_switches(interface):
-    """Find switches via LLDP, with DHCP lease fallback for the IP."""
+    """Find switches via LLDP and the DHCP lease table.
+
+    LLDP finds the directly connected switch.  The lease table finds
+    daisy-chained switches by vendor-class-identifier.  Results are
+    merged and deduplicated by MAC.
+    """
+    lldp_neighbors = []
     try:
         result = subprocess.run(
             ["lldpcli", "show", "neighbors"],
@@ -131,29 +151,47 @@ def discover_switches(interface):
             text=True,
             timeout=5,
         )
-    except FileNotFoundError:
-        die("lldpcli not found. Install with: sudo apt install lldpd")
-    except subprocess.TimeoutExpired:
-        die("lldpcli timed out")
+        if result.returncode == 0:
+            lldp_neighbors = _parse_lldp_neighbors(result.stdout)
+            if interface:
+                lldp_neighbors = [
+                    n
+                    for n in lldp_neighbors
+                    if n.get("interface") == interface
+                ]
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
 
-    if result.returncode != 0:
-        die(f"lldpcli failed: {result.stderr.strip()}")
+    all_leases = _parse_active_leases()
+    mac_to_ip = {entry["mac"]: entry["ip"] for entry in all_leases}
 
-    neighbors = _parse_lldp_neighbors(result.stdout)
-    if interface:
-        neighbors = [n for n in neighbors if n.get("interface") == interface]
-
-    leases = None
-    for n in neighbors:
+    for n in lldp_neighbors:
         if "mgmt_ip" not in n and "chassis_id" in n:
-            if leases is None:
-                leases = _parse_active_leases()
             mac = _extract_mac(n["chassis_id"])
-            ip = leases.get(mac)
+            ip = mac_to_ip.get(mac)
             if ip:
                 n["mgmt_ip"] = ip
 
-    return [n for n in neighbors if "mgmt_ip" in n]
+    seen_macs = set()
+    for n in lldp_neighbors:
+        if "chassis_id" in n:
+            seen_macs.add(_extract_mac(n["chassis_id"]))
+
+    for entry in all_leases:
+        if (
+            entry.get("vendor_class") in SWITCH_VENDOR_CLASSES
+            and entry["mac"] not in seen_macs
+        ):
+            lldp_neighbors.append(
+                {
+                    "mgmt_ip": entry["ip"],
+                    "chassis_id": entry["mac"],
+                    "description": entry.get("vendor_class", "unknown"),
+                }
+            )
+            seen_macs.add(entry["mac"])
+
+    return [n for n in lldp_neighbors if "mgmt_ip" in n]
 
 
 # ---------------------------------------------------------------------------

@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
-"""Discover network switches on the camera link via LLDP.
+"""Discover network switches on the camera link.
 
-LLDP (IEEE 802.1AB) is enabled by default on NETGEAR MS510TXPP and
-MS510TXUP switches regardless of firmware version.  Unlike Netgear's
-proprietary NSDP, which was removed in firmware 1.1.0.8+, LLDP is an
-IEEE standard that will not disappear in a firmware update.
+Uses two complementary methods:
+
+1. **LLDP** (IEEE 802.1AB) — finds the directly connected switch.
+   Enabled by default on MS510TXPP and MS510TXUP.
+2. **DHCP lease table** — finds any switch on the subnet by its
+   vendor-class-identifier (``MS510TXPP``, ``MS510TXUP``, or
+   ``Switch``).  This catches daisy-chained switches that are not
+   directly visible via LLDP.
 
 Prerequisites::
 
@@ -15,11 +19,6 @@ Usage::
 
     python3 switch_discover.py [interface]
     python3 switch_discover.py enp37s0
-
-LLDP neighbors take ~30 seconds to appear after lldpd starts.  With
-daisy-chained switches only the directly connected switch is visible
-via LLDP; use the DHCP lease table or --switch on poe_cycle.py to
-reach the second switch.
 """
 
 import os
@@ -31,22 +30,28 @@ from pathlib import Path
 DEFAULT_LEASE_FILE = Path("/var/lib/dhcp/dhcpd.leases")
 
 
-def _parse_active_leases(lease_file=DEFAULT_LEASE_FILE):
-    """Return a dict mapping MAC address to leased IP from the ISC lease file.
+SWITCH_VENDOR_CLASSES = {"MS510TXPP", "MS510TXUP", "Switch"}
 
-    Only returns leases with ``binding state active``.
+
+def _parse_active_leases(lease_file=DEFAULT_LEASE_FILE):
+    """Parse active leases from the ISC DHCP lease file.
+
+    Returns a list of dicts with keys ``ip``, ``mac``, and optionally
+    ``vendor_class``.  Only leases with ``binding state active`` are
+    included.
     """
-    mac_to_ip = {}
+    leases = []
     if not lease_file.exists():
-        return mac_to_ip
+        return leases
 
     try:
         text = lease_file.read_text()
     except OSError:
-        return mac_to_ip
+        return leases
 
     current_ip = None
     current_mac = None
+    current_vendor = None
     active = False
     for line in text.splitlines():
         stripped = line.strip()
@@ -54,11 +59,15 @@ def _parse_active_leases(lease_file=DEFAULT_LEASE_FILE):
         if m:
             current_ip = m.group(1)
             current_mac = None
+            current_vendor = None
             active = False
             continue
         if stripped == "}":
             if current_ip and current_mac and active:
-                mac_to_ip[current_mac] = current_ip
+                entry = {"ip": current_ip, "mac": current_mac}
+                if current_vendor:
+                    entry["vendor_class"] = current_vendor
+                leases.append(entry)
             current_ip = None
             continue
         if current_ip is None:
@@ -68,8 +77,28 @@ def _parse_active_leases(lease_file=DEFAULT_LEASE_FILE):
             current_mac = m.group(1).lower()
         elif stripped == "binding state active;":
             active = True
+        else:
+            m = re.match(
+                r'set vendor-class-identifier\s*=\s*"([^"]+)"\s*;', stripped
+            )
+            if m:
+                current_vendor = m.group(1)
 
-    return mac_to_ip
+    return leases
+
+
+def _leases_by_mac(leases):
+    """Index a lease list by MAC address."""
+    return {entry["mac"]: entry["ip"] for entry in leases}
+
+
+def _find_switch_leases(leases):
+    """Return lease entries whose vendor class identifies them as switches."""
+    return [
+        entry
+        for entry in leases
+        if entry.get("vendor_class") in SWITCH_VENDOR_CLASSES
+    ]
 
 
 def _extract_mac(chassis_id):
@@ -115,11 +144,16 @@ def parse_lldp_neighbors(text):
 
 
 def discover_switches(interface=None, lease_file=DEFAULT_LEASE_FILE):
-    """Return LLDP neighbors, optionally filtered to one interface.
+    """Discover switches via LLDP and the DHCP lease table.
 
-    When a neighbor advertises a ChassisID MAC but no MgmtIP, the DHCP
-    lease table is checked to resolve the MAC to an IP.
+    LLDP finds the directly connected switch.  The lease table finds
+    any switch on the subnet whose vendor-class-identifier marks it as
+    a NETGEAR switch (including daisy-chained switches not visible via
+    LLDP).  Results from both sources are merged and deduplicated by
+    MAC address.
     """
+    # -- LLDP ---------------------------------------------------------------
+    lldp_neighbors = []
     try:
         result = subprocess.run(
             ["lldpcli", "show", "neighbors"],
@@ -127,37 +161,52 @@ def discover_switches(interface=None, lease_file=DEFAULT_LEASE_FILE):
             text=True,
             timeout=5,
         )
-    except FileNotFoundError:
-        print(
-            "lldpcli not found. Install with: sudo apt install lldpd",
-            file=sys.stderr,
-        )
-        return []
-    except subprocess.TimeoutExpired:
-        print("lldpcli timed out.", file=sys.stderr)
-        return []
+        if result.returncode == 0:
+            lldp_neighbors = parse_lldp_neighbors(result.stdout)
+            if interface:
+                lldp_neighbors = [
+                    n
+                    for n in lldp_neighbors
+                    if n.get("interface") == interface
+                ]
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
 
-    if result.returncode != 0:
-        print(f"lldpcli failed: {result.stderr.strip()}", file=sys.stderr)
-        return []
+    # -- DHCP lease table ---------------------------------------------------
+    all_leases = _parse_active_leases(lease_file)
+    mac_to_ip = _leases_by_mac(all_leases)
 
-    neighbors = parse_lldp_neighbors(result.stdout)
-    if interface:
-        neighbors = [n for n in neighbors if n.get("interface") == interface]
-
-    # Fill in missing mgmt_ip from the DHCP lease table.
-    leases = None
-    for n in neighbors:
+    # Fill in missing mgmt_ip on LLDP neighbors.
+    for n in lldp_neighbors:
         if "mgmt_ip" not in n and "chassis_id" in n:
-            if leases is None:
-                leases = _parse_active_leases(lease_file)
             mac = _extract_mac(n["chassis_id"])
-            ip = leases.get(mac)
+            ip = mac_to_ip.get(mac)
             if ip:
                 n["mgmt_ip"] = ip
                 n["mgmt_ip_source"] = "dhcp"
 
-    return neighbors
+    # Build a set of MACs already covered by LLDP.
+    seen_macs = set()
+    for n in lldp_neighbors:
+        if "chassis_id" in n:
+            seen_macs.add(_extract_mac(n["chassis_id"]))
+
+    # Add switches found only in the lease table (daisy-chained).
+    switch_leases = _find_switch_leases(all_leases)
+    for entry in switch_leases:
+        if entry["mac"] not in seen_macs:
+            lldp_neighbors.append(
+                {
+                    "mgmt_ip": entry["ip"],
+                    "mgmt_ip_source": "dhcp",
+                    "chassis_id": entry["mac"],
+                    "description": entry.get("vendor_class", "unknown"),
+                    "discovery": "dhcp-only",
+                }
+            )
+            seen_macs.add(entry["mac"])
+
+    return lldp_neighbors
 
 
 def main():
@@ -174,12 +223,14 @@ def main():
     neighbors = discover_switches(interface)
 
     if not neighbors:
-        print(f"No LLDP neighbors found on {interface}.")
+        print(f"No switches found on {interface}.")
         print("Ensure lldpd is running: sudo systemctl start lldpd")
         print("LLDP neighbors appear after ~30 seconds.")
+        print("Switches also need an active DHCP lease to be found")
+        print("via the lease table.")
         sys.exit(1)
 
-    print(f"LLDP neighbors on {interface}:\n")
+    print(f"Switches on {interface}:\n")
     for n in neighbors:
         print(f"  {n.get('description', 'unknown')}")
         if "mgmt_ip" in n:
@@ -191,6 +242,8 @@ def main():
             print(f"    Port:      {n['port_id']}")
         if "name" in n:
             print(f"    Name:      {n['name']}")
+        if n.get("discovery") == "dhcp-only":
+            print(f"    Note:      not directly connected (found via DHCP lease)")
         print()
 
 
