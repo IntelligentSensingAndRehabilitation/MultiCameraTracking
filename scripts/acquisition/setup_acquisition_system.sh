@@ -573,6 +573,57 @@ EOF
 }
 
 ################################################################################
+# Step 5b: Switch Management Tools (LLDP discovery + SNMP PoE control)
+################################################################################
+
+install_switch_tools() {
+    if [ "$DEPLOYMENT_MODE" != "laptop" ]; then
+        print_info "Skipping switch tool setup (network mode selected)"
+        return 0
+    fi
+
+    print_header "Step 5b: Switch Management Tools"
+
+    print_info "The switch management tools let the system discover network switches"
+    print_info "automatically and power-cycle camera PoE ports for diagnostics."
+    echo ""
+
+    local packages_needed=()
+
+    if dpkg -l lldpd 2>/dev/null | grep -q '^ii'; then
+        print_success "lldpd already installed"
+    else
+        packages_needed+=(lldpd)
+    fi
+
+    if dpkg -l snmp 2>/dev/null | grep -q '^ii'; then
+        print_success "snmp (net-snmp tools) already installed"
+    else
+        packages_needed+=(snmp)
+    fi
+
+    if [ ${#packages_needed[@]} -gt 0 ]; then
+        print_info "Installing ${packages_needed[*]}..."
+        apt-get update -qq
+        apt-get install -y "${packages_needed[@]}"
+        print_success "Installed ${packages_needed[*]}"
+    fi
+
+    if systemctl is-active --quiet lldpd 2>/dev/null; then
+        print_success "lldpd already running"
+    else
+        systemctl enable --now lldpd
+        print_success "Started lldpd and enabled on boot"
+    fi
+
+    echo ""
+    print_info "Switch discovery and PoE control are now available."
+    print_info "Each switch still needs a one-time SNMP community setup"
+    print_info "via its web interface — see docs/acquisition/switch_setup.md."
+    echo ""
+}
+
+################################################################################
 # Step 6: Directory Creation
 ################################################################################
 
@@ -930,6 +981,7 @@ main() {
     install_docker
     detect_network_interface
     setup_dhcp_server
+    install_switch_tools
     create_directories
     create_env_file
     create_datajoint_config

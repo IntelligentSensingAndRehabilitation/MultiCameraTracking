@@ -131,6 +131,17 @@ if [ "$DEPLOYMENT_MODE" = "laptop" ]; then
         echo -e "${YELLOW}Warning: isc-dhcp-server not found${NC}"
         echo "Please install isc-dhcp-server if using laptop mode."
     fi
+
+    echo ""
+    echo "Configuring lldpd to start on boot..."
+
+    if systemctl list-unit-files | grep -q lldpd; then
+        sudo systemctl enable lldpd
+        echo -e "${GREEN}✓${NC} lldpd enabled for auto-start"
+    else
+        echo -e "${YELLOW}Warning: lldpd not found${NC}"
+        echo "Install with: sudo apt install lldpd"
+    fi
 else
     echo ""
     echo "Skipping DHCP configuration (network mode)"

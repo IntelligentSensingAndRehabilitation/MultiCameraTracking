@@ -61,7 +61,7 @@ print_header "Host Remediation"
 print_info "Interface: $NETWORK_INTERFACE   Mode: $DEPLOYMENT_MODE"
 
 # MTU: jumbo frames are required for GigE camera throughput.
-print_step "1/3" "MTU"
+print_step "1/4" "MTU"
 if ip link show "$NETWORK_INTERFACE" &>/dev/null; then
     mtu=$(ip link show "$NETWORK_INTERFACE" | grep -oP 'mtu \K\d+')
     if [ "$mtu" = "9000" ]; then
@@ -78,7 +78,7 @@ else
 fi
 
 # rmem_max: large socket receive buffers prevent dropped frames under load.
-print_step "2/3" "Network buffers (rmem_max)"
+print_step "2/4" "Network buffers (rmem_max)"
 rmem_max=$(sysctl -n net.core.rmem_max 2>/dev/null)
 if [ -n "$rmem_max" ] && [ "$rmem_max" -ge 10000000 ]; then
     print_success "rmem_max already $rmem_max"
@@ -92,7 +92,7 @@ fi
 
 # DHCP: laptop mode is the camera network's only DHCP server. In network mode
 # DHCP is upstream and there is nothing local to start.
-print_step "3/3" "DHCP server"
+print_step "3/4" "DHCP server"
 if [ "$DEPLOYMENT_MODE" != "laptop" ]; then
     print_info "Network mode — DHCP is upstream, nothing to remediate"
 elif systemctl is-active --quiet isc-dhcp-server 2>/dev/null; then
@@ -105,6 +105,21 @@ else
     print_info "Start manually: sudo systemctl start isc-dhcp-server"
     print_info "Check logs: journalctl -u isc-dhcp-server -n 50"
     print_info "Or enable on boot: ./scripts/acquisition/make_settings_persistent.sh"
+fi
+
+# lldpd: switch discovery (LLDP) requires this service.
+print_step "4/4" "lldpd (switch discovery)"
+if ! command -v lldpcli &>/dev/null; then
+    print_warning "lldpd not installed — switch discovery unavailable"
+    print_info "Install with: sudo apt install lldpd"
+elif systemctl is-active --quiet lldpd 2>/dev/null; then
+    print_success "lldpd already running"
+elif sudo -n systemctl start lldpd >/dev/null 2>&1 \
+    && systemctl is-active --quiet lldpd 2>/dev/null; then
+    print_success "Started lldpd"
+else
+    print_error "Could not start lldpd (passwordless sudo unavailable?)"
+    print_info "Start manually: sudo systemctl start lldpd"
 fi
 
 print_header "Health Report (post-remediation)"

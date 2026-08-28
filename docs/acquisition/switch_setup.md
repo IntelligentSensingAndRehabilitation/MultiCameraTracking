@@ -8,13 +8,9 @@ remediation).
 
 ## Prerequisites
 
-The laptop must already be set up (see [Automated Setup](automated_setup.md))
-with the DHCP server running and `lldpd` installed:
-
-```bash
-sudo apt install lldpd
-sudo systemctl enable --now lldpd
-```
+The laptop must already be set up via the setup wizard
+(`setup_acquisition_system.sh`), which installs `lldpd` and `snmp`
+automatically.  See [Automated Setup](automated_setup.md).
 
 ## Find the switch's IP
 

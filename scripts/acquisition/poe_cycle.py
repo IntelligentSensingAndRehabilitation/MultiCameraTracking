@@ -5,13 +5,9 @@ Discovers switches on the camera network via LLDP and uses the standard
 POWER-ETHERNET-MIB (RFC 3621) to disable and re-enable PoE on specified
 ports.  Works on both MS510TXPP and MS510TXUP.
 
-Prerequisites::
-
-    sudo apt install lldpd snmp
-    sudo systemctl start lldpd
-
-Each switch needs a one-time SNMP community setup via the web GUI:
-System > SNMP > SNMPv1/v2 > Community Configuration, access Read/Write.
+The setup wizard (``setup_acquisition_system.sh``) installs ``lldpd`` and
+``snmp`` automatically.  Each switch needs a one-time SNMP community setup
+via the web GUI — see ``docs/acquisition/switch_setup.md``.
 
 Environment variables::
 

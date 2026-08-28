@@ -10,10 +10,8 @@ Uses two complementary methods:
    ``Switch``).  This catches daisy-chained switches that are not
    directly visible via LLDP.
 
-Prerequisites::
-
-    sudo apt install lldpd
-    sudo systemctl start lldpd
+The setup wizard (``setup_acquisition_system.sh``) installs and enables
+``lldpd`` automatically.
 
 Usage::
 

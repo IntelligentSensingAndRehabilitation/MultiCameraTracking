@@ -8,6 +8,7 @@ The wizard:
 - Validates system prerequisites
 - Installs Docker and dependencies
 - Configures DHCP server (laptop mode)
+- Installs switch discovery and PoE control tools (laptop mode)
 - Sets up network interfaces
 - Creates required directories
 - Generates environment configuration
@@ -40,7 +41,7 @@ The wizard must run with sudo to install packages and configure system settings.
 
 ## Detailed Steps
 
-The wizard guides you through 9 steps:
+The wizard guides you through 10 steps:
 
 ### Step 1: System Prerequisites Check
 
@@ -87,6 +88,15 @@ Skipped in network mode.
 In laptop mode, the wizard automatically configures a DHCP server so your laptop can assign IP addresses to the cameras.
 
 For configuration details and manual setup, see [DHCP Server Setup](dhcp_setup.md).
+
+### Step 5b: Switch Management Tools (Laptop Mode Only)
+
+Skipped in network mode.
+
+Installs `lldpd` (for automatic switch discovery via LLDP) and `snmp`
+(net-snmp tools for PoE port control), then enables `lldpd` on boot.  Each
+switch still needs a one-time SNMP community setup via its web interface —
+see [Switch Setup](switch_setup.md).
 
 ### Step 6: Directory Creation
 
@@ -152,8 +162,9 @@ If you prefer manual setup or the wizard doesn't work for your environment, foll
 1. [General System Setup](general_system_setup.md)
 2. [Docker Setup](docker_setup.md)
 3. [DHCP Server Setup](dhcp_setup.md) (laptop mode only)
-4. [Acquisition Software Setup](acquisition_software_setup.md)
-5. [Persistent Settings](persistent_settings.md)
+4. [Switch Setup](switch_setup.md) (laptop mode only)
+5. [Acquisition Software Setup](acquisition_software_setup.md)
+6. [Persistent Settings](persistent_settings.md)
 
 ## What the Wizard Doesn't Do
 
