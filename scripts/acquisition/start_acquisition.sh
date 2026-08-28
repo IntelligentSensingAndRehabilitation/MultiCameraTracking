@@ -245,7 +245,8 @@ run_system_checks() {
     if [ "$ac_online" = "1" ]; then
         print_success "Running on AC power"
     elif [ "$ac_online" = "0" ]; then
-        print_warning "Running on battery — plug in for full performance"
+        print_error "Running on battery — plug in AC power before starting"
+        checks_passed=false
     else
         print_info "Could not determine power source (desktop or no power_supply sysfs)"
     fi
