@@ -624,6 +624,54 @@ install_switch_tools() {
 }
 
 ################################################################################
+# Step 5c: Power Profile Configuration
+################################################################################
+
+configure_power_profile() {
+    print_header "Step 5c: Power Profile"
+
+    print_info "The acquisition system performs best with the power profile set to"
+    print_info "'performance' and automatic battery saver disabled."
+    echo ""
+
+    if command -v powerprofilesctl &>/dev/null; then
+        local current_profile
+        current_profile=$(powerprofilesctl get 2>/dev/null)
+
+        if [ "$current_profile" = "performance" ]; then
+            print_success "Power profile already set to performance"
+        else
+            powerprofilesctl set performance 2>/dev/null
+            print_success "Set power profile to performance (was $current_profile)"
+        fi
+    else
+        print_info "powerprofilesctl not found — install power-profiles-daemon if"
+        print_info "you want automatic power profile management"
+    fi
+
+    # Disable GNOME's automatic battery saver (switches to power-saver on
+    # low battery, which throttles the system mid-recording).
+    if command -v gsettings &>/dev/null; then
+        local auto_saver
+        auto_saver=$(sudo -u "$ACTUAL_USER" gsettings get \
+            org.gnome.settings-daemon.plugins.power \
+            power-saver-profile-on-low-battery 2>/dev/null)
+        if [ "$auto_saver" = "true" ]; then
+            sudo -u "$ACTUAL_USER" gsettings set \
+                org.gnome.settings-daemon.plugins.power \
+                power-saver-profile-on-low-battery false 2>/dev/null
+            print_success "Disabled automatic battery saver"
+        elif [ "$auto_saver" = "false" ]; then
+            print_success "Automatic battery saver already disabled"
+        else
+            print_info "Could not read GNOME power settings (headless or non-GNOME session)"
+        fi
+    fi
+
+    echo ""
+}
+
+################################################################################
 # Step 6: Directory Creation
 ################################################################################
 
@@ -982,6 +1030,7 @@ main() {
     detect_network_interface
     setup_dhcp_server
     install_switch_tools
+    configure_power_profile
     create_directories
     create_env_file
     create_datajoint_config

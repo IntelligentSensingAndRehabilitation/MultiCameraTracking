@@ -1,7 +1,7 @@
 # This is the build file for the docker. Note this should be run from the
 # parent directory for the necessary files to be available
 
-.PHONY: clean build run run-no-checks _docker-run run-mocap-test test test-matrix test-diagnostics validate-sync diag-recording diag-analyze health health-fix setup-env install-sudoers force-ip init-dj-test run-mocap-test-dj reset-dj-test
+.PHONY: clean build run run-fresh run-no-checks _docker-run run-mocap-test test test-matrix test-diagnostics validate-sync diag-recording diag-analyze health health-fix setup-env install-sudoers force-ip init-dj-test run-mocap-test-dj reset-dj-test
 
 DIR := ${CURDIR}
 TEST_DJ_EXTERNAL ?= /tmp/datajoint_external_test
@@ -19,6 +19,10 @@ setup-env:
 # Start acquisition with full system validation (recommended)
 run:
 	@./scripts/acquisition/start_acquisition.sh
+
+# Start acquisition after power-cycling all camera PoE ports
+run-fresh:
+	@./scripts/acquisition/start_acquisition.sh --fresh
 
 # Quick start without system validation checks
 run-no-checks:

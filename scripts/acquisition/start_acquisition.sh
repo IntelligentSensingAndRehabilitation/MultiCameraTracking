@@ -23,17 +23,23 @@ BOLD='\033[1m'
 
 # Parse command line arguments
 SKIP_CHECKS=false
+POE_FRESH=false
 while [[ $# -gt 0 ]]; do
     case $1 in
         --skip-checks)
             SKIP_CHECKS=true
             shift
             ;;
+        --fresh)
+            POE_FRESH=true
+            shift
+            ;;
         -h|--help)
-            echo "Usage: $0 [--skip-checks]"
+            echo "Usage: $0 [--skip-checks] [--fresh]"
             echo ""
             echo "Options:"
             echo "  --skip-checks    Skip system validation checks"
+            echo "  --fresh          Power-cycle all camera PoE ports before starting"
             echo "  -h, --help       Show this help message"
             exit 0
             ;;
@@ -95,7 +101,7 @@ run_system_checks() {
     local checks_passed=true
 
     # Check 1: .env file exists
-    print_step "1/7" "Checking .env file"
+    print_step "1/9" "Checking .env file"
     if [ ! -f "$ENV_FILE" ]; then
         print_error ".env file not found at $ENV_FILE"
         print_info "Create .env from .env.template"
@@ -107,7 +113,7 @@ run_system_checks() {
     export $(grep -v '^#' "$ENV_FILE" | grep -v '^$' | xargs)
 
     # Check 2: Required environment variables
-    print_step "2/7" "Checking required environment variables"
+    print_step "2/9" "Checking required environment variables"
     local missing_vars=()
 
     [ -z "$NETWORK_INTERFACE" ] && missing_vars+=("NETWORK_INTERFACE")
@@ -130,7 +136,7 @@ run_system_checks() {
     fi
 
     # Check 3: Network interface exists
-    print_step "3/7" "Checking network interface"
+    print_step "3/9" "Checking network interface"
     if ! ip link show "$NETWORK_INTERFACE" &>/dev/null; then
         print_error "Network interface $NETWORK_INTERFACE not found"
         print_info "Available interfaces:"
@@ -141,7 +147,7 @@ run_system_checks() {
     fi
 
     # Check 4: MTU setting (auto-remediate before failing).
-    print_step "4/7" "Checking MTU setting"
+    print_step "4/9" "Checking MTU setting"
     if ip link show "$NETWORK_INTERFACE" &>/dev/null; then
         local mtu=$(ip link show "$NETWORK_INTERFACE" | grep -oP 'mtu \K\d+')
         if [ "$mtu" = "9000" ]; then
@@ -167,7 +173,7 @@ run_system_checks() {
     fi
 
     # Check 5: Network buffers (auto-remediate before failing).
-    print_step "5/7" "Checking network buffer settings"
+    print_step "5/9" "Checking network buffer settings"
     local rmem_max=$(sysctl -n net.core.rmem_max 2>/dev/null)
     if [ -n "$rmem_max" ] && [ "$rmem_max" -ge 10000000 ]; then
         print_success "Network buffers configured correctly"
@@ -191,7 +197,7 @@ run_system_checks() {
     fi
 
     # Check 6: Disk space
-    print_step "6/7" "Checking disk space"
+    print_step "6/9" "Checking disk space"
     if [ -d "$DATA_VOLUME" ]; then
         local available_gb=$(df -BG "$DATA_VOLUME" | tail -1 | awk '{print $4}' | sed 's/G//')
         local threshold=${DISK_SPACE_WARNING_THRESHOLD_GB:-10}
@@ -209,7 +215,7 @@ run_system_checks() {
     fi
 
     # Check 7: Camera configs directory
-    print_step "7/7" "Checking camera configs directory"
+    print_step "7/9" "Checking camera configs directory"
     if [ -d "$CAMERA_CONFIGS" ]; then
         local config_count=$(find "$CAMERA_CONFIGS" -name "*.yaml" -o -name "*.yml" 2>/dev/null | wc -l)
         if [ "$config_count" -gt 0 ]; then
@@ -221,6 +227,44 @@ run_system_checks() {
     else
         print_warning "Camera configs directory not found: $CAMERA_CONFIGS"
         print_info "Will be created by Docker if needed"
+    fi
+
+    # Check 8: AC power
+    print_step "8/9" "Checking power source"
+    local ac_online=""
+    for ps_dir in /sys/class/power_supply/*/; do
+        if [ -f "$ps_dir/type" ]; then
+            local ps_type
+            ps_type=$(cat "$ps_dir/type" 2>/dev/null)
+            if [ "$ps_type" = "Mains" ] && [ -f "$ps_dir/online" ]; then
+                ac_online=$(cat "$ps_dir/online" 2>/dev/null)
+                break
+            fi
+        fi
+    done
+    if [ "$ac_online" = "1" ]; then
+        print_success "Running on AC power"
+    elif [ "$ac_online" = "0" ]; then
+        print_warning "Running on battery — plug in for full performance"
+    else
+        print_info "Could not determine power source (desktop or no power_supply sysfs)"
+    fi
+
+    # Check 9: Power profile — auto-set to performance if available.
+    print_step "9/9" "Checking power profile"
+    if command -v powerprofilesctl &>/dev/null; then
+        local current_profile
+        current_profile=$(powerprofilesctl get 2>/dev/null)
+        if [ "$current_profile" = "performance" ]; then
+            print_success "Power profile: performance"
+        elif powerprofilesctl set performance 2>/dev/null; then
+            print_success "Switched power profile to performance (was $current_profile)"
+        else
+            print_warning "Power profile is $current_profile — could not switch to performance"
+            print_info "Run: powerprofilesctl set performance"
+        fi
+    else
+        print_info "powerprofilesctl not found — skipping power profile check"
     fi
 
     echo ""
@@ -493,6 +537,33 @@ main() {
             print_error "Network activation failed"
             echo ""
             exit 1
+        fi
+    fi
+
+    # PoE fresh start: power-cycle all camera ports so every camera boots
+    # from a clean state. Runs after network activation (switches need DHCP
+    # leases to be discoverable) and before camera detection.
+    if $POE_FRESH; then
+        print_header "PoE Power Cycle"
+        local community="${SWITCH_SNMP_COMMUNITY:-}"
+        if [ -z "$community" ]; then
+            print_warning "SWITCH_SNMP_COMMUNITY not set — skipping PoE cycle"
+            print_info "Set SWITCH_SNMP_COMMUNITY in .env to enable"
+        elif ! command -v snmpset &>/dev/null; then
+            print_warning "snmp tools not installed — skipping PoE cycle"
+            print_info "Run the setup wizard to install"
+        else
+            print_info "Power-cycling all PoE ports on discovered switches..."
+            if python3 "$SCRIPT_DIR/poe_cycle.py" \
+                --cycle-all \
+                -i "$NETWORK_INTERFACE" \
+                --community "$community"; then
+                print_success "PoE cycle complete — cameras rebooting"
+                print_info "Waiting 15s for cameras to boot..."
+                sleep 15
+            else
+                print_warning "PoE cycle failed — continuing without fresh start"
+            fi
         fi
     fi
 
