@@ -114,12 +114,6 @@ def run_calibration_and_insert(
     import datajoint as dj
 
     from multi_camera.datajoint.calibrate_cameras import Calibration
-    from multi_camera.datajoint.multi_camera_dj import (
-        CalibrationVideos,
-        MultiCameraCalibration,
-        calibration_video_project,
-    )
-    from pose_pipeline import Video
 
     entry, board = run_calibration_APL(vid_base, **calibration_kwargs)
 
@@ -135,6 +129,56 @@ def run_calibration_and_insert(
         "cal_timestamp": entry["cal_timestamp"],
         "camera_config_hash": entry["camera_config_hash"],
     }
+
+    with dj.conn().transaction:
+        Calibration.insert1(entry)
+        insert_calibration_videos(
+            cal_key,
+            vid_base,
+            camera_names=entry["camera_names"],
+            trial_video_project=trial_video_project,
+            comment=comment,
+        )
+
+    return cal_key
+
+
+def insert_calibration_videos(
+    cal_key,
+    vid_base,
+    *,
+    camera_names,
+    trial_video_project=None,
+    comment=None,
+):
+    """Register a calibration's videos against an existing ``Calibration`` row.
+
+    Inserts ``Video``, ``MultiCameraCalibration`` and ``CalibrationVideos``. The
+    ``Calibration`` row itself must already exist, or be inserted by the caller
+    inside the same transaction.
+
+    Split out of ``run_calibration_and_insert`` so it can also be used to
+    backfill calibrations that were computed without their videos being
+    registered — those never enter ``CalibrationArucoDetection.key_source``,
+    so their trials can never reach ``TenMeterWalkTest``.
+
+    Args:
+        cal_key: ``{cal_timestamp, camera_config_hash}``.
+        vid_base: full path to the video set, without the ``.{serial}.mp4`` suffix.
+        camera_names: serials the calibration was computed from. The discovered
+            videos must match exactly.
+        trial_video_project: trial-side ``video_project``. Only needed when no
+            ``MultiCameraCalibration`` row exists yet.
+        comment: comment for the ``MultiCameraCalibration`` row when this
+            function inserts it. ArUco detection is gated on this containing
+            ``"aruco"`` — see ``CalibrationArucoDetection.key_source``.
+    """
+    from multi_camera.datajoint.multi_camera_dj import (
+        CalibrationVideos,
+        MultiCameraCalibration,
+        calibration_video_project,
+    )
+    from pose_pipeline import Video
 
     # Resolve calibration video_project from the MultiCameraCalibration row that
     # push_to_datajoint inserted. If absent (legacy / no prior push), derive from
@@ -169,7 +213,7 @@ def run_calibration_and_insert(
                 "video_project": cal_video_project,
                 "filename": filename_no_ext,
                 "video": v,
-                "start_time": entry["cal_timestamp"],
+                "start_time": cal_key["cal_timestamp"],
             }
         )
         cal_video_rows.append(
@@ -181,10 +225,10 @@ def run_calibration_and_insert(
         )
 
     # Consistency check between videos discovered here and what calibration used
-    if set(discovered_serials) != set(entry["camera_names"]):
+    if set(discovered_serials) != set(camera_names):
         raise RuntimeError(
             f"Camera mismatch: videos discovered {sorted(discovered_serials)} but "
-            f"calibration used {sorted(entry['camera_names'])}. "
+            f"calibration used {sorted(camera_names)}. "
             "Refusing to insert inconsistent state."
         )
 
@@ -198,13 +242,9 @@ def run_calibration_and_insert(
         "comment": comment or "",
     }
 
-    with dj.conn().transaction:
-        Calibration.insert1(entry)
-        Video.insert(video_rows, skip_duplicates=True)
-        MultiCameraCalibration.insert1(capture_row, skip_duplicates=True)
-        CalibrationVideos.insert(cal_video_rows, skip_duplicates=True)
-
-    return cal_key
+    Video.insert(video_rows, skip_duplicates=True)
+    MultiCameraCalibration.insert1(capture_row, skip_duplicates=True)
+    CalibrationVideos.insert(cal_video_rows, skip_duplicates=True)
 
 
 def relevel_calibration(
