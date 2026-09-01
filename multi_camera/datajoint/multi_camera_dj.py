@@ -1,10 +1,21 @@
 import datajoint as dj
+from pose_pipeline.dj_schema import TimestampedSchema
 import numpy as np
 
 from .calibrate_cameras import Calibration
 from pose_pipeline import Video, VideoInfo, TopDownPerson, TopDownMethodLookup, BestDetectedFrames, BlurredVideo
 
-schema = dj.schema("multicamera_tracking")
+schema = TimestampedSchema("multicamera_tracking")
+
+
+def calibration_video_project(trial_video_project: str) -> str:
+    """Derive the calibration-side video_project namespace from a trial-side one.
+
+    Calibration videos for project X live under ``"{X}_CALIBRATION"`` in the
+    Video table. Keeps calibrations out of pose-pipeline analyses that filter on
+    the trial project, while remaining trivially queryable per-project.
+    """
+    return f"{trial_video_project}_CALIBRATION"
 
 
 @schema
@@ -49,6 +60,28 @@ class CalibratedRecording(dj.Manual):
 
 
 @schema
+class MultiCameraCalibration(dj.Manual):
+    definition = """
+    # Calibration recording session metadata (parallel to MultiCameraRecording for trials)
+    cal_timestamp : timestamp           # acquisition time, parsed from filename
+    camera_config_hash : varchar(50)
+    ---
+    video_project : varchar(50)
+    video_base_filename : varchar(100)  # e.g. "calibration_20260504_153438"
+    comment="" : varchar(255)           # comment from acquisition GUI
+    """
+
+
+@schema
+class CalibrationVideos(dj.Manual):
+    definition = """
+    # Per-camera videos that belong to a calibration recording session
+    -> MultiCameraCalibration
+    -> Video
+    """
+
+
+@schema
 class PersonKeypointReconstructionMethodLookup(dj.Lookup):
     definition = """
     reconstruction_method      : int
@@ -69,6 +102,7 @@ class PersonKeypointReconstructionMethodLookup(dj.Lookup):
         {"reconstruction_method": 10, "reconstruction_method_name": r"Implicit Optimization $\\gamma=0.3$"},
         {"reconstruction_method": 11, "reconstruction_method_name": "Implicit Optimization, MaxHuber=10"},
         {"reconstruction_method": 12, "reconstruction_method_name": r"Implicit Optimization $\\sigma=50$"},
+        {"reconstruction_method": 14, "reconstruction_method_name": "Robust Triangulation - No Skeleton"},
     ]
 
 
@@ -108,6 +142,9 @@ class PersonKeypointReconstruction(dj.Computed):
         reconstruction_method = key["reconstruction_method"]
 
         top_down_method_name = (TopDownMethodLookup & key).fetch1("top_down_method_name")
+        reconstruction_method_name = (PersonKeypointReconstructionMethodLookup & key).fetch1(
+            "reconstruction_method_name"
+        )
 
         camera_calibration, camera_names = (Calibration & calibration_key).fetch1("camera_calibration", "camera_names")
         keypoints, camera_name = (
@@ -120,18 +157,25 @@ class PersonKeypointReconstruction(dj.Computed):
             & recording_key
         ).fetch("keypoints", "camera_name")
 
+        if len(keypoints) == 0:
+            raise RuntimeError(
+                f"No keypoints found for key {key}. "
+                "TopDownPerson may not be populated for this recording's videos."
+            )
+
         # need to add zeros for missing frames at the end
         N = max([len(k) for k in keypoints])
         keypoints = np.stack(
             [np.concatenate([k, np.zeros([N - k.shape[0], *k.shape[1:]])], axis=0) for k in keypoints], axis=0
         )
 
-        print(len(camera_names), len(camera_name))
         # work out the order that matches the calibration (should normally match)
         order = [list(camera_name).index(c) for c in camera_names]
         points2d = np.stack([keypoints[o][:, :, :] for o in order], axis=0)
 
-        if top_down_method_name == "MMPoseHalpe":
+        if "No Skeleton" in reconstruction_method_name:
+            skeleton = None
+        elif top_down_method_name == "MMPoseHalpe":
             joints = TopDownPerson.joint_names("MMPoseHalpe")
             pairs = [
                 ("Pelvis", "Right Hip"),
@@ -305,9 +349,11 @@ class PersonKeypointReconstruction(dj.Computed):
             points2d[..., -1] = conf
             points3d = triangulate_point(camera_calibration, points2d, return_confidence=True)
             camera_weights = []
-            print(points3d.shape)
 
         elif reconstruction_method_name == "Robust Triangulation":
+            points3d, camera_weights = robust_triangulate_points(camera_calibration, points2d, return_weights=True)
+
+        elif reconstruction_method_name == "Robust Triangulation - No Skeleton":
             points3d, camera_weights = robust_triangulate_points(camera_calibration, points2d, return_weights=True)
 
         elif reconstruction_method_name == "Robust Triangulation $\sigma=100$":
@@ -458,7 +504,10 @@ class PersonKeypointReconstruction(dj.Computed):
         key["keypoints3d"] = np.array(points3d)
         key["camera_weights"] = np.array(camera_weights)
         key["reprojection_loss"] = reprojection_loss(camera_calibration, points2d, points3d[:, :, :3], huber_max=100)
-        key["skeleton_loss"] = skeleton_loss(points3d[:, :, :3], skeleton)
+        if skeleton is None:
+            key["skeleton_loss"] = 0.0
+        else:
+            key["skeleton_loss"] = skeleton_loss(points3d[:, :, :3], skeleton)
         key["smoothness_loss"] = smoothness_loss(points3d[:, :, :3])
         if np.isinf(key["smoothness_loss"]):
             key["smoothness_loss"] = 1e10
@@ -1303,13 +1352,24 @@ def import_recording(vid_base, vid_path=".", video_project="MULTICAMERA_TEST", l
 
     # search for files. expects them to be in the format vid_base.serial_number.mp4
     vids = []
-    camera_names = []
+    rejected = []
     for v in os.listdir(vid_path):
         base, ext = os.path.splitext(v)
         if ext == ".mp4" and len(base.split(".")) == 2 and base.split(".")[0] == vid_base:
             vids.append(os.path.join(vid_path, v))
+        elif ext.lower() == ".mp4":
+            rejected.append(v)
 
     print(f"Found {len(vids)} videos.")
+
+    if len(vids) == 0:
+        raise FileNotFoundError(
+            f"No videos matched pattern '{vid_base}.<serial>.mp4' in {vid_path!r}.\n"
+            f"  vid_base: {vid_base!r}\n"
+            f"  .mp4 files present but rejected ({len(rejected)}): {rejected}\n"
+            f"  Expected: extension '.mp4' (lowercase), exactly one '.' in basename, "
+            f"prefix exactly equal to vid_base."
+        )
 
     def mysplit(x):
         splits = x.split("_")
@@ -1346,7 +1406,16 @@ def import_recording(vid_base, vid_path=".", video_project="MULTICAMERA_TEST", l
         else:
             serials = ["UnknownRight", "UnknownLeft"]
 
-    assert all(np.sort(serials) == np.sort(camera_names))
+    serials_set = set(serials)
+    camera_names_set = set(camera_names)
+    if serials_set != camera_names_set:
+        raise ValueError(
+            f"Serial/filename mismatch for {vid_base!r} in {vid_path!r}.\n"
+            f"  serials in JSON ({len(serials)}): {sorted(serials)}\n"
+            f"  camera_names from filenames ({len(camera_names)}): {sorted(camera_names)}\n"
+            f"  in JSON but no video file: {sorted(serials_set - camera_names_set)}\n"
+            f"  video file but not in JSON: {sorted(camera_names_set - serials_set)}"
+        )
 
     vid_structs = []
     single_structs = []

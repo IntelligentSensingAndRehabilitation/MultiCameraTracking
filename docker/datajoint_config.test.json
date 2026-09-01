@@ -1,0 +1,20 @@
+{
+    "database.host": "127.0.0.1",
+    "database.port": 3307,
+    "database.user": "root",
+    "database.password": "djtest",
+    "connection.charset": "",
+    "connection.init_function": null,
+    "database.reconnect": true,
+    "database.use_tls": false,
+    "enable_python_native_blobs": true,
+    "fetch_format": "array",
+    "loglevel": "INFO",
+    "safemode": false,
+    "stores": {
+        "localattach": {
+            "protocol": "file",
+            "location": "/datajoint_external"
+        }
+    }
+}

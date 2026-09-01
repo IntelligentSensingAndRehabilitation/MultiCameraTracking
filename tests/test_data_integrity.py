@@ -31,10 +31,12 @@ from multi_camera.backend.recording_db import (
     get_db,
     Participant,
     Session as SQLiteSession,
+    Photo as SQLitePhoto,
     Imported
 )
-from multi_camera.datajoint.sessions import Subject, Session as DJSession, Recording
+from multi_camera.datajoint.sessions import Subject, Session as DJSession, Recording, Photo as DJPhoto
 from multi_camera.datajoint.multi_camera_dj import MultiCameraRecording, SingleCameraVideo
+from multi_camera.datajoint.subject_extended import Fin
 
 
 # ============================================================================
@@ -115,6 +117,23 @@ def check_session_in_datajoint(participant_id: str, session_date: str) -> bool:
 
             # Check that SingleCameraVideo entries exist for this recording
             if not (SingleCameraVideo & mcr_key):
+                return False
+
+        # If SQLite recorded a FIN, the subject_extended.Fin row must match.
+        if session.fin:
+            fin_rows = Fin & session_key
+            if not fin_rows or fin_rows.fetch1("fin") != session.fin:
+                return False
+
+        # If SQLite has any photos, exactly one row must exist in DataJoint
+        # and it must correspond to the most recent SQLite photo.
+        sqlite_photos = db.query(SQLitePhoto).filter(
+            SQLitePhoto.session_id == session.id
+        ).all()
+        if sqlite_photos:
+            latest = max(sqlite_photos, key=lambda x: x.upload_timestamp)
+            dj_photos = DJPhoto & session_key
+            if not dj_photos or dj_photos.fetch1("filename") != latest.filename:
                 return False
 
         # All checks passed - data exists in DataJoint

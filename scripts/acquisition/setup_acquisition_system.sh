@@ -550,7 +550,7 @@ EOF
             print_info "Updating existing DHCP-Server profile..."
             nmcli con modify DHCP-Server \
                 ifname "$NETWORK_INTERFACE" \
-                autoconnect no \
+                autoconnect yes \
                 ipv4.method manual \
                 ipv4.addresses 192.168.1.1/24 \
                 ipv4.gateway 192.168.1.1 \
@@ -561,7 +561,7 @@ EOF
         fi
     else
         nmcli con add type ethernet con-name DHCP-Server ifname "$NETWORK_INTERFACE" \
-            autoconnect no \
+            autoconnect yes \
             ipv4.method manual \
             ipv4.addresses 192.168.1.1/24 \
             ipv4.gateway 192.168.1.1 \
@@ -679,22 +679,118 @@ EOF
 }
 
 ################################################################################
+# Step 7b: DataJoint Config File
+################################################################################
+
+create_datajoint_config() {
+    print_header "Step 7b: DataJoint Config File"
+
+    local config_file="datajoint_config.json"
+    local template_file="template.datajoint_config.json"
+
+    # The Dockerfile COPYs datajoint_config.json into the image unconditionally,
+    # so the build fails outright if it is missing, and a fresh checkout never
+    # has it (it is gitignored, per-machine). Generate it from the template with
+    # the connection target (host and port) only. The username and password are
+    # NOT written here — the COPY would bake them into the image. They live in
+    # .env and are forwarded to the container at runtime, where DataJoint reads
+    # them natively and they override this file (see docker-compose.yml).
+    if [ -f "$config_file" ]; then
+        print_success "$config_file already exists — leaving it untouched"
+        echo ""
+        return 0
+    fi
+
+    if [ ! -f "$template_file" ]; then
+        print_error "$template_file not found — cannot create $config_file"
+        exit 1
+    fi
+
+    if ! command -v python3 &>/dev/null; then
+        print_error "python3 not found — cannot generate $config_file"
+        print_info "Create it by hand: cp $template_file $config_file"
+        print_info "then add database.host/port from your .env (user/password stay in .env)"
+        exit 1
+    fi
+
+    # Step 7 may have been skipped (operator kept an existing .env), so read the
+    # connection target back from .env rather than relying on in-memory values.
+    # Only host and port are written to the file; the credentials stay in .env.
+    local dj_host dj_port
+    dj_host=$(grep '^DJ_HOST=' .env | cut -d= -f2-)
+    dj_port=$(grep '^DJ_PORT=' .env | cut -d= -f2-)
+
+    print_info "Creating $config_file from $template_file..."
+    python3 - "$template_file" "$config_file" "$dj_host" "$dj_port" <<'PY'
+import json
+import sys
+
+template, out, host, port = sys.argv[1:5]
+with open(template) as f:
+    cfg = json.load(f)
+cfg["database.host"] = host
+cfg["database.port"] = int(port)
+with open(out, "w") as f:
+    json.dump(cfg, f, indent=4)
+PY
+
+    chown "$ACTUAL_USER:$ACTUAL_USER" "$config_file"
+    print_success "$config_file created — connects to $dj_host:$dj_port; credentials read from .env at runtime"
+    echo ""
+}
+
+################################################################################
 # Step 8: Apply Persistence Settings
 ################################################################################
 
 apply_persistence() {
     print_header "Step 8: Persistent Network Settings"
 
-    print_info "Making network settings (MTU, buffers, DHCP) persist across reboots"
+    print_info "This makes the camera network settings stick after a restart, so the"
+    print_info "cameras keep working without any manual setup each time the computer"
+    print_info "reboots. If you skip this, the cameras may drop frames or fail to"
+    print_info "connect after a reboot until the settings are applied again by hand."
     echo ""
 
-    if ask_yes_no "Apply persistent settings now?" "y"; then
-        # Run persistence script as actual user
-        sudo -u "$ACTUAL_USER" ./scripts/acquisition/make_settings_persistent.sh
+    if ask_yes_no "Save the camera network settings so they survive a restart?" "y"; then
+        # The wizard already runs as root; run the persistence script directly
+        # rather than via `sudo -u "$ACTUAL_USER"`. It re-invokes sudo internally
+        # to edit system files, which would prompt for a password and hang when
+        # dropped to a user without passwordless sudo. Its writes are root-owned anyway.
+        ./scripts/acquisition/make_settings_persistent.sh
         print_success "Persistence settings applied"
     else
         print_warning "Skipped persistence setup"
         print_info "You can run it later with: ./scripts/acquisition/make_settings_persistent.sh"
+    fi
+
+    echo ""
+}
+
+################################################################################
+# Step 8b: Install passwordless-sudo rules for auto-remediation
+################################################################################
+
+install_sudoers() {
+    print_header "Step 8b: Passwordless-sudo Rules"
+
+    print_info "This lets the acquisition system fix common network problems on its"
+    print_info "own — for example restoring the camera network settings or restarting"
+    print_info "the address server — without stopping to ask for a password each time."
+    echo ""
+    print_info "If you skip this, the system can still detect those problems but will"
+    print_info "only print instructions for you to run by hand, instead of fixing them"
+    print_info "automatically."
+    echo ""
+    print_info "You can undo this later by removing the permissions file:"
+    print_info "  sudo rm /etc/sudoers.d/mocap-acquisition"
+    echo ""
+
+    if ask_yes_no "Allow the system to fix network problems automatically?" "y"; then
+        ./scripts/acquisition/install_sudoers.sh "$ACTUAL_USER"
+    else
+        print_warning "Skipped sudoers install"
+        print_info "You can run it later with: make install-sudoers"
     fi
 
     echo ""
@@ -836,7 +932,9 @@ main() {
     setup_dhcp_server
     create_directories
     create_env_file
+    create_datajoint_config
     apply_persistence
+    install_sudoers
     download_flir_sdk
     build_docker_image
     show_summary

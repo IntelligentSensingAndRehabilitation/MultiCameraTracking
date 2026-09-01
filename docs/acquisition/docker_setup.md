@@ -1,5 +1,7 @@
 # Docker Setup
 
+This page covers installing the Docker engine on Ubuntu. For the project's containers and how to operate them, see [Container Reference](../operations/container_reference.md).
+
 ## Install Docker according to the [Docker website](https://docs.docker.com/engine/install/ubuntu/)
 
 Copy and paste each of these blocks into the terminal and run them
@@ -55,3 +57,7 @@ newgrp docker
 ```
 docker run hello-world
 ```
+
+## Next steps
+
+Once the Docker engine is installed and your user can run `docker` without sudo, see [Container Reference](../operations/container_reference.md) for the project's containers and the Makefile targets that drive them.

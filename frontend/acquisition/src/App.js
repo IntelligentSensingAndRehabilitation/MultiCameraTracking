@@ -13,6 +13,8 @@ import AnalysisHome from './AnalysisHome';
 import { AcquisitionApi } from './AcquisitionApi';
 import Container from "react-bootstrap/Container";
 import SmplBrowser from './components/SmplBrowser';
+import HealthBanner from './components/HealthBanner';
+import DiagnosticsPage from './components/DiagnosticsPage';
 
 function App() {
 
@@ -32,15 +34,33 @@ function App() {
             <LinkContainer to="/smpl_browser">
               <Nav.Link>SMPL</Nav.Link>
             </LinkContainer>
+            <LinkContainer to="/diagnostics">
+              <Nav.Link>Diagnostics</Nav.Link>
+            </LinkContainer>
           </Nav>
         </Container>
       </Navbar>
 
+      {process.env.REACT_APP_TEST_MODE === 'true' && (
+        <div style={{
+          background: '#e74c3c',
+          color: 'white',
+          textAlign: 'center',
+          padding: '8px',
+          fontWeight: 'bold',
+          letterSpacing: '1px',
+        }}>
+          TEST MODE — Data is not being saved to the production database
+        </div>
+      )}
+
       <AcquisitionApi>
+        <HealthBanner />
         <Routes>
           <Route path="/" element={<AcquisitionHome />} />
           <Route path="/analysis" element={<AnalysisHome />} />
           <Route path="/smpl_browser" element={<SmplBrowser />} />
+          <Route path="/diagnostics" element={<DiagnosticsPage />} />
         </Routes>
       </AcquisitionApi>
 

@@ -89,7 +89,7 @@ class Animator {
         if (options.play === undefined) {
             options.play = true;
         }
-        if (options.loop == undefined) {
+        if (options.loop === undefined) {
             options.loop = true;
         }
         if (options.clampWhenFinished === undefined) {
@@ -126,7 +126,7 @@ class Animator {
         if (this.playing) {
             this.mixer.update(this.clock.getDelta());
             this.viewer.setDirty();
-            if (this.duration != 0) {
+            if (this.duration !== 0) {
                 this.displayProgress(this.action.time);
             } else {
                 this.displayProgress(0);

@@ -1,0 +1,582 @@
+import React, { useContext, useState } from 'react';
+import { Container, Card, Badge, Button, ListGroup, Accordion, Table, Row, Col } from 'react-bootstrap';
+import { AcquisitionState, isBusyPySpinState } from '../AcquisitionApi';
+
+const severityVariant = {
+    ok: 'success',
+    warn: 'warning',
+    error: 'danger',
+    unknown: 'secondary',
+};
+
+const SeverityBadge = ({ level }) => (
+    <Badge bg={severityVariant[level] || 'secondary'} style={{ textTransform: 'uppercase' }}>
+        {level || 'unknown'}
+    </Badge>
+);
+
+const FindingList = ({ findings }) => {
+    if (!findings || findings.length === 0) {
+        return <p className="text-muted mb-0">No findings.</p>;
+    }
+    return (
+        <ListGroup variant="flush">
+            {findings.map((f, i) => (
+                <ListGroup.Item key={`${f.code}-${i}`} className="d-flex justify-content-between align-items-start">
+                    <div className="ms-2 me-auto">
+                        <div className="fw-bold">{f.message}</div>
+                        {f.remediation && f.remediation.length > 0 && (
+                            <ol className="small mb-1 mt-1 ps-3">
+                                {f.remediation.map((step, j) => (
+                                    <li key={j}>{step}</li>
+                                ))}
+                            </ol>
+                        )}
+                        <small className="text-muted">{f.code}</small>
+                    </div>
+                    <SeverityBadge level={f.level} />
+                </ListGroup.Item>
+            ))}
+        </ListGroup>
+    );
+};
+
+const SubsystemPanel = ({ title, severity, findings, extra }) => (
+    <div className="h-100">
+        <div className="d-flex justify-content-between align-items-center mb-2 pb-1 border-bottom">
+            <strong>{title}</strong>
+            <SeverityBadge level={severity} />
+        </div>
+        {extra}
+        <FindingList findings={findings} />
+    </div>
+);
+
+// Compact 2-column definition list. Use instead of a borderless Table
+// for tight key/value summaries.
+const KvDl = ({ entries }) => (
+    <dl className="row small mb-2 gx-2">
+        {entries.map(([k, v], i) => (
+            <React.Fragment key={i}>
+                <dt className="col-5 fw-normal text-muted">{k}</dt>
+                <dd className="col-7 mb-1">{v}</dd>
+            </React.Fragment>
+        ))}
+    </dl>
+);
+
+const HostHealthPanel = () => {
+    const { healthReport, fetchHealth } = useContext(AcquisitionState);
+    const [refreshing, setRefreshing] = useState(false);
+
+    const handleRefresh = async () => {
+        setRefreshing(true);
+        try {
+            await fetchHealth(true);
+        } finally {
+            setRefreshing(false);
+        }
+    };
+
+    if (!healthReport) {
+        return (
+            <Card className="mb-4">
+                <Card.Header><strong>Host Health</strong></Card.Header>
+                <Card.Body>
+                    <p className="text-muted">Loading health report…</p>
+                    <Button onClick={handleRefresh} disabled={refreshing} size="sm">
+                        {refreshing ? 'Checking…' : 'Re-check now'}
+                    </Button>
+                </Card.Body>
+            </Card>
+        );
+    }
+
+    const { overall, dhcp, cameras, host_network, recording_state, deployment_mode, generated_at } = healthReport;
+    const dhcpFindings = (dhcp && dhcp.findings) || [];
+    const cameraFindings = (cameras && cameras.findings) || [];
+    const perCamera = (cameras && cameras.cameras) || [];
+    const wrongSubnet = (cameras && cameras.wrong_subnet) || [];
+    const hostFindings = (host_network && host_network.findings) || [];
+    const expectedList = (cameras && cameras.expected) || [];
+    const detectedList = (cameras && cameras.detected) || [];
+    const missingList = (cameras && cameras.missing) || [];
+    const extraList = (cameras && cameras.extra) || [];
+
+    return (
+        <Card className="mb-4">
+            <Card.Header className="d-flex justify-content-between align-items-center">
+                <div>
+                    <strong>Host Health</strong>{' '}
+                    <SeverityBadge level={overall} />
+                </div>
+                <Button onClick={handleRefresh} disabled={refreshing} size="sm" variant="outline-primary">
+                    {refreshing ? 'Checking…' : 'Re-check now'}
+                </Button>
+            </Card.Header>
+            <Card.Body>
+                <div className="mb-3 text-muted small">
+                    Mode: <code>{deployment_mode}</code> &nbsp;|&nbsp;
+                    Recording state: <code>{recording_state}</code> &nbsp;|&nbsp;
+                    Last checked: {generated_at ? new Date(generated_at).toLocaleString() : '—'}
+                </div>
+
+                <Row className="g-3 mb-3">
+                    <Col md={4}>
+                        <SubsystemPanel
+                            title="DHCP server"
+                            severity={maxLevel(dhcpFindings)}
+                            findings={dhcpFindings}
+                            extra={
+                                dhcp && dhcp.applicable ? (
+                                    <KvDl entries={[
+                                        ['Service', describeBool(dhcp.service_active)],
+                                        ['Interface IP', <code key="ip">{dhcp.interface_ip || '—'}</code>],
+                                        ['Active leases', dhcp.lease_count],
+                                    ]} />
+                                ) : (
+                                    <p className="text-muted small mb-2">DHCP checks skipped (laptop mode).</p>
+                                )
+                            }
+                        />
+                    </Col>
+                    <Col md={4}>
+                        <SubsystemPanel
+                            title="Cameras"
+                            severity={maxLevel(cameraFindings)}
+                            findings={cameraFindings}
+                            extra={
+                                <KvDl entries={[
+                                    ['Expected', expectedList.length],
+                                    ['Detected', detectedList.length],
+                                    ['Missing', missingList.join(', ') || '—'],
+                                    ['Extra', extraList.join(', ') || '—'],
+                                ]} />
+                            }
+                        />
+                    </Col>
+                    <Col md={4}>
+                        <SubsystemPanel
+                            title="Host network"
+                            severity={maxLevel(hostFindings)}
+                            findings={hostFindings}
+                            extra={
+                                host_network ? (
+                                    <KvDl entries={[
+                                        ['Interface', <code key="if">{host_network.interface}</code>],
+                                        ['Carrier', describeBool(host_network.carrier_up)],
+                                        ['MTU', `${host_network.mtu == null ? '—' : host_network.mtu} (expected ${host_network.expected_mtu})`],
+                                        ['rmem_max', `${host_network.rmem_max == null ? '—' : host_network.rmem_max} (expected ${host_network.expected_rmem_max})`],
+                                    ]} />
+                                ) : null
+                            }
+                        />
+                    </Col>
+                </Row>
+
+                {wrongSubnet.length > 0 && (
+                    <Table size="sm" striped bordered className="mb-3">
+                        <thead>
+                            <tr>
+                                <th colSpan={3}>Cameras on wrong subnet</th>
+                                <th>Action</th>
+                            </tr>
+                            <tr>
+                                <th>MAC</th>
+                                <th>Current IP</th>
+                                <th>Model</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {wrongSubnet.map((c) => (
+                                <tr key={c.mac}>
+                                    <td><code>{c.mac}</code></td>
+                                    <td>{c.current_ip || '—'}</td>
+                                    <td>{c.model || '—'}</td>
+                                    <td><ForceIpButton mac={c.mac} /></td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </Table>
+                )}
+
+                {perCamera.length > 0 && (
+                    <Table size="sm" striped bordered className="mb-0">
+                        <thead>
+                            <tr>
+                                <th>Serial</th>
+                                <th>IP</th>
+                                <th>Link</th>
+                                <th>Throughput</th>
+                                <th>Status</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {perCamera.map((c) => (
+                                <tr key={c.serial}>
+                                    <td>{c.serial}</td>
+                                    <td>{c.ip || '—'}</td>
+                                    <td>{deriveLinkLabel(c)}</td>
+                                    <td>{c.link_throughput_bytes_per_sec != null
+                                        ? `${Math.round(c.link_throughput_bytes_per_sec * 8 / 1000000)} Mbps`
+                                        : '—'}</td>
+                                    <td>{c.excluded
+                                        ? 'excluded'
+                                        : (c.detected ? 'reachable' : (c.expected ? 'missing' : 'unexpected'))}</td>
+                                    <td>{(c.excluded || c.expected || c.detected)
+                                        ? <ExcludeCameraButton serial={c.serial} excluded={c.excluded} />
+                                        : null}</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </Table>
+                )}
+            </Card.Body>
+        </Card>
+    );
+};
+
+const CurrentSessionPanel = () => {
+    const { sessionSummary, fetchSessionSummary } = useContext(AcquisitionState);
+    const [refreshing, setRefreshing] = useState(false);
+
+    // No auto-fetch — _build_session_summary walks every trial JSON
+    // and can take seconds. Wait for an explicit click.
+
+    const handleGenerate = async () => {
+        setRefreshing(true);
+        try {
+            await fetchSessionSummary();
+        } finally {
+            setRefreshing(false);
+        }
+    };
+
+    const buttonLabel = sessionSummary
+        ? (refreshing ? 'Refreshing…' : 'Refresh summary')
+        : (refreshing ? 'Generating…' : 'Generate session summary');
+
+    return (
+        <Card className="mb-4">
+            <Card.Header className="d-flex justify-content-between align-items-center">
+                <strong>Current Session</strong>
+                <Button onClick={handleGenerate} disabled={refreshing} size="sm" variant="outline-primary">
+                    {buttonLabel}
+                </Button>
+            </Card.Header>
+            <Card.Body>
+                {!sessionSummary && (
+                    <p className="text-muted mb-0">
+                        Click "Generate session summary" to scan the current session's
+                        trial files for patterns and recommendations.
+                    </p>
+                )}
+
+                {sessionSummary && (
+                    <>
+                        {sessionSummary.session_header && (
+                            <div className="fw-bold mb-1">
+                                {sessionSummary.session_header}
+                            </div>
+                        )}
+                        <div className="mb-3 small text-muted">
+                            {sessionSummary.n_trials} trials analyzed.{' '}
+                            Last refreshed: {new Date(sessionSummary.generated_at).toLocaleTimeString()}
+                        </div>
+
+                        <Accordion defaultActiveKey={["0", "1", "2"]} alwaysOpen>
+                            <Accordion.Item eventKey="0">
+                                <Accordion.Header>
+                                    Insights ({(sessionSummary.insights || []).length})
+                                </Accordion.Header>
+                                <Accordion.Body>
+                                    {renderStringList(sessionSummary.insights, 'No session-level patterns detected.')}
+                                </Accordion.Body>
+                            </Accordion.Item>
+
+                            <Accordion.Item eventKey="1">
+                                <Accordion.Header>
+                                    Recommendations ({(sessionSummary.recommendations || []).length})
+                                </Accordion.Header>
+                                <Accordion.Body>
+                                    {renderStringList(sessionSummary.recommendations, 'No recommendations.')}
+                                </Accordion.Body>
+                            </Accordion.Item>
+
+                            <Accordion.Item eventKey="2">
+                                <Accordion.Header>
+                                    Per-trial findings ({(sessionSummary.trial_findings || []).length})
+                                </Accordion.Header>
+                                <Accordion.Body>
+                                    {renderStringList(sessionSummary.trial_findings, 'No per-trial issues detected.')}
+                                </Accordion.Body>
+                            </Accordion.Item>
+                        </Accordion>
+                    </>
+                )}
+            </Card.Body>
+        </Card>
+    );
+};
+
+const LiveTrialEventsPanel = () => {
+    const { sessionInsights } = useContext(AcquisitionState);
+    if (!sessionInsights || sessionInsights.length === 0) return null;
+    return (
+        <Card className="mb-4">
+            <Card.Header><strong>Live trial events</strong></Card.Header>
+            <ListGroup variant="flush">
+                {sessionInsights.map((ev, i) => {
+                    const steps = (ev.details && ev.details.remediation) || null;
+                    return (
+                        <ListGroup.Item key={i} className="d-flex justify-content-between align-items-start">
+                            <div className="ms-2 me-auto">
+                                <div className="fw-bold">{ev.message}</div>
+                                {steps && steps.length > 0 && (
+                                    <ol className="small mb-1 mt-1 ps-3">
+                                        {steps.map((step, j) => (
+                                            <li key={j}>{step}</li>
+                                        ))}
+                                    </ol>
+                                )}
+                                <small className="text-muted">
+                                    {ev.code}{ev.ts ? ` · ${new Date(ev.ts).toLocaleTimeString()}` : ''}
+                                </small>
+                            </div>
+                            <SeverityBadge level={ev.level} />
+                        </ListGroup.Item>
+                    );
+                })}
+            </ListGroup>
+        </Card>
+    );
+};
+
+const ExcludeCameraButton = ({ serial, excluded }) => {
+    const { setCameraExcluded, recordingSystemStatus } = useContext(AcquisitionState);
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState(null);
+    const isPySpinBusy = isBusyPySpinState(recordingSystemStatus);
+
+    const handleClick = async () => {
+        const target = !excluded;
+        const verb = target ? 'Exclude' : 'Include';
+        const ok = window.confirm(
+            target
+                ? `Exclude camera ${serial} from this session? The system will reconfigure ` +
+                  `with one fewer camera. You can re-include it later.`
+                : `Re-include camera ${serial}? The system will reconfigure with this camera back in the recording.`
+        );
+        if (!ok) return;
+        setBusy(true);
+        setError(null);
+        try {
+            await setCameraExcluded(serial, target);
+        } catch (e) {
+            const msg = (e && e.response && e.response.data && e.response.data.detail) || e.message;
+            setError(msg || `${verb} failed.`);
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    return (
+        <div>
+            <Button
+                onClick={handleClick}
+                disabled={busy || isPySpinBusy}
+                size="sm"
+                variant={excluded ? 'outline-success' : 'outline-secondary'}
+                title={isPySpinBusy
+                    ? `Wait until the system is Idle (currently ${recordingSystemStatus})`
+                    : (excluded ? 'Re-include this camera in the recording' : 'Skip this camera in this session')}
+            >
+                {busy ? '…' : (excluded ? 'Include' : 'Exclude')}
+            </Button>
+            {error && <div className="text-danger small mt-1">{error}</div>}
+        </div>
+    );
+};
+
+const ForceIpButton = ({ mac }) => {
+    const { forceIpCamera, recordingSystemStatus } = useContext(AcquisitionState);
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState(null);
+    const isPySpinBusy = isBusyPySpinState(recordingSystemStatus);
+
+    const handleClick = async () => {
+        const ok = window.confirm(
+            `Force-IP camera ${mac}? The system will auto-assign the next free address ` +
+            'on the camera subnet. The camera will take a few seconds to reappear.'
+        );
+        if (!ok) return;
+        setBusy(true);
+        setError(null);
+        try {
+            await forceIpCamera(mac);
+        } catch (e) {
+            const msg = (e && e.response && e.response.data && e.response.data.detail) || e.message;
+            setError(msg || 'Force IP failed.');
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    return (
+        <div>
+            <Button
+                onClick={handleClick}
+                disabled={busy || isPySpinBusy}
+                size="sm"
+                variant="outline-warning"
+                title={isPySpinBusy
+                    ? `Wait until the system is Idle (currently ${recordingSystemStatus})`
+                    : 'Re-IP this camera onto the camera subnet'}
+            >
+                {busy ? '…' : 'Force IP'}
+            </Button>
+            {error && <div className="text-danger small mt-1">{error}</div>}
+        </div>
+    );
+};
+
+const RecalibrateRigButton = () => {
+    const { markRigRecalibrate, currentConfig } = useContext(AcquisitionState);
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState(null);
+    const noConfig = !currentConfig;
+
+    const handleClick = async () => {
+        const ok = window.confirm(
+            'Mark the rig for recalibration? Subsequent trials in this session ' +
+            'will record under a new camera_config_hash, so DataJoint will ' +
+            'treat them as a new calibration setup. Capture a new calibration ' +
+            'recording before your next trial.'
+        );
+        if (!ok) return;
+        setBusy(true);
+        setError(null);
+        try {
+            await markRigRecalibrate();
+        } catch (e) {
+            const msg = (e && e.response && e.response.data && e.response.data.detail) || e.message;
+            setError(msg || 'Mark failed.');
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    return (
+        <div>
+            <Button
+                onClick={handleClick}
+                disabled={busy || noConfig}
+                size="sm"
+                variant="outline-info"
+                title={noConfig
+                    ? 'Select a camera config first'
+                    : 'Force a new camera_config_hash for subsequent trials (after a camera was bumped/moved)'}
+            >
+                {busy ? '…' : 'Camera moved'}
+            </Button>
+            {error && <div className="text-danger small mt-1">{error}</div>}
+        </div>
+    );
+};
+
+const RestartAcquisitionButton = () => {
+    const { restartAcquisition, recordingSystemStatus } = useContext(AcquisitionState);
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState(null);
+    const isPySpinBusy = isBusyPySpinState(recordingSystemStatus);
+
+    const handleClick = async () => {
+        setBusy(true);
+        setError(null);
+        try {
+            await restartAcquisition();
+        } catch (e) {
+            const msg = (e && e.response && e.response.data && e.response.data.detail) || e.message;
+            setError(msg || 'Restart failed.');
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    return (
+        <div>
+            <Button
+                onClick={handleClick}
+                disabled={busy || isPySpinBusy}
+                size="sm"
+                variant="outline-warning"
+                title={isPySpinBusy
+                    ? `Wait until the system is Idle (currently ${recordingSystemStatus})`
+                    : 'Re-init PySpin and re-run PTP sync'}
+            >
+                {busy ? 'Restarting…' : 'Restart acquisition'}
+            </Button>
+            {error && <div className="text-danger small mt-1">{error}</div>}
+        </div>
+    );
+};
+
+const DiagnosticsPage = () => (
+    <Container className="mt-3">
+        <div className="d-flex justify-content-between align-items-center mb-3">
+            <h3 className="mb-0">Diagnostics</h3>
+            <div className="d-flex gap-2">
+                <RecalibrateRigButton />
+                <RestartAcquisitionButton />
+            </div>
+        </div>
+        <HostHealthPanel />
+        <LiveTrialEventsPanel />
+        <CurrentSessionPanel />
+    </Container>
+);
+
+const describeBool = (b) => (b === true ? 'OK' : b === false ? 'down' : '—');
+
+// Derive a human-readable link rating. Some Blackfly firmware doesn't populate
+// GevLinkSpeed via the held-recorder snapshot path, so we fall back to the
+// observed payload throughput. A 1 Gbps link tops out around 700-750 Mbps
+// payload (jumbo frames at 30 fps); a 100 Mbps link tops out around 95-100.
+const deriveLinkLabel = (c) => {
+    if (c.link_speed_mbps != null && c.link_speed_mbps > 0) {
+        return `${c.link_speed_mbps} Mbps`;
+    }
+    if (c.link_throughput_bytes_per_sec != null) {
+        const mbps = c.link_throughput_bytes_per_sec * 8 / 1000000;
+        if (mbps > 200) return '1 Gbps';
+        if (mbps > 20) return '100 Mbps';
+        if (mbps > 0) return '10 Mbps';
+    }
+    return '—';
+};
+
+const SEVERITY_RANK = { unknown: 0, ok: 1, warn: 2, error: 3 };
+const maxLevel = (findings) => {
+    if (!findings || findings.length === 0) return 'ok';
+    return findings.reduce(
+        (acc, f) => (SEVERITY_RANK[f.level] > SEVERITY_RANK[acc] ? f.level : acc),
+        'ok'
+    );
+};
+
+const renderStringList = (items, emptyMessage) => {
+    if (!items || items.length === 0) {
+        return <p className="text-muted mb-0">{emptyMessage}</p>;
+    }
+    return (
+        <ListGroup variant="flush">
+            {items.map((s, i) => (
+                <ListGroup.Item key={i}>{s}</ListGroup.Item>
+            ))}
+        </ListGroup>
+    );
+};
+
+export default DiagnosticsPage;

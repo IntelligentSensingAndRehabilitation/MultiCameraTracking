@@ -1,15 +1,20 @@
 # This is the build file for the docker. Note this should be run from the
 # parent directory for the necessary files to be available
 
-.PHONY: clean build run run-no-checks _docker-run
+.PHONY: clean build run run-no-checks _docker-run run-mocap-test test test-matrix test-diagnostics validate-sync diag-recording diag-analyze health health-fix setup-env install-sudoers force-ip init-dj-test run-mocap-test-dj reset-dj-test
 
 DIR := ${CURDIR}
+TEST_DJ_EXTERNAL ?= /tmp/datajoint_external_test
 
 build-mocap:
 	docker compose build mocap
 
 build-annotate:
 	docker compose build annotate
+
+# Validate .env against .env.template; prompt for any missing/empty values.
+setup-env:
+	@./scripts/acquisition/check_env.sh
 
 # Start acquisition with full system validation (recommended)
 run:
@@ -23,11 +28,106 @@ run-no-checks:
 _docker-run:
 	docker compose run --rm mocap
 
+# Start acquisition with isolated test data (TEST_DATA_VOLUME, default /data-test).
+# Cannot run simultaneously with 'make run' — both bind host ports 8000 and 3000.
+run-mocap-test:
+	if [ -f .env ]; then set -a; . ./.env; set +a; fi; docker compose run --rm mocap-test
+
+# Run all acquisition tests (cameras required for test matrix)
 test:
 	docker compose run --rm test
+
+# Camera test matrix only (cameras required, long)
+test-matrix:
+	docker compose run --rm --entrypoint pytest test \
+		-s /Mocap/tests/acquisition/test_acquisition.py
+
+# Diagnostics unit tests only (no cameras needed)
+test-diagnostics:
+	docker compose run --rm --entrypoint pytest test \
+		-s /Mocap/tests/acquisition/test_sync_diagnostics.py /Mocap/tests/acquisition/test_system_monitor.py
 
 reset:
 	docker compose run --rm reset
 
 annotate:
 	docker compose run --rm annotate
+
+# --- Diagnostics targets (cameras required unless noted) ---
+
+# Validate sync before recording (cameras required). Usage:
+#   make validate-sync CONFIG=/configs/your_config.yaml
+validate-sync:
+	@test -n "$(CONFIG)" || { echo "CONFIG is required. Usage: make validate-sync CONFIG=/configs/your_config.yaml"; exit 1; }
+	docker compose run --rm --entrypoint python3 test \
+		/Mocap/tests/acquisition/validate_sync.py \
+		--config $(CONFIG)
+
+# Short recording with full diagnostics (cameras required). Usage:
+#   make diag-recording CONFIG=/configs/your_config.yaml
+#   make diag-recording CONFIG=/configs/your_config.yaml FRAMES=300
+diag-recording:
+	@test -n "$(CONFIG)" || { echo "CONFIG is required. Usage: make diag-recording CONFIG=/configs/your_config.yaml"; exit 1; }
+	docker compose run --rm --entrypoint python3 test \
+		/Mocap/tests/acquisition/diag_recording.py \
+		--config $(CONFIG) \
+		$(if $(DATA),--output-dir $(DATA)) \
+		$(if $(FRAMES),--frames $(FRAMES))
+
+# Analyze recording JSON output (no cameras needed). Usage:
+#   make diag-analyze DATA=/data
+diag-analyze:
+	docker compose run --rm --entrypoint python3 test \
+		-m multi_camera.acquisition.diagnostics.json_parser \
+		$(or $(DATA),/data) --no-plots
+
+# Quick host health check (DHCP, host-network MTU/rmem, camera reachability).
+health:
+	docker compose run --rm --entrypoint python3 test \
+		-m multi_camera.acquisition.health
+
+# Same as `make health` but auto-remediates host drift (MTU/rmem/DHCP) first.
+# Runs on the host — the container has no sudo and cannot reach host systemd.
+# Requires passwordless sudo (run `make install-sudoers` once).
+health-fix:
+	./scripts/acquisition/health_fix.sh
+
+# Rescue cameras stuck on link-local 169.254.x.x by broadcasting a Spinnaker
+# ForceIP. Volatile: cameras revert to their previous IP config on next
+# power-cycle, so this is for unblocking the current session, not a
+# permanent fix. Pair with `make health` to confirm afterwards.
+force-ip:
+	docker compose run --rm --entrypoint python3 test \
+		/Mocap/scripts/acquisition/force_camera_ips.py
+
+# Install /etc/sudoers.d/mocap-acquisition so start_acquisition.sh's
+# auto-remediation path (MTU/rmem/DHCP) and `make health-fix` can run
+# without prompting for a password.
+install-sudoers:
+	sudo ./scripts/acquisition/install_sudoers.sh
+
+# --- Test DataJoint targets ---
+
+# One-time setup: create external storage directory with sentinel file (TEST_DJ_EXTERNAL, default /mnt/datajoint_external_test).
+init-dj-test:
+	mkdir -p $(TEST_DJ_EXTERNAL)
+	touch $(TEST_DJ_EXTERNAL)/.multi_cam_mount_check
+
+# Run acquisition in test mode against local test DataJoint (starts datajoint-test automatically).
+# Cannot run simultaneously with 'make run' or 'make run-mocap-test' — all bind host ports 8000 and 3000.
+# Run 'make init-dj-test' once before first use.
+# --build rebuilds the image so Python source changes under multi_camera/ are picked up
+# (the Dockerfile bakes source in via COPY; there is no source bind mount on this service).
+# Source .env first (same as start_acquisition.sh does for `make run`) so the container
+# inherits REACT_APP_BASE_URL / NETWORK_INTERFACE / etc. instead of the compose defaults —
+# otherwise the GUI bundle is built for localhost and only works in a browser on the server.
+run-mocap-test-dj:
+	if [ -f .env ]; then set -a; . ./.env; set +a; fi; docker compose run --rm --build mocap-test-dj
+
+# Drop and recreate the test DataJoint database (clean-slate testing).
+# Stops the container, removes the data volume, and restarts.
+reset-dj-test:
+	docker compose stop datajoint-test
+	docker compose rm -f datajoint-test
+	docker volume ls -q | grep datajoint_test_db | xargs -r docker volume rm
+	docker compose up -d datajoint-test

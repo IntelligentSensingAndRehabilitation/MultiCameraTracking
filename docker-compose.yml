@@ -9,10 +9,53 @@ services:
     environment:
       REACT_APP_BASE_URL: ${REACT_APP_BASE_URL:-localhost}
       PYTHONUNBUFFERED: 1
+      DEPLOYMENT_MODE: ${DEPLOYMENT_MODE:-network}
+      NETWORK_INTERFACE: ${NETWORK_INTERFACE:-enp5s0}
+      DHCP_LEASE_FILE: ${DHCP_LEASE_FILE:-/var/lib/dhcp/dhcpd.leases}
+      DISK_SPACE_WARNING_THRESHOLD_GB: ${DISK_SPACE_WARNING_THRESHOLD_GB:-50}
+      HEALTH_IDLE_POLL_S: ${HEALTH_IDLE_POLL_S:-30}
+      # DataJoint credentials. DataJoint reads DJ_HOST/DJ_USER/DJ_PASS natively and
+      # they override the baked /root/.datajoint_config.json, so creds live in .env
+      # instead of the image. database.port is not env-driven; it stays in the config file.
+      DJ_HOST: ${DJ_HOST}
+      DJ_USER: ${DJ_USER}
+      DJ_PASS: ${DJ_PASS}
     volumes:
       - ${DATA_VOLUME:-/data}:/data
       - ${CAMERA_CONFIGS:-/camera_configs}:/configs
       - /etc/localtime:/etc/localtime:ro
+      - /var/lib/dhcp:/var/lib/dhcp:ro
+      - ${DATAJOINT_EXTERNAL:-/mnt/datajoint_external}:/datajoint_external
+    network_mode: host
+    command: /Mocap/entrypoints/start_acquisition_gui.sh
+
+  mocap-test:
+    build:
+      context: .
+      dockerfile: ./docker/Dockerfile
+    image: isr/mct_acquisition
+    tty: true
+    stdin_open: true
+    environment:
+      REACT_APP_BASE_URL: ${REACT_APP_BASE_URL:-localhost}
+      REACT_APP_TEST_MODE: "true"
+      PYTHONUNBUFFERED: 1
+      DEPLOYMENT_MODE: ${DEPLOYMENT_MODE:-network}
+      NETWORK_INTERFACE: ${NETWORK_INTERFACE:-enp5s0}
+      DHCP_LEASE_FILE: ${DHCP_LEASE_FILE:-/var/lib/dhcp/dhcpd.leases}
+      DISK_SPACE_WARNING_THRESHOLD_GB: ${DISK_SPACE_WARNING_THRESHOLD_GB:-50}
+      HEALTH_IDLE_POLL_S: ${HEALTH_IDLE_POLL_S:-30}
+      # DataJoint credentials. DataJoint reads DJ_HOST/DJ_USER/DJ_PASS natively and
+      # they override the baked /root/.datajoint_config.json, so creds live in .env
+      # instead of the image. database.port is not env-driven; it stays in the config file.
+      DJ_HOST: ${DJ_HOST}
+      DJ_USER: ${DJ_USER}
+      DJ_PASS: ${DJ_PASS}
+    volumes:
+      - ${TEST_DATA_VOLUME:-/data-test}:/data
+      - ${CAMERA_CONFIGS:-/camera_configs}:/configs
+      - /etc/localtime:/etc/localtime:ro
+      - /var/lib/dhcp:/var/lib/dhcp:ro
       - ${DATAJOINT_EXTERNAL:-/mnt/datajoint_external}:/datajoint_external
     network_mode: host
     command: /Mocap/entrypoints/start_acquisition_gui.sh
@@ -20,13 +63,22 @@ services:
   test:
     image: isr/mct_acquisition
     command: /Mocap/entrypoints/run_tests.sh
+    environment:
+      PYTHONUNBUFFERED: 1
+      DEPLOYMENT_MODE: ${DEPLOYMENT_MODE:-network}
+      NETWORK_INTERFACE: ${NETWORK_INTERFACE:-enp5s0}
+      DHCP_LEASE_FILE: ${DHCP_LEASE_FILE:-/var/lib/dhcp/dhcpd.leases}
+      DISK_SPACE_WARNING_THRESHOLD_GB: ${DISK_SPACE_WARNING_THRESHOLD_GB:-50}
+      HEALTH_IDLE_POLL_S: ${HEALTH_IDLE_POLL_S:-30}
     volumes:
       - ${DATA_VOLUME:-/data}:/data
       - ${CAMERA_CONFIGS:-/camera_configs}:/configs
       - /etc/localtime:/etc/localtime:ro
+      - /var/lib/dhcp:/var/lib/dhcp:ro
       - ${DATAJOINT_EXTERNAL:-/mnt/datajoint_external}:/datajoint_external
       - ./tests:/Mocap/tests
       - ./tests/testdata:/Mocap/tests/testdata
+      - ./scripts:/Mocap/scripts
     network_mode: host
 
   reset:
@@ -51,3 +103,52 @@ services:
       - /etc/localtime:/etc/localtime:ro
       - ${DATAJOINT_EXTERNAL:-/mnt/datajoint_external}:/datajoint_external
     network_mode: host
+
+  # Local test DataJoint MySQL — safe upload target that mirrors production engine.
+  # Binds only to localhost:3307. Data persists in the datajoint_test_db named volume.
+  # Password defaults to 'djtest'; override with DJ_TEST_PASS (also update datajoint_config.test.json).
+  # Run via: make run-mocap-test-dj  (starts this container automatically)
+  datajoint-test:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DJ_TEST_PASS:-djtest}
+      MYSQL_ROOT_HOST: '%'
+    ports:
+      - "127.0.0.1:3307:3306"
+    volumes:
+      - datajoint_test_db:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p$$MYSQL_ROOT_PASSWORD"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # mocap-test variant that uploads to the local datajoint-test MySQL instead of production.
+  # Uses TEST_DATA_VOLUME for recording data and TEST_DJ_EXTERNAL for DataJoint external storage.
+  # Run via: make run-mocap-test-dj  (waits for datajoint-test to be healthy before starting)
+  mocap-test-dj:
+    build:
+      context: .
+      dockerfile: ./docker/Dockerfile
+    image: isr/mct_acquisition
+    tty: true
+    stdin_open: true
+    depends_on:
+      datajoint-test:
+        condition: service_healthy
+    environment:
+      REACT_APP_BASE_URL: ${REACT_APP_BASE_URL:-localhost}
+      REACT_APP_TEST_MODE: "true"
+      PYTHONUNBUFFERED: 1
+    volumes:
+      - ${TEST_DATA_VOLUME:-/data-test}:/data
+      - ${CAMERA_CONFIGS:-/camera_configs}:/configs
+      - /etc/localtime:/etc/localtime:ro
+      - ${TEST_DJ_EXTERNAL:-/tmp/datajoint_external_test}:/datajoint_external
+      - ./docker/datajoint_config.test.json:/root/.datajoint_config.json:ro
+    network_mode: host
+    command: /Mocap/entrypoints/start_acquisition_gui.sh
+
+volumes:
+  datajoint_test_db:

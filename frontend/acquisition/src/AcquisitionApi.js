@@ -2,13 +2,22 @@ import React from 'react';
 import { useState, useEffect, useRef, createContext } from 'react';
 import axios from 'axios';
 
-// get first part of base url from environment variable
-// if not set, then use localhost
-const BASE_HOSTNAME = process.env.REACT_APP_BASE_URL || 'localhost';
+// API host resolution. Prefer an explicitly-configured, non-localhost host; but
+// otherwise use the host the page is being served from, so the GUI works from any
+// machine without a build-time base URL (the same way the FastAPI-served page does
+// with relative calls). A bare 'localhost' — the default .env value — is treated as
+// unset, so a browser on another machine still reaches the server instead of itself.
+const _configuredHost = process.env.REACT_APP_BASE_URL;
+const BASE_HOSTNAME =
+    _configuredHost && _configuredHost !== 'localhost'
+        ? _configuredHost
+        : (typeof window !== 'undefined' && window.location.hostname) || 'localhost';
 
 const BASE_URL = `${BASE_HOSTNAME}:8000/api/v1`;
 const API_BASE_URL = `http://${BASE_URL}`;
 const WS_BASE_URL = `ws://${BASE_URL}/ws`;
+const WS_DIAGNOSTICS_URL = `ws://${BASE_URL}/ws/diagnostics`;
+const MAX_SESSION_INSIGHTS = 50;
 
 const initialState = {
     partipant: "",
@@ -18,6 +27,25 @@ const initialState = {
 }
 
 export const AcquisitionState = createContext(initialState);
+
+// Mirrors backend `_BUSY_PYSPIN_STATES` in multi_camera/backend/fastapi.py.
+// Any recovery / reconfigure action the operator can trigger from the GUI
+// (Force IP, Exclude/Include, Restore defaults, Restart acquisition) is
+// refused by the backend in any of these states, so the corresponding
+// frontend buttons should disable to match — otherwise the operator clicks
+// and gets a 409 toast instead of an obviously-unavailable button.
+const BUSY_PYSPIN_STATES = [
+    'Configuring',
+    'Synchronizing',
+    'Synchronized',
+    'Starting',
+    'Recording',
+    'Resetting',
+    'Reset complete. Waiting to reconfigure.',
+];
+
+export const isBusyPySpinState = (status) =>
+    BUSY_PYSPIN_STATES.includes(status);
 
 export const useEffectOnce = (effect) => {
 
@@ -65,10 +93,15 @@ export const AcquisitionApi = (props) => {
     const [recordingFileBase, setRecordingFileBase] = useState('');
     const [recordingFilename, setRecordingFilename] = useState('');
     const [recordingProgress, setRecordingProgress] = useState('');
-    const [keypoints, setKeypoints] = useState([]);
+    const [keypoints] = useState([]);
     const [diskSpaceInfo, setDiskSpaceInfo] = useState(null);
     const [showDiskWarningModal, setShowDiskWarningModal] = useState(false);
     const [diskWarningOnStartup, setDiskWarningOnStartup] = useState(false);
+    const [isPreview, setIsPreview] = useState(false);
+    const [selectedCamera, setSelectedCamera] = useState(null);
+    const [healthReport, setHealthReport] = useState(null);
+    const [sessionInsights, setSessionInsights] = useState([]);
+    const [sessionSummary, setSessionSummary] = useState(null);
 
     useEffect(() => {
         // axios.interceptors.request.use(request => {
@@ -82,41 +115,121 @@ export const AcquisitionApi = (props) => {
     }, []);
 
     useEffectOnce(() => {
-
+        // Persist a single socket ref across reconnect attempts and a flag
+        // so the cleanup function knows we're intentionally closing.
         const url = `${WS_BASE_URL}`;
-        const socket = new WebSocket(url);
+        const state = { socket: null, closed: false, backoffMs: 500 };
 
-        console.log("Connecting to websocket..." + url)
+        const connect = () => {
+            console.log("Connecting to websocket..." + url);
+            const socket = new WebSocket(url);
+            state.socket = socket;
 
-        socket.onopen = (event) => {
-            console.log("WebSocket connection established" + url, event);
+            socket.onopen = () => {
+                console.log("WebSocket connection established " + url);
+                state.backoffMs = 500;
+                // Re-fetch the authoritative status on every (re)open so
+                // the GUI never sits with stale recordingSystemStatus if
+                // a broadcast was missed while disconnected.
+                fetchRecordingStatus();
+            };
+
+            socket.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                if (data.status !== undefined) {
+                    setRecordingSystemStatus(data.status);
+                }
+                if (data.progress !== undefined) {
+                    setRecordingProgress(Math.ceil(data.progress * 100));
+                }
+            };
+
+            socket.onclose = (event) => {
+                console.log("WebSocket connection closed " + url, event);
+                if (state.closed) return;
+                // Backoff: 0.5s → 1s → 2s → 4s → cap at 5s
+                const delay = state.backoffMs;
+                state.backoffMs = Math.min(state.backoffMs * 2, 5000);
+                setTimeout(connect, delay);
+            };
+
+            socket.onerror = (event) => {
+                console.log("WebSocket error observed " + url + ":", event);
+            };
         };
 
-        socket.onmessage = (event) => {
-            const data = JSON.parse(event.data);
-            console.log("WebSocket message received", data);
-            setRecordingSystemStatus(data.status);
+        connect();
 
-            // if there is a progress field, then update the progress bar
-            if (data.progress) {
-                // Compute progress as percentage and take ceiling to nearest integer
-                setRecordingProgress(Math.ceil(data.progress * 100));
-            }
-        };
-
-        socket.onclose = (event) => {
-            console.log("WebSocket connection closed" + url, event);
-        };
-
-        socket.onerror = (event) => {
-            console.log("WebSocket error observed" + url + ":", event);
-        }
-
-        //clean up function when we close page
         return () => {
-            console.log("Closing WebSocket " + url + " ...")
-            socket.close();
-        }
+            state.closed = true;
+            console.log("Closing WebSocket " + url + " ...");
+            if (state.socket) state.socket.close();
+        };
+    }, []);
+
+    useEffectOnce(() => {
+        const state = { socket: null, closed: false, backoffMs: 500 };
+
+        const appendInsight = (env, dedupKey) => {
+            setSessionInsights(prev => {
+                if (prev.some(i => dedupKey(i) === dedupKey(env))) return prev;
+                const next = [...prev, env];
+                return next.length > MAX_SESSION_INSIGHTS
+                    ? next.slice(-MAX_SESSION_INSIGHTS)
+                    : next;
+            });
+        };
+
+        const connect = () => {
+            const socket = new WebSocket(WS_DIAGNOSTICS_URL);
+            state.socket = socket;
+            console.log("Connecting to diagnostics websocket...", WS_DIAGNOSTICS_URL);
+
+            socket.onopen = () => {
+                console.log("Diagnostics WebSocket connection established");
+                state.backoffMs = 500;
+                // Re-fetch health on every (re)open so a dropped health_report
+                // broadcast doesn't leave the GUI stuck on a stale banner.
+                fetchHealth();
+            };
+
+            socket.onmessage = (event) => {
+                const env = JSON.parse(event.data);
+                switch (env.type) {
+                    case "health_report":
+                        fetchHealth();
+                        break;
+                    case "session_insight":
+                        appendInsight(env, (i) => i.message);
+                        break;
+                    case "error":
+                        fetchHealth();
+                        appendInsight(env, (i) => `${i.code}::${i.message}`);
+                        break;
+                    default:
+                        break;
+                }
+            };
+
+            socket.onclose = () => {
+                console.log("Diagnostics WebSocket closed");
+                if (state.closed) return;
+                const delay = state.backoffMs;
+                state.backoffMs = Math.min(state.backoffMs * 2, 5000);
+                setTimeout(connect, delay);
+            };
+
+            socket.onerror = (event) => {
+                console.log("Diagnostics WebSocket error:", event);
+            };
+        };
+
+        connect();
+
+        return () => {
+            state.closed = true;
+            if (state.socket) state.socket.close();
+        };
     }, []);
 
     useEffect(() => {
@@ -127,6 +240,7 @@ export const AcquisitionApi = (props) => {
         fetchRecordingStatus();
         fetchSession();
         fetchDiskStatus();
+        fetchHealth();
     }, []);
 
     useEffect(() => {
@@ -148,6 +262,29 @@ export const AcquisitionApi = (props) => {
             console.log("No active session");
         }
     }
+
+    const fetchHealth = async (forceRefresh = false) => {
+        try {
+            const path = forceRefresh ? "/health/refresh" : "/health";
+            const method = forceRefresh ? "post" : "get";
+            const response = await axios({ method, url: `${API_BASE_URL}${path}` });
+            setHealthReport(response.data);
+        } catch (error) {
+            console.error("Error fetching health:", error);
+        }
+    };
+
+    const fetchSessionSummary = async () => {
+        try {
+            const response = await axios.get(`${API_BASE_URL}/health/session_summary`);
+            setSessionSummary(response.data);
+        } catch (error) {
+            // 404 = no active session; anything else = transient backend issue
+            // (e.g. session dir not yet populated). Both surface as "no
+            // summary available" to the operator.
+            setSessionSummary(null);
+        }
+    };
 
     async function fetchDiskStatus() {
         try {
@@ -194,6 +331,9 @@ export const AcquisitionApi = (props) => {
         if (max_frames === undefined) {
             max_frames = 100;
         }
+
+        setIsPreview(false);
+        setSelectedCamera(null);
 
         if (participant && participant.length > 0) {
             console.log("Starting recording for participant: ", participant);
@@ -246,6 +386,9 @@ export const AcquisitionApi = (props) => {
     }
 
     async function previewVideo(max_frames) {
+        if (!participant || participant.length === 0) return;
+        setIsPreview(true);
+        setSelectedCamera(null);
         await axios.post(`${API_BASE_URL}/preview`,
             {
                 max_frames: max_frames
@@ -254,6 +397,8 @@ export const AcquisitionApi = (props) => {
     }
 
     async function stopAcquisition() {
+        setIsPreview(false);
+        setSelectedCamera(null);
         await axios.post(`${API_BASE_URL}/stop`);
     }
 
@@ -337,6 +482,46 @@ export const AcquisitionApi = (props) => {
         fetchCameraStatus();
     };
 
+    const restartAcquisition = async () => {
+        const response = await axios.post(`${API_BASE_URL}/restart_acquisition`);
+        await fetchCameraStatus();
+        await fetchHealth(true);
+        return response.data;
+    };
+
+    const restoreCameraDefaults = async (serial) => {
+        const response = await axios.post(`${API_BASE_URL}/cameras/${serial}/restore_defaults`);
+        await fetchCameraStatus();
+        await fetchHealth(true);
+        return response.data;
+    };
+
+    const setCameraExcluded = async (serial, excluded) => {
+        const path = excluded ? 'exclude' : 'include';
+        const response = await axios.post(`${API_BASE_URL}/cameras/${serial}/${path}`);
+        await fetchCameraStatus();
+        await fetchHealth(true);
+        return response.data;
+    };
+
+    const markRigRecalibrate = async () => {
+        const response = await axios.post(`${API_BASE_URL}/rig/recalibrate`);
+        return response.data;
+    };
+
+    const forceIpCamera = async (mac, ip, mask, gateway) => {
+        const body = {};
+        if (ip) body.ip = ip;
+        if (mask) body.mask = mask;
+        if (gateway) body.gateway = gateway;
+        const response = await axios.post(
+            `${API_BASE_URL}/cameras/${encodeURIComponent(mac)}/force_ip`,
+            body
+        );
+        await fetchHealth(true);
+        return response.data;
+    };
+
     /* Code for editing recording database */
 
     const getMatchingPriorRecordings = async (participant, filename) => {
@@ -370,10 +555,12 @@ export const AcquisitionApi = (props) => {
                         participant: participant,
                         filename: filename,
                         recording_timestamp: matchedRecording[0].recording_timestamp,
-                        comment: matchedRecording[0].comment,
+                        // Whole metadata container — must round-trip unknown keys on update
+                        metadata: matchedRecording[0].metadata,
                         config_file: matchedRecording[0].config_file,
                         should_process: matchedRecording[0].should_process,
-                        timestamp_spread: matchedRecording[0].timestamp_spread
+                        timestamp_spread: matchedRecording[0].timestamp_spread,
+                        duration: matchedRecording[0].duration
                     }
                     console.log("prior_recording: ", prior_recording)
                     return prior_recording;
@@ -394,7 +581,8 @@ export const AcquisitionApi = (props) => {
     const changeComment = async (participant, filename, newComment) => {
         console.log(`Comment changed for ${participant} ${filename}: ${newComment}`);
         const matchedRecording = await getMatchingPriorRecordings(participant, filename);
-        matchedRecording.comment = newComment;
+        // Mutate only the comment element; Object.assign preserves other container keys (e.g. 10mwt_time)
+        matchedRecording.metadata = Object.assign({}, matchedRecording.metadata || {}, { comment: newComment });
         await axios.post(`${API_BASE_URL}/update_recording`, matchedRecording);
         fetchRecordings();
     };
@@ -408,6 +596,11 @@ export const AcquisitionApi = (props) => {
             }
         });
     };
+
+    async function selectCamera(cameraIndex) {
+        await axios.post(`${API_BASE_URL}/select_camera`, { camera_index: cameraIndex });
+        setSelectedCamera(cameraIndex);
+    }
 
     const processSession = async (participant, session, video_project) => {
         console.log(`Processing session ${session} for ${participant}`);
@@ -447,7 +640,15 @@ export const AcquisitionApi = (props) => {
         showDiskWarningModal: showDiskWarningModal,
         setShowDiskWarningModal: setShowDiskWarningModal,
         diskWarningOnStartup: diskWarningOnStartup,
+        isPreview: isPreview,
+        selectedCamera: selectedCamera,
+        selectCamera,
         resetCameras,
+        restartAcquisition,
+        restoreCameraDefaults,
+        setCameraExcluded,
+        forceIpCamera,
+        markRigRecalibrate,
         newSession,
         newTrial,
         previewVideo,
@@ -462,6 +663,11 @@ export const AcquisitionApi = (props) => {
         processSession,
         fetchSmplTrials,
         fetchSmpl,
+        healthReport: healthReport,
+        sessionInsights: sessionInsights,
+        sessionSummary: sessionSummary,
+        fetchHealth,
+        fetchSessionSummary,
     }}> {props.children} </AcquisitionState.Provider >)
     //return (<div> {children} </div>)
 };

@@ -1,7 +1,8 @@
 import numpy as np
 import datajoint as dj
+from pose_pipeline.dj_schema import TimestampedSchema
 
-schema = dj.schema("multicamera_tracking")
+schema = TimestampedSchema("multicamera_tracking")
 
 
 # keeping this class definition in this file to avoid it needing to depend
@@ -29,10 +30,20 @@ class Calibration(dj.Manual):
 if __name__ == "__main__":
     import argparse
     import os
-    from ..analysis.calibration import run_calibration_APL
+
+    import datajoint as dj
+
+    from ..analysis.calibration import insert_calibration_videos, run_calibration_APL
 
     parser = argparse.ArgumentParser(description="Run camera calibration and releveling pipeline.")
     parser.add_argument('--vid_base', type=str, required=True, help='Base path to calibration video set (without .cam.mp4)')
+    parser.add_argument('--trial_video_project', type=str, default=None,
+                        help='Trial-side video_project for this session, e.g. CLINIC_GAIT. Only '
+                             'needed when the session has not been pushed to DataJoint yet; the '
+                             'calibration videos are filed under "{project}_CALIBRATION".')
+    parser.add_argument('--comment', type=str, default=None,
+                        help='Comment for the MultiCameraCalibration row. ArUco detection only '
+                             'runs on calibrations whose comment contains "aruco".')
     parser.add_argument('--charuco', type=str, default='charuco', help='Use charuco or checkerboard')
     parser.add_argument('--checkerboard_size', type=int, default=109, help='Checkerboard square size in mm')
     parser.add_argument('--checkerboard_dim', type=int, nargs=2, default=[5,7], help='Checkerboard dimensions (rows cols)')
@@ -93,5 +104,16 @@ if __name__ == "__main__":
         print("Cancelling")
     else:
         print("Storing calibration in database...")
-        Calibration.insert1(entry)
+        # Register the videos alongside the calibration. Without them the
+        # calibration never enters CalibrationArucoDetection.key_source, so its
+        # trials can never reach TenMeterWalkTest.
+        with dj.conn().transaction:
+            Calibration.insert1(entry)
+            insert_calibration_videos(
+                {k: entry[k] for k in ("cal_timestamp", "camera_config_hash")},
+                args.vid_base,
+                camera_names=entry["camera_names"],
+                trial_video_project=args.trial_video_project,
+                comment=args.comment,
+            )
         print("Calibration complete.")

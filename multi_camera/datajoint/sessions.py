@@ -26,13 +26,24 @@ the subject or session level that might be invalidated by a later recording.
 """
 
 import os
-from typing import List, Tuple
-from datetime import date
+from dataclasses import dataclass
+from datetime import date, datetime
+from typing import List, Optional, Tuple
 
 import datajoint as dj
+from pose_pipeline.dj_schema import TimestampedSchema
 from .multi_camera_dj import import_recording, MultiCameraRecording
 
-schema = dj.schema("mocap_sessions")
+schema = TimestampedSchema("mocap_sessions")
+
+
+@dataclass
+class PhotoSpec:
+    saved_path: str
+    filename: str
+    original_filename: str
+    upload_timestamp: datetime
+    description: Optional[str] = None
 
 
 def get_subject_id_from_participant_id(participant_id: str) -> int:
@@ -69,10 +80,32 @@ class Recording(dj.Manual):
     -> MultiCameraRecording
     ---
     comment: varchar(255)
+    metadata=null: json   # opaque copy of the SQLite per-recording metadata container (#28); requires MySQL 8.0+
     """
 
 
-def import_session(participant_id: str, session_date: date, video_project: str, recordings: List[Tuple[str, str]]):
+@schema
+class Photo(dj.Manual):
+    definition = """
+    # Most recent patient identification photo for the session.
+    -> Session
+    ---
+    photo: attach@localattach
+    filename: varchar(255)
+    original_filename: varchar(255)
+    description=null: varchar(255)
+    upload_timestamp: datetime
+    """
+
+
+def import_session(
+    participant_id: str,
+    session_date: date,
+    video_project: str,
+    recordings: List[Tuple[str, str, Optional[dict]]],
+    fin: Optional[str] = None,
+    photo: Optional[PhotoSpec] = None,
+):
     """
     Import a session with a list of recordings
 
@@ -80,7 +113,11 @@ def import_session(participant_id: str, session_date: date, video_project: str, 
         participant_id (str): subject id
         session_date (date): session date
         video_project (str): video project
-        recordings (List[Tuple(str, str)]): list of recording tuples
+        recordings (List[Tuple(str, str, Optional[dict])]): list of
+            (video_base_path, comment, metadata_container) tuples; the container
+            is stored whole-hog in Recording.metadata (#28)
+        fin (Optional[str]): hospital FIN for this session (pushed to subject_extended.Fin)
+        photo (Optional[PhotoSpec]): most recent patient identification photo for this session
 
     """
 
@@ -88,6 +125,23 @@ def import_session(participant_id: str, session_date: date, video_project: str, 
     session_key = {"participant_id": participant_id, "session_date": session_date}
 
     assert not Session & session_key, "Session already exists"
+
+    # Activate subject_extended outside the transaction: first import triggers DDL
+    # (create schema + ~log table), and MySQL implicitly commits DDL, which
+    # tears down the surrounding transaction. The deferred import here also
+    # breaks the sessions <-> subject_extended cycle at module load time.
+    if fin is not None:
+        from multi_camera.datajoint.subject_extended import Fin, FIN_MAX_LENGTH
+
+        if len(fin) > FIN_MAX_LENGTH:
+            raise ValueError(
+                f"FIN is {len(fin)} characters; subject_extended.Fin allows at most {FIN_MAX_LENGTH}"
+            )
+
+    # Check the photo file before the transaction so a missing file fails fast
+    # instead of rolling back the (expensive) recording imports.
+    if photo is not None and not os.path.exists(photo.saved_path):
+        raise FileNotFoundError(f"Photo missing on disk: {photo.saved_path}")
 
     dj.conn().start_transaction()
     try:
@@ -98,16 +152,32 @@ def import_session(participant_id: str, session_date: date, video_project: str, 
 
         for recording in recordings:
             print("processing recording", recording)
-            vid_base, comment = recording
+            vid_base, comment, metadata = recording
 
             vid_dir, vid_base = os.path.split(vid_base)
             print("vid_dir", vid_dir, "vid_base", vid_base)
-            key = import_recording(vid_base, vid_dir, video_project, skip_connection=True)
+            key = import_recording(
+                vid_base, vid_dir, video_project, skip_connection=True
+            )
             key = (MultiCameraRecording & key).fetch1("KEY")
             key.update(session_key)
             key["comment"] = comment
+            key["metadata"] = metadata
 
             Recording.insert1(key)
+
+        if photo is not None:
+            Photo.insert1({
+                **session_key,
+                "photo": photo.saved_path,
+                "filename": photo.filename,
+                "original_filename": photo.original_filename,
+                "description": photo.description,
+                "upload_timestamp": photo.upload_timestamp,
+            })
+
+        if fin is not None:
+            Fin.insert1({**session_key, "fin": fin})
 
     except Exception as e:
         dj.conn().cancel_transaction()

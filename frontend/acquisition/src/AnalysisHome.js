@@ -1,4 +1,5 @@
-import React, { useContext, useState, useRef, useEffect } from "react";
+import React, { useContext, useState, useRef } from "react";
+import { useEffectOnce } from "./AcquisitionApi";
 import { Accordion, Table, Form, Container, Button, Col, Row, ButtonGroup, ToggleButton } from 'react-bootstrap';
 import path from 'path-browserify';
 import { AcquisitionState } from "./AcquisitionApi";
@@ -31,23 +32,29 @@ const RecordingTable = ({ recordings, participant, session_date, imported, callb
                         <th>Filename</th>
                         <th>Comment</th>
                         {/* <th>Config File</th> */}
+                        <th>Duration</th>
                         <th>Should Process</th>
                     </tr>
                 </thead>
                 <tbody>
-                    {recordings.map((recording, index) => (
+                    {recordings.map((recording, index) => {
+                        const metadata = recording.metadata || {};
+                        const comment = metadata.comment || '';
+                        return (
                         <tr key={recording.filename}>
                             <td>{stripPath(recording.filename)}</td>
 
 
-                            {/* If recording.comment == "calibration" add button for run calibration, otherwise show comment */}
-                            {recording.comment === "calibration" ? (
+                            {/* If the metadata comment is "calibration" add button for run calibration, otherwise show comment */}
+                            {comment === "calibration" ? (
                                 <td><Button variant="primary" onClick={() => calibrate(recording.filename, false)}>Checkerboard Calibration</Button></td>
-                            ) : recording.comment === "charuco" ? (
+                            ) : comment === "charuco" ? (
                                 <td><Button variant="primary" onClick={() => calibrate(recording.filename, true)}>Charuco Calibration</Button></td>
                             ) : (
-                                <td>{recording.comment}</td>
+                                <td>{comment}</td>
                             )}
+
+                            <td>{recording.duration != null ? recording.duration.toFixed(1) + ' s' : '—'}</td>
 
 
                             {/* <td>{recording.config_file}</td> */}
@@ -64,7 +71,8 @@ const RecordingTable = ({ recordings, participant, session_date, imported, callb
 
                             </td>
                         </tr>
-                    ))}
+                        );
+                    })}
                 </tbody>
             </Table>
             {/* Button that pushes a recording to DataJoint */}
@@ -249,17 +257,17 @@ const AnalysisHome = () => {
         onCalibrate: onCalibrate
     }
 
-    useEffect(() => {
-
+    // Fetch the recording DB once on mount. fetchRecordingDb is recreated
+    // on every AcquisitionApi render, so adding it as a dependency would
+    // cause an endless re-fetch loop.
+    useEffectOnce(() => {
         const fetchData = async () => {
             const recordings = await fetchRecordingDb();
             console.log("recordings", recordings);
             setRecordingDb(recordings);
-        }
-
+        };
         fetchData();
-
-    }, [fetchRecordingDb]);
+    }, []);
 
     const resyncData = async () => {
         const recordings = await fetchRecordingDb();
@@ -268,7 +276,7 @@ const AnalysisHome = () => {
     }
 
     const toggle = (val) => {
-        val = val == "true";
+        val = val === "true";
         console.log("toggle", val);
         setSortByDate(val);
     }
@@ -287,7 +295,7 @@ const AnalysisHome = () => {
                             variant={idx % 2 ? 'outline-success' : 'outline-danger'}
                             name="radio"
                             value={radio.value}
-                            checked={sortByDate == radio.value}
+                            checked={sortByDate === radio.value}
                             onChange={(e) => toggle(e.currentTarget.value)}
                         >
                             {radio.name}

@@ -1,8 +1,9 @@
 import datajoint as dj
+from pose_pipeline.dj_schema import TimestampedSchema
 from multi_camera.datajoint.multi_camera_dj import MultiCameraRecording
 import numpy as np
 
-schema = dj.schema('multicamera_tracking_annotation')
+schema = TimestampedSchema("multicamera_tracking_annotation")
 
 @schema
 class VideoActivityLookup(dj.Lookup):

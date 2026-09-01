@@ -1,7 +1,11 @@
-from sqlalchemy import create_engine, Boolean, Column, Integer, String, Date, DateTime, ForeignKey
+import json
+import os
+import re
+
+from sqlalchemy import create_engine, Boolean, Column, Float, Integer, JSON, String, Date, DateTime, ForeignKey
 from sqlalchemy.orm import relationship, declarative_base, joinedload
 from typing import Union, Tuple, List, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 from datetime import date, datetime
 
 Base = declarative_base()
@@ -14,6 +18,7 @@ class Participant(Base):
     name = Column(String)
 
     sessions = relationship("Session", back_populates="participant")
+    fin_record = relationship("ParticipantFIN", uselist=False, back_populates="participant")
 
 
 class Session(Base):
@@ -23,9 +28,11 @@ class Session(Base):
     session_date = Column(Date)
     session_path = Column(String)
     participant_id = Column(Integer, ForeignKey("participants.id"))
+    fin = Column(String, nullable=True)
 
     participant = relationship("Participant", back_populates="sessions")
     recordings = relationship("Recording", back_populates="session")
+    photos = relationship("Photo", back_populates="session")
     imported = relationship("Imported", uselist=False, back_populates="session")
 
 
@@ -36,10 +43,15 @@ class Recording(Base):
     session_id = Column(Integer, ForeignKey("sessions.id"))
     filename = Column(String)
     recording_timestamp = Column(DateTime)  # Add recording_timestamp field
-    comment = Column(String, nullable=True)  # Add comment field
+    comment = Column(String, nullable=True)  # DEPRECATED (#28): moved into recording_metadata["comment"];
+    # kept read-only for one release to support rollback, migrated by _ensure_recording_metadata_columns.
     config_file = Column(String, nullable=True)  # Add config_file field
     should_process = Column(Boolean, default=True)  # Add should_process field with a default value of True
     timestamp_spread = Column(Integer, nullable=True)  # Add timestamp_spread field
+    # Per-recording metadata container (#28): {"comment": str, "10mwt_time": float, ...}.
+    # Writes must REASSIGN a whole new dict — SQLAlchemy's JSON type does not track nested mutation.
+    recording_metadata = Column(JSON, nullable=True)
+    duration = Column(Float, nullable=True)  # #25: seconds, computed at file finalization; historical rows NULL
 
     session = relationship("Session", back_populates="recordings")
 
@@ -55,6 +67,94 @@ class Imported(Base):
     session = relationship("Session", back_populates="imported")
 
 
+class Photo(Base):
+    """Tracks uploaded participant identification photos for a session"""
+
+    __tablename__ = "photos"
+
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(Integer, ForeignKey("sessions.id"))
+    filename = Column(String)
+    original_filename = Column(String)
+    saved_path = Column(String)
+    description = Column(String, nullable=True)
+    file_size_mb = Column(Float)
+    upload_timestamp = Column(DateTime)
+
+    session = relationship("Session", back_populates="photos")
+
+
+class ParticipantFIN(Base):
+    """DEPRECATED: FIN is now stored per-session on `Session.fin`.
+
+    Kept for one release to support rollback and to feed the one-shot migration in
+    `_ensure_session_fin_column`. Do not write to this table; remove in a follow-up
+    once the new path is verified in production.
+    """
+
+    __tablename__ = "participant_fin"
+
+    id = Column(Integer, primary_key=True, index=True)
+    participant_id = Column(Integer, ForeignKey("participants.id"), unique=True, nullable=False)
+    fin = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    participant = relationship("Participant", back_populates="fin_record")
+
+
+def _get_or_create_participant(db, participant_name: str) -> Participant:
+    """Find or create a participant by name."""
+    participant = db.query(Participant).filter(Participant.name == participant_name).first()
+    if not participant:
+        participant = Participant(name=participant_name)
+        db.add(participant)
+        db.flush()
+    return participant
+
+
+def _get_or_create_session(db: Session, participant_name: str, session_date, session_path: str):
+    """Find or create a participant and session, returning the Session object."""
+    if isinstance(session_date, str):
+        from datetime import datetime
+        session_date = datetime.strptime(session_date, "%Y-%m-%d").date()
+
+    participant = _get_or_create_participant(db, participant_name)
+
+    session = (
+        db.query(Session).filter(Session.participant_id == participant.id, Session.session_date == session_date).first()
+    )
+    if not session:
+        session = Session(participant_id=participant.id, session_path=session_path, session_date=session_date)
+        db.add(session)
+        db.flush()
+
+    return session
+
+
+def store_fin(db, participant_name: str, session_date, session_path: str, fin: str) -> "Session":
+    """Set the FIN on the matching session row. Creates participant/session if needed."""
+    session = _get_or_create_session(db, participant_name, session_date, session_path)
+    session.fin = fin
+    db.commit()
+    db.refresh(session)
+    return session
+
+
+def get_fin(db, participant_name: str, session_date) -> Optional[str]:
+    """Look up the FIN for a (participant, session_date). Returns None if not set."""
+    if isinstance(session_date, str):
+        session_date = datetime.strptime(session_date, "%Y-%m-%d").date()
+
+    session = (
+        db.query(Session)
+        .join(Participant, Session.participant_id == Participant.id)
+        .filter(Participant.name == participant_name, Session.session_date == session_date)
+        .first()
+    )
+    return session.fin if session and session.fin else None
+
+
 def add_recording(
     db: Session,
     participant_name: str,
@@ -66,6 +166,7 @@ def add_recording(
     comment: Optional[str] = None,
     should_process: Optional[bool] = True,
     timestamp_spread: Optional[int] = None,
+    duration: Optional[float] = None,
 ):
     print(
         "Adding recording to database: ",
@@ -78,39 +179,20 @@ def add_recording(
         config_file,
         should_process,
         timestamp_spread,
+        duration,
     )
 
-    # if date is a string, convert to a python date type
-    if isinstance(session_date, str):
-        from datetime import datetime
+    session = _get_or_create_session(db, participant_name, session_date, session_path)
 
-        session_date = datetime.strptime(session_date, "%Y-%m-%d").date()
-
-    # Create or update the participant
-    participant = db.query(Participant).filter(Participant.name == participant_name).first()
-    if not participant:
-        participant = Participant(name=participant_name)
-        db.add(participant)
-        db.flush()
-
-    # Create or update the session
-    session = (
-        db.query(Session).filter(Session.participant_id == participant.id, Session.session_date == session_date).first()
-    )
-    if not session:
-        session = Session(participant_id=participant.id, session_path=session_path, session_date=session_date)
-        db.add(session)
-        db.flush()
-
-    # Create the recording
     new_recording = Recording(
         session_id=session.id,
         filename=filename,
         recording_timestamp=recording_timestamp,
-        comment=comment,
+        recording_metadata={"comment": comment or ""},
         config_file=config_file,
         should_process=should_process,
         timestamp_spread=timestamp_spread,
+        duration=duration,
     )
     db.add(new_recording)
     db.commit()
@@ -118,22 +200,77 @@ def add_recording(
     return new_recording
 
 
+def add_photo(
+    db: Session,
+    participant_name: str,
+    session_date: Date,
+    session_path: str,
+    filename: str,
+    original_filename: str,
+    saved_path: str,
+    file_size_mb: float,
+    upload_timestamp: DateTime,
+    description: Optional[str] = None,
+):
+    session = _get_or_create_session(db, participant_name, session_date, session_path)
+
+    new_photo = Photo(
+        session_id=session.id,
+        filename=filename,
+        original_filename=original_filename,
+        saved_path=saved_path,
+        description=description,
+        file_size_mb=file_size_mb,
+        upload_timestamp=upload_timestamp,
+    )
+    db.add(new_photo)
+    db.commit()
+    db.refresh(new_photo)
+    return new_photo
+
+
 ### Data access API with Pydantic models
+
+
+class RecordingMetadata(BaseModel):
+    """Per-recording metadata container (#28).
+
+    `extra="allow"` round-trips unknown keys so future elements (e.g. trial type,
+    stopwatch time from #26) survive clients that predate them. The wire key for
+    the walk-test time is "10mwt_time" (not a valid Python identifier, hence the
+    alias); FastAPI serializes response models by alias.
+    """
+
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+    comment: str = ""
+    ten_mwt_time: Optional[float] = Field(default=None, alias="10mwt_time")
 
 
 class RecordingOut(BaseModel):
     filename: str
     recording_timestamp: datetime
-    comment: Optional[str]
+    metadata: RecordingMetadata = Field(default_factory=RecordingMetadata)
     config_file: Optional[str]
     should_process: bool
     timestamp_spread: Optional[float]
+    duration: Optional[float] = None  # seconds; server-computed, None for historical rows
+
+
+class PhotoOut(BaseModel):
+    filename: str
+    original_filename: str
+    saved_path: str
+    description: Optional[str]
+    file_size_mb: float
+    upload_timestamp: datetime
 
 
 class SessionOut(BaseModel):
     session_date: date
     session_path: str
     recordings: List[RecordingOut]
+    photos: List[PhotoOut]
     imported: bool
 
 
@@ -142,13 +279,29 @@ class ParticipantOut(BaseModel):
     sessions: List[SessionOut]
 
 
+def _recording_to_out(recording: Recording) -> RecordingOut:
+    """Map an ORM Recording row to RecordingOut.
+
+    Rows written by a pre-#28 binary after the column migration ran may have a
+    NULL container; fall back to wrapping the legacy comment column. The stale
+    top-level "comment" key left in `data` is ignored by pydantic.
+    """
+    data = {k: v for k, v in recording.__dict__.items() if k != "_sa_instance_state"}
+    raw = data.pop("recording_metadata", None)
+    data["metadata"] = raw if raw is not None else {"comment": data.get("comment") or ""}
+    return RecordingOut(**data)
+
+
 def get_recordings(
     db: Session,
     participant_name: Optional[str] = None,
     filter_by_session_date: Optional[date] = None,
     order_by_date: Optional[bool] = False,
 ) -> Union[List[ParticipantOut], Tuple[List[SessionOut], List[str]]]:
-    query = db.query(Participant).options(joinedload(Participant.sessions).joinedload(Session.recordings))
+    query = db.query(Participant).options(
+        joinedload(Participant.sessions).joinedload(Session.recordings),
+        joinedload(Participant.sessions).joinedload(Session.photos),
+    )
 
     if participant_name:
         query = query.filter(Participant.name == participant_name)
@@ -162,9 +315,11 @@ def get_recordings(
             if filter_by_session_date and session.session_date != filter_by_session_date:
                 continue
 
-            recording_out_list = [
-                RecordingOut(**{k: v for k, v in recording.__dict__.items() if k != "_sa_instance_state"})
-                for recording in session.recordings
+            recording_out_list = [_recording_to_out(recording) for recording in session.recordings]
+
+            photo_out_list = [
+                PhotoOut(**{k: v for k, v in photo.__dict__.items() if k != "_sa_instance_state"})
+                for photo in session.photos
             ]
 
             # check if there is an imported entry for this session
@@ -174,6 +329,7 @@ def get_recordings(
                 session_date=session.session_date,
                 session_path=session.session_path,
                 recordings=recording_out_list,
+                photos=photo_out_list,
                 imported=imported is not None,
             )
             session_out_list.append(session_out)
@@ -210,12 +366,57 @@ def modify_recording_entry(db: Session, participant: ParticipantOut, updated_rec
 
     # get the recording entry
     recording = query.first()
+    if recording is None:
+        raise ValueError(
+            f"Recording not found: participant={participant.name}, filename={updated_recording.filename}"
+        )
 
-    # now update the comment and should process fields
-    recording.comment = updated_recording.comment
+    # Replace the metadata container wholesale (clients round-trip unknown keys) and
+    # the should_process flag. duration/timestamp_spread are server-computed — never
+    # written here. Whole-dict reassignment is required for the JSON column to persist.
+    recording.recording_metadata = updated_recording.metadata.model_dump(by_alias=True)
     recording.should_process = updated_recording.should_process
 
     # commit the changes
+    db.commit()
+
+
+def rename_recording_entry(db: Session, participant_name: str, old_filename: str, new_filename: str):
+    """Rename a recording: update the filename in the database and rename the directory on disk.
+
+    The new filename must share the same parent directory as the old filename
+    (only the basename may change). Path traversal segments are rejected.
+    """
+    # Reject absolute paths and traversal segments
+    if os.path.isabs(new_filename):
+        raise ValueError("new_filename must not be an absolute path")
+    if ".." in new_filename.split(os.sep):
+        raise ValueError("new_filename must not contain '..' path segments")
+
+    # Ensure the parent directory hasn't changed (only the basename may differ)
+    if os.path.dirname(new_filename) != os.path.dirname(old_filename):
+        raise ValueError("new_filename must be in the same directory as the original recording")
+
+    query = db.query(Recording).join(Session).join(Participant)
+    query = query.filter(Participant.name == participant_name)
+    query = query.filter(Recording.filename == old_filename)
+
+    recording = query.first()
+    if recording is None:
+        raise ValueError(f"Recording not found: participant={participant_name}, filename={old_filename}")
+
+    # Check for collisions
+    existing = db.query(Recording).filter(Recording.filename == new_filename).first()
+    if existing is not None:
+        raise FileExistsError(f"A recording with filename '{new_filename}' already exists in the database")
+    if os.path.exists(new_filename):
+        raise FileExistsError(f"Path already exists on disk: {new_filename}")
+
+    # Rename directory on disk if it exists
+    if os.path.exists(old_filename):
+        os.rename(old_filename, new_filename)
+
+    recording.filename = new_filename
     db.commit()
 
 
@@ -301,8 +502,133 @@ def check_datajoint_external_mounted(mount_path, sentinel_file_name=".multi_cam_
 
     print("External drive mounted and sentinel file found.")
 
+def _is_calibration_comment(comment: Optional[str]) -> bool:
+    """A recording is a calibration if its comment contains 'calibration' or 'charuco'.
+
+    Substring match (not exact) so tag-style comments like 'charuco+aruco' are
+    still recognized. Case-insensitive — operators type free-form comments and
+    "Calibration" or "ChArUco" must work the same as the lowercase form.
+    """
+    if not comment:
+        return False
+    lowered = comment.lower()
+    return "calibration" in lowered or "charuco" in lowered
+
+
+def _push_calibration_videos(
+    filenames_and_comments: List[Tuple[str, str]],
+    trial_video_project: str,
+) -> None:
+    """Insert calibration videos and per-recording metadata into DataJoint.
+
+    Calibration videos for trial project ``X`` live under ``video_project="{X}_CALIBRATION"``
+    in the Video table. The dedicated suffix keeps them out of pose-pipeline
+    analyses that filter on the trial project, while remaining trivially
+    queryable per-project.
+
+    For each calibration recording:
+      - Inserts one Video row per camera.
+      - Inserts a MultiCameraCalibration row carrying the SQLite comment forward
+        so CalibrationArucoDetection.populate() can gate off the substring "aruco".
+      - Inserts one CalibrationVideos row per camera linking the new Video rows
+        to the MultiCameraCalibration session.
+
+    All inserts use skip_duplicates=True so this is idempotent. Does NOT insert
+    the Calibration row — that requires the calibration computation, which
+    still lives in the notebook.
+    """
+    import glob
+    import json
+
+    import datajoint as dj
+
+    from multi_camera.datajoint.multi_camera_dj import (
+        CalibrationVideos,
+        MultiCameraCalibration,
+        calibration_video_project,
+    )
+    from pose_pipeline import Video
+
+    cal_video_project = calibration_video_project(trial_video_project)
+
+    for cal_filename, comment in filenames_and_comments:
+        vid_path, vid_basename = os.path.split(cal_filename)
+        if not os.path.isdir(vid_path):
+            print(f"  [calibration] skipping {cal_filename}: directory not found")
+            continue
+
+        vids = sorted(glob.glob(os.path.join(vid_path, f"{vid_basename}.*.mp4")))
+        if not vids:
+            print(f"  [calibration] skipping {cal_filename}: no matching .mp4 files")
+            continue
+
+        # Parse timestamp from basename like "calibration_20260312_151801".
+        # Mirror the strict prefix check from run_AniposeLib_calibration so
+        # accidental misnames (e.g. "session_20260312_...") don't slip through.
+        if not vid_basename.startswith("calibration_"):
+            print(f"  [calibration] skipping {vid_basename}: basename must start with 'calibration_'")
+            continue
+        try:
+            ts_str = vid_basename[len("calibration_"):]
+            cal_timestamp = datetime.strptime(ts_str, "%Y%m%d_%H%M%S")
+        except ValueError:
+            print(f"  [calibration] skipping {vid_basename}: cannot parse timestamp")
+            continue
+
+        # Read camera_config_hash from JSON sidecar (same source as run_calibration_APL)
+        json_file = os.path.join(vid_path, f"{vid_basename}.json")
+        if not os.path.exists(json_file):
+            print(f"  [calibration] skipping {vid_basename}: missing JSON sidecar")
+            continue
+        with open(json_file) as f:
+            sidecar = json.load(f)
+        camera_config_hash = sidecar.get("camera_config_hash")
+        if not camera_config_hash:
+            print(f"  [calibration] skipping {vid_basename}: no camera_config_hash in JSON")
+            continue
+
+        capture_key = {
+            "cal_timestamp": cal_timestamp,
+            "camera_config_hash": camera_config_hash,
+        }
+
+        video_rows = [
+            {
+                "video_project": cal_video_project,
+                "filename": os.path.splitext(os.path.basename(v))[0],
+                "video": v,
+                "start_time": cal_timestamp,
+            }
+            for v in vids
+        ]
+        cal_video_rows = [
+            {**capture_key, "video_project": cal_video_project, "filename": r["filename"]}
+            for r in video_rows
+        ]
+
+        # All three rows for one calibration go in a single transaction so a
+        # mid-sequence failure can't leave a Video row attached without its
+        # MultiCameraCalibration / CalibrationVideos linkage.
+        with dj.conn().transaction:
+            Video.insert(video_rows, skip_duplicates=True)
+            MultiCameraCalibration.insert1(
+                {
+                    **capture_key,
+                    "video_project": cal_video_project,
+                    "video_base_filename": vid_basename,
+                    "comment": comment or "",
+                },
+                skip_duplicates=True,
+            )
+            CalibrationVideos.insert(cal_video_rows, skip_duplicates=True)
+        print(
+            f"  [calibration] inserted {len(video_rows)} videos + capture + linkage for "
+            f"{vid_basename} (comment={comment!r})"
+        )
+
+
 def push_to_datajoint(db: Session, participant_id: str, session_date: date, video_project: str):
-    from multi_camera.datajoint.sessions import import_session
+    from multi_camera.datajoint.sessions import import_session, PhotoSpec
 
     # get the list of recordings from the database with their comments
     # that match the participant and session date
@@ -314,24 +640,147 @@ def push_to_datajoint(db: Session, participant_id: str, session_date: date, vide
     assert len(sessions) == 1, "Did not find exactly one session for this participant and date."
     recordings: List[RecordingOut] = sessions[0].recordings
 
-    # filter out the recordings that should not be processed and retain the
-    # filename and comment
-    recordings = [
-        (rec.filename, rec.comment) for rec in recordings if rec.should_process and rec.comment != "calibration" and rec.comment != "charuco"
+    # SQLite stores the un-normalized participant name (Participant.name == subject_id
+    # passed to /session), so look up FIN before normalization below.
+    fin = get_fin(db, participant_name=participant_id, session_date=session_date)
+
+    photo = None
+    if sessions[0].photos:
+        p = max(sessions[0].photos, key=lambda x: x.upload_timestamp)
+        photo = PhotoSpec(
+            saved_path=p.saved_path,
+            filename=p.filename,
+            original_filename=p.original_filename,
+            upload_timestamp=p.upload_timestamp,
+            description=p.description,
+        )
+
+    # Split into trial recordings (push to DataJoint Recording chain) and calibration
+    # recordings (push raw videos only; Calibration computation still happens in the
+    # notebook via run_calibration_and_insert, which is idempotent on Video rows).
+    # Trial tuples carry the whole metadata container (#28) so DataJoint stores it
+    # whole-hog alongside the plain comment string.
+    trial_recordings = [
+        (rec.filename, rec.metadata.comment, rec.metadata.model_dump(by_alias=True))
+        for rec in recordings
+        if rec.should_process and not _is_calibration_comment(rec.metadata.comment)
+    ]
+    calibration_recordings = [
+        (rec.filename, rec.metadata.comment)
+        for rec in recordings
+        if rec.should_process and _is_calibration_comment(rec.metadata.comment)
     ]
 
-    print("Processing recordings: ", recordings)
+    print("Processing trial recordings: ", trial_recordings)
+    print("Processing calibration recordings: ", calibration_recordings)
 
     datajoint_external_path = get_datajoint_external_path()
     check_datajoint_external_mounted(datajoint_external_path)
 
-    # TODO: confirm calibration has been performed
-
     participant_id = normalize_participant_id(participant_id)
 
-    import_session(participant_id, session_date, video_project=video_project, recordings=recordings)
+    import_session(
+        participant_id,
+        session_date,
+        video_project=video_project,
+        recordings=trial_recordings,
+        fin=fin,
+        photo=photo,
+    )
+
+    # Calibration videos + recording metadata are pushed so they're queryable from DataJoint.
+    # Calibration computation still happens when the user runs run_calibration_and_insert
+    # from the notebook. Downstream ArUco detection auto-fires for any calibration whose
+    # MultiCameraCalibration.comment contains "aruco" (set in the acquisition GUI).
+    _push_calibration_videos(calibration_recordings, trial_video_project=video_project)
 
     synchronize_to_datajoint(db)
+
+
+def _ensure_session_fin_column(engine):
+    """Add `sessions.fin` column on existing DBs that pre-date #15.
+
+    SQLAlchemy's create_all only creates missing tables, not missing columns.
+    Best-effort backfill: copy ParticipantFIN.fin to the most recent session
+    per participant. Older sessions are left NULL because the legacy
+    ParticipantFIN table only kept the latest FIN per participant.
+    """
+    from sqlalchemy import inspect, text
+
+    insp = inspect(engine)
+    if "sessions" not in insp.get_table_names():
+        return
+    cols = [c["name"] for c in insp.get_columns("sessions")]
+    if "fin" in cols:
+        return
+
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE sessions ADD COLUMN fin VARCHAR"))
+        if "participant_fin" in insp.get_table_names():
+            conn.execute(text("""
+                UPDATE sessions
+                SET fin = (
+                    SELECT pf.fin FROM participant_fin pf
+                    WHERE pf.participant_id = sessions.participant_id
+                )
+                WHERE sessions.id IN (
+                    SELECT MAX(id) FROM sessions GROUP BY participant_id
+                )
+            """))
+
+
+_TEN_MWT_COMMENT_RE = re.compile(r"\s*10MWT:\s*([\d.]+)\s*s", re.IGNORECASE)
+
+
+def _wrap_legacy_comment(comment: Optional[str]) -> dict:
+    """Build a metadata container from a pre-#28 free-text comment.
+
+    The capture-app's 10MWT timer used to append exactly "10MWT: <n>s" to the
+    comment. Parse-&-strip (user-approved): the last match becomes the structured
+    "10mwt_time" element and all matches are removed from the comment text.
+    """
+    container = {"comment": comment or ""}
+    matches = _TEN_MWT_COMMENT_RE.findall(container["comment"])
+    if matches:
+        try:
+            container["10mwt_time"] = float(matches[-1])  # last match wins
+        except ValueError:
+            return container  # malformed number (e.g. "1.2.3") — leave text untouched
+        stripped = _TEN_MWT_COMMENT_RE.sub("", container["comment"])
+        container["comment"] = " ".join(stripped.split())  # collapse leftover whitespace
+    return container
+
+
+def _ensure_recording_metadata_columns(engine):
+    """Add `recordings.recording_metadata` (JSON) and `recordings.duration` (FLOAT) — #28/#25.
+
+    Same ALTER-on-startup idiom as _ensure_session_fin_column: create_all only
+    creates missing tables, not columns. Idempotent (cheap inspect + early return
+    per column). The one-time backfill wraps each legacy comment into the JSON
+    container via _wrap_legacy_comment; duration stays NULL for historical rows.
+    Backfill runs in Python (json.dumps) so the stored text is exactly what
+    SQLAlchemy's JSON deserializer expects.
+    """
+    from sqlalchemy import inspect, text
+
+    insp = inspect(engine)
+    if "recordings" not in insp.get_table_names():
+        return
+    cols = [c["name"] for c in insp.get_columns("recordings")]
+
+    if "duration" not in cols:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE recordings ADD COLUMN duration FLOAT"))
+
+    if "recording_metadata" not in cols:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE recordings ADD COLUMN recording_metadata JSON"))
+            rows = conn.execute(text("SELECT id, comment FROM recordings")).fetchall()
+            for row_id, comment in rows:
+                conn.execute(
+                    text("UPDATE recordings SET recording_metadata = :meta WHERE id = :id"),
+                    {"meta": json.dumps(_wrap_legacy_comment(comment)), "id": row_id},
+                )
 
 
 def get_db():
@@ -341,6 +790,8 @@ def get_db():
 
     engine = create_engine(DATABASE_URL)
     Base.metadata.create_all(bind=engine)
+    _ensure_session_fin_column(engine)
+    _ensure_recording_metadata_columns(engine)
 
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 

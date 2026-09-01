@@ -5,10 +5,18 @@ import { AcquisitionState } from "../AcquisitionApi";
 import Spinner from 'react-bootstrap/Spinner';
 
 const RecordingControl = () => {
-    const { newTrial, recordingFilename, recordingProgress, recordingSystemStatus, calibrationVideo, previewVideo, stopAcquisition } = useContext(AcquisitionState);
+    const { participant, currentConfig, newTrial, recordingFilename, recordingProgress, recordingSystemStatus, calibrationVideo, previewVideo, stopAcquisition } = useContext(AcquisitionState);
 
     const [comment, setComment] = useState("");
     const [maxFrames, setMaxFrames] = useState(1000);
+
+    const needsParticipant = !participant || participant.length === 0;
+    const noConfig = !currentConfig;
+    const disableReasons = [];
+    if (needsParticipant) disableReasons.push("Set a Participant ID first");
+    if (noConfig) disableReasons.push("Select a config first");
+    const startTooltip = disableReasons.join(" · ");
+    const startDisabled = recordingSystemStatus !== "Idle" || needsParticipant || noConfig;
 
     return (
         <div >
@@ -32,22 +40,26 @@ const RecordingControl = () => {
                         <Col md="auto">
                             <Button id="preview"
                                 className="btn btn-secondary"
-                                disabled={recordingSystemStatus !== "Idle"}
+                                disabled={startDisabled}
                                 onClick={() => previewVideo(maxFrames)}
+                                title={startTooltip}
                             >Preview</Button>
                         </Col>
                         <Col md="auto">
                             <Button id="calibration"
                                 className="btn btn-secondary"
-                                disabled={recordingSystemStatus !== "Idle"}
+                                disabled={startDisabled}
                                 onClick={() => calibrationVideo(maxFrames)}
+                                title={startTooltip}
                             >Calibration</Button>
                         </Col>
                         <Col md="auto">
                             <Button id="new_trial"
-                                disabled={recordingSystemStatus !== "Idle"}
+                                disabled={startDisabled}
                                 onClick={() => newTrial(comment, maxFrames)}
-                                className="btn btn-primary">New Trial</Button>
+                                className="btn btn-primary"
+                                title={startTooltip}
+                            >New Trial</Button>
                         </Col>
                         <Col md="auto">
                             <Button id="stop"
