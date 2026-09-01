@@ -939,6 +939,9 @@ def make_single_camera_reprojection_video(
         frames.append(frame)
 
     cap.release()
+    if len(frames) == 0:
+        os.remove(video_path)
+        raise RuntimeError(f"Failed to read any frames from {video_path}")
     os.remove(video_path)
 
     # --------------------------------------------------
