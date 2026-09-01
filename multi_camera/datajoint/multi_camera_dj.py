@@ -634,6 +634,8 @@ class ReprojectionError(dj.Computed):
             })
 
 
+# ReprojectionErrorPerKeypoint: note that this is the same as ReprojectionError table, but contains reprojection errors for each keypoint. 
+# Can take the average across all the keypoints and will get the same number as in ReprojectionError -> need to consolidate into one table.
 @schema
 class ReprojectionErrorPerKeypoint(dj.Computed):
     definition = """
