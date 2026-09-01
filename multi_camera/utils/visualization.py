@@ -492,6 +492,8 @@ def make_reprojection_video(
     height = np.unique((VideoInfo & video_keys).fetch("height"))[0]
     fps = np.unique((VideoInfo & video_keys).fetch("fps"))[0]
 
+    camera_params, camera_names = (Calibration & key).fetch1("camera_calibration", "camera_names")
+
     if keypoints3d is None:
         # get 3D keypoints
         keypoints3d = (PersonKeypointReconstruction & key).fetch1("keypoints3d")
