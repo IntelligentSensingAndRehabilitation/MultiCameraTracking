@@ -552,7 +552,7 @@ class ReprojectionError(dj.Computed):
     definition = """
     # Reprojection error for each camera
     -> PersonKeypointReconstruction
-    camera_name          : varchar(10)
+    camera_name          : varchar(50)
     ---
     reprojection_error : float
     reprojection_error_timeseries : longblob
@@ -639,7 +639,7 @@ class ReprojectionErrorPerKeypoint(dj.Computed):
     definition = """
     # Reprojection error for each camera across all keypoints
     -> PersonKeypointReconstruction
-    camera_name          : varchar(10)
+    camera_name          : varchar(50)
     ---
     reprojection_error : longblob
     reprojection_error_timeseries : longblob
