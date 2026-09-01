@@ -649,7 +649,7 @@ class ReprojectionErrorPerKeypoint(dj.Computed):
     num_nans : longblob
     """
     def make(self, key):
-        print(key)
+        # print(key)  # Uncomment for debugging
         import numpy as np
         from body_models.losses import reprojection_loss
         from multi_camera.datajoint.multi_camera_dj import SingleCameraVideo, MultiCameraRecording, PersonKeypointReconstruction
