@@ -744,7 +744,7 @@ def render_raw_collated(
         return output_path, results
     return output_path
 
-
+# Function for making reprojection video from only single camera
 def make_single_camera_reprojection_video(
     key: dict,
     portrait_width=288,
