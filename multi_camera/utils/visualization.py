@@ -926,7 +926,7 @@ def make_single_camera_reprojection_video(
             threshold=visible_threshold,
         )
 
-        # Draw bounding box (white)and crop
+        # Draw bounding box (white) and crop
         frame = bbox_fn(frame, frame_idx, width=2, color=(255, 255, 255))
         frame = crop_image_bbox(
             frame,
