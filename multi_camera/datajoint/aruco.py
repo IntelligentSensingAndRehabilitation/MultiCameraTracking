@@ -38,7 +38,6 @@ class CalibrationArucoDetection(dj.Computed):
     frame_step                 : int         # frames sampled (every Nth)
     marker_position_spread_mm  : longblob    # dict[marker_id -> median absolute deviation (mm) of triangulated positions across frames]
     marker_n_frames_detected   : longblob    # dict[marker_id -> int] frames each marker was triangulatable in (>= min_cameras visible)
-    copied_from_cal_timestamp=NULL  : timestamp    # copied from Calibration.cal_timestamp. 
     """
 
     @property
@@ -85,7 +84,9 @@ class CalibrationArucoDetection(dj.Computed):
                 video_paths[cam_serial] = row["video"]
 
             print(f"[CalibrationArucoDetection] Detecting ArUco markers for {key}")
-            print(f"  {len(video_paths)} cameras, dictionary={dictionary_name}, frame_step={frame_step}")
+            print(
+                f"  {len(video_paths)} cameras, dictionary={dictionary_name}, frame_step={frame_step}"
+            )
 
             pixel_detections = detect_markers_multi_camera(
                 video_paths,
@@ -101,12 +102,18 @@ class CalibrationArucoDetection(dj.Computed):
         detailed = triangulate_detected_markers_detailed(pixel_detections, cgroup)
 
         marker_ids_found = sorted(detailed.keys())
-        marker_position_spread_mm = {mid: info["spread_mm"] for mid, info in detailed.items()}
-        marker_n_frames_detected = {mid: info["n_frames"] for mid, info in detailed.items()}
+        marker_position_spread_mm = {
+            mid: info["spread_mm"] for mid, info in detailed.items()
+        }
+        marker_n_frames_detected = {
+            mid: info["n_frames"] for mid, info in detailed.items()
+        }
 
         print(f"  Found {len(marker_ids_found)} markers: {marker_ids_found}")
         print(f"  Per-marker spatial spread (mm), worst → best:")
-        for mid, spread in sorted(marker_position_spread_mm.items(), key=lambda kv: -kv[1]):
+        for mid, spread in sorted(
+            marker_position_spread_mm.items(), key=lambda kv: -kv[1]
+        ):
             n = marker_n_frames_detected[mid]
             print(f"    Marker {mid:>4d}: spread={spread:7.2f}mm  (n_frames={n})")
 
