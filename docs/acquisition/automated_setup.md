@@ -29,7 +29,7 @@ Before running the setup wizard:
    git clone https://github.com/IntelligentSensingAndRehabilitation/MultiCameraTracking
    cd MultiCameraTracking
    ```
-3. **Network adapter connected** (the 10 GbE Thunderbolt adapter must be plugged in so the wizard can detect the interface and its MAC address; the switches and cameras can be connected later)
+3. **Network adapter available** (the 10 GbE interface must be present — a PCIe NIC in a tower or a Thunderbolt adapter on a laptop — so the wizard can detect the interface and its MAC address; the switches and cameras can be connected later)
 
 ## Running the Setup Wizard
 
