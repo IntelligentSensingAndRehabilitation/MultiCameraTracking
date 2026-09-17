@@ -78,6 +78,8 @@ $TARGET_USER ALL=(root) NOPASSWD: $IP_BIN link set * mtu *
 $TARGET_USER ALL=(root) NOPASSWD: $SYSCTL_BIN -w net.core.rmem_max=*
 $TARGET_USER ALL=(root) NOPASSWD: $SYSTEMCTL_BIN start isc-dhcp-server
 $TARGET_USER ALL=(root) NOPASSWD: $SYSTEMCTL_BIN restart isc-dhcp-server
+$TARGET_USER ALL=(root) NOPASSWD: $SYSTEMCTL_BIN start lldpd
+$TARGET_USER ALL=(root) NOPASSWD: $SYSTEMCTL_BIN restart lldpd
 $TARGET_USER ALL=(root) NOPASSWD: $NMCLI_BIN con up DHCP-Server
 EOF
 

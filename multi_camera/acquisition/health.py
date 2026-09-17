@@ -122,6 +122,19 @@ class HostNetworkStatus(BaseModel):
         return max_severity([f.level for f in self.findings])
 
 
+class PowerStatus(BaseModel):
+    """Laptop power source and performance profile."""
+
+    ac_online: bool | None = None
+    battery_percent: int | None = None
+    power_profile: str | None = None
+    findings: list[Finding] = Field(default_factory=list)
+
+    @property
+    def severity(self) -> Severity:
+        return max_severity([f.level for f in self.findings])
+
+
 class HealthCheckReport(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -131,6 +144,7 @@ class HealthCheckReport(BaseModel):
     dhcp: DhcpServerStatus
     cameras: CameraReachabilityReport
     host_network: HostNetworkStatus
+    power: PowerStatus = Field(default_factory=PowerStatus)
     recording_state: str
     findings: list[Finding]
 
@@ -1170,6 +1184,134 @@ def check_host_network(
 
 
 # ---------------------------------------------------------------------------
+# Power check
+# ---------------------------------------------------------------------------
+
+
+def _read_ac_online() -> bool | None:
+    """Read AC adapter state from sysfs. Returns True (plugged), False (battery), or None."""
+    power_supply = Path("/sys/class/power_supply")
+    if not power_supply.exists():
+        return None
+    for ps_dir in power_supply.iterdir():
+        try:
+            ps_type = (ps_dir / "type").read_text().strip()
+        except OSError:
+            continue
+        if ps_type == "Mains":
+            try:
+                return (ps_dir / "online").read_text().strip() == "1"
+            except OSError:
+                continue
+    return None
+
+
+def _read_battery_percent() -> int | None:
+    """Read battery capacity percentage from sysfs."""
+    power_supply = Path("/sys/class/power_supply")
+    if not power_supply.exists():
+        return None
+    for ps_dir in power_supply.iterdir():
+        try:
+            ps_type = (ps_dir / "type").read_text().strip()
+        except OSError:
+            continue
+        if ps_type == "Battery":
+            try:
+                return int((ps_dir / "capacity").read_text().strip())
+            except (OSError, ValueError):
+                continue
+    return None
+
+
+def _read_power_profile() -> str | None:
+    """Read the current power profile via powerprofilesctl."""
+    try:
+        result = subprocess.run(
+            ["powerprofilesctl", "get"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        pass
+    return None
+
+
+def check_power() -> PowerStatus:
+    """Check AC power, battery level, and power profile."""
+    findings: list[Finding] = []
+
+    ac_online = _read_ac_online()
+    battery_percent = _read_battery_percent()
+    power_profile = _read_power_profile()
+
+    if ac_online is False:
+        battery_str = f" ({battery_percent}%)" if battery_percent is not None else ""
+        findings.append(
+            Finding(
+                level="error",
+                code="power_on_battery",
+                message=(
+                    f"Running on battery{battery_str}. Plug in AC power for "
+                    "full acquisition performance."
+                ),
+                details={
+                    "ac_online": False,
+                    "battery_percent": battery_percent,
+                },
+            )
+        )
+    elif ac_online is True:
+        findings.append(
+            Finding(
+                level="ok",
+                code="power_ac_connected",
+                message="Running on AC power.",
+            )
+        )
+
+    if power_profile is not None and power_profile != "performance":
+        findings.append(
+            Finding(
+                level="warn",
+                code="power_profile_not_performance",
+                message=(
+                    f"Power profile is '{power_profile}', expected 'performance'. "
+                    "Run: powerprofilesctl set performance"
+                ),
+                details={"power_profile": power_profile},
+            )
+        )
+    elif power_profile == "performance":
+        findings.append(
+            Finding(
+                level="ok",
+                code="power_profile_ok",
+                message="Power profile: performance.",
+            )
+        )
+
+    if not findings:
+        findings.append(
+            Finding(
+                level="ok",
+                code="power_check_skipped",
+                message="Power status not available (desktop or no sysfs).",
+            )
+        )
+
+    return PowerStatus(
+        ac_online=ac_online,
+        battery_percent=battery_percent,
+        power_profile=power_profile,
+        findings=findings,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Orchestration
 # ---------------------------------------------------------------------------
 
@@ -1208,7 +1350,7 @@ def run_health_check(
     # would block the HTTP response even after we've already given up on the
     # future via future.result(timeout=...). Use an explicit non-waiting
     # shutdown so we return as soon as the per-check timeouts fire.
-    executor = concurrent.futures.ThreadPoolExecutor(max_workers=3)
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
     try:
         dhcp_future = executor.submit(
             check_dhcp_server,
@@ -1245,6 +1387,7 @@ def run_health_check(
             check_host_network,
             interface=config.network_interface,
         )
+        power_future = executor.submit(check_power)
 
         try:
             dhcp = dhcp_future.result(timeout=config.dhcp_timeout_s)
@@ -1311,13 +1454,34 @@ def run_health_check(
                     )
                 ],
             )
+
+        try:
+            power = power_future.result(timeout=2.0)
+        except concurrent.futures.TimeoutError:
+            power = PowerStatus(
+                findings=[
+                    Finding(
+                        level="warn",
+                        code="power_check_timeout",
+                        message="Power check timed out.",
+                    )
+                ],
+            )
     finally:
         executor.shutdown(wait=False)
 
     all_findings = (
-        list(host_network.findings) + list(dhcp.findings) + list(cameras.findings)
+        list(host_network.findings)
+        + list(dhcp.findings)
+        + list(cameras.findings)
+        + list(power.findings)
     )
-    severities = [host_network.severity, dhcp.severity, cameras.severity]
+    severities = [
+        host_network.severity,
+        dhcp.severity,
+        cameras.severity,
+        power.severity,
+    ]
     overall = max_severity(severities)
 
     return HealthCheckReport(
@@ -1327,6 +1491,7 @@ def run_health_check(
         dhcp=dhcp,
         cameras=cameras,
         host_network=host_network,
+        power=power,
         recording_state=recording_state,
         findings=_prioritize_findings(all_findings),
     )
@@ -1553,6 +1718,7 @@ __all__ = [
     "HealthIdlePoller",
     "HostNetworkStatus",
     "IpAddrRunner",
+    "PowerStatus",
     "RecorderLike",
     "RemediationAttempt",
     "RemediationReport",
@@ -1563,6 +1729,7 @@ __all__ = [
     "check_camera_reachability",
     "check_dhcp_server",
     "check_host_network",
+    "check_power",
     "max_severity",
     "run_health_check",
     "run_host_remediation",

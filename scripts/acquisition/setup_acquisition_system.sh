@@ -113,10 +113,10 @@ check_prerequisites() {
     print_info "Checking Ubuntu version..."
     if [ -f /etc/os-release ]; then
         source /etc/os-release
-        if [ "$ID" = "ubuntu" ] && [ "$VERSION_ID" = "22.04" ]; then
-            print_success "Ubuntu 22.04 detected"
+        if [ "$ID" = "ubuntu" ] && [[ "$VERSION_ID" =~ ^(22\.04|24\.04)$ ]]; then
+            print_success "Ubuntu $VERSION_ID detected"
         else
-            print_warning "Running $PRETTY_NAME (recommended: Ubuntu 22.04)"
+            print_warning "Running $PRETTY_NAME (recommended: Ubuntu 22.04 or 24.04)"
         fi
     else
         print_warning "Could not detect OS version"
@@ -573,6 +573,105 @@ EOF
 }
 
 ################################################################################
+# Step 5b: Switch Management Tools (LLDP discovery + SNMP PoE control)
+################################################################################
+
+install_switch_tools() {
+    if [ "$DEPLOYMENT_MODE" != "laptop" ]; then
+        print_info "Skipping switch tool setup (network mode selected)"
+        return 0
+    fi
+
+    print_header "Step 5b: Switch Management Tools"
+
+    print_info "The switch management tools let the system discover network switches"
+    print_info "automatically and power-cycle camera PoE ports for diagnostics."
+    echo ""
+
+    local packages_needed=()
+
+    if dpkg -l lldpd 2>/dev/null | grep -q '^ii'; then
+        print_success "lldpd already installed"
+    else
+        packages_needed+=(lldpd)
+    fi
+
+    if dpkg -l snmp 2>/dev/null | grep -q '^ii'; then
+        print_success "snmp (net-snmp tools) already installed"
+    else
+        packages_needed+=(snmp)
+    fi
+
+    if [ ${#packages_needed[@]} -gt 0 ]; then
+        print_info "Installing ${packages_needed[*]}..."
+        apt-get update -qq
+        apt-get install -y "${packages_needed[@]}"
+        print_success "Installed ${packages_needed[*]}"
+    fi
+
+    if systemctl is-active --quiet lldpd 2>/dev/null; then
+        print_success "lldpd already running"
+    else
+        systemctl enable --now lldpd
+        print_success "Started lldpd and enabled on boot"
+    fi
+
+    echo ""
+    print_info "Switch discovery and PoE control are now available."
+    print_info "Each switch still needs a one-time SNMP community setup"
+    print_info "via its web interface — see docs/acquisition/switch_setup.md."
+    echo ""
+}
+
+################################################################################
+# Step 5c: Power Profile Configuration
+################################################################################
+
+configure_power_profile() {
+    print_header "Step 5c: Power Profile"
+
+    print_info "The acquisition system performs best with the power profile set to"
+    print_info "'performance' and automatic battery saver disabled."
+    echo ""
+
+    if command -v powerprofilesctl &>/dev/null; then
+        local current_profile
+        current_profile=$(powerprofilesctl get 2>/dev/null)
+
+        if [ "$current_profile" = "performance" ]; then
+            print_success "Power profile already set to performance"
+        else
+            powerprofilesctl set performance 2>/dev/null
+            print_success "Set power profile to performance (was $current_profile)"
+        fi
+    else
+        print_info "powerprofilesctl not found — install power-profiles-daemon if"
+        print_info "you want automatic power profile management"
+    fi
+
+    # Disable GNOME's automatic battery saver (switches to power-saver on
+    # low battery, which throttles the system mid-recording).
+    if command -v gsettings &>/dev/null; then
+        local auto_saver
+        auto_saver=$(sudo -u "$ACTUAL_USER" gsettings get \
+            org.gnome.settings-daemon.plugins.power \
+            power-saver-profile-on-low-battery 2>/dev/null)
+        if [ "$auto_saver" = "true" ]; then
+            sudo -u "$ACTUAL_USER" gsettings set \
+                org.gnome.settings-daemon.plugins.power \
+                power-saver-profile-on-low-battery false 2>/dev/null
+            print_success "Disabled automatic battery saver"
+        elif [ "$auto_saver" = "false" ]; then
+            print_success "Automatic battery saver already disabled"
+        else
+            print_info "Could not read GNOME power settings (headless or non-GNOME session)"
+        fi
+    fi
+
+    echo ""
+}
+
+################################################################################
 # Step 6: Directory Creation
 ################################################################################
 
@@ -656,6 +755,12 @@ create_env_file() {
     REACT_APP_BASE_URL=$(ask_input "React app base URL" "localhost")
     DISK_SPACE_WARNING_THRESHOLD_GB=$(ask_input "Disk space warning threshold (GB)" "50")
 
+    if [ "$DEPLOYMENT_MODE" = "laptop" ]; then
+        echo ""
+        print_info "Switch management (PoE control):"
+        SWITCH_SNMP_COMMUNITY=$(ask_input "  SNMP community string" "isr-switch")
+    fi
+
     # Create .env file
     cat > .env <<EOF
 DJ_USER=$DJ_USER
@@ -670,6 +775,10 @@ CAMERA_CONFIGS=$CAMERA_CONFIGS
 DATAJOINT_EXTERNAL=$DATAJOINT_EXTERNAL
 DISK_SPACE_WARNING_THRESHOLD_GB=$DISK_SPACE_WARNING_THRESHOLD_GB
 EOF
+
+    if [ "$DEPLOYMENT_MODE" = "laptop" ] && [ -n "$SWITCH_SNMP_COMMUNITY" ]; then
+        echo "SWITCH_SNMP_COMMUNITY=$SWITCH_SNMP_COMMUNITY" >> .env
+    fi
 
     # Set ownership to actual user
     chown "$ACTUAL_USER:$ACTUAL_USER" .env
@@ -899,7 +1008,7 @@ show_summary() {
 
     echo ""
     print_info "Documentation: docs/README.md"
-    print_info "Diagnostics: ./scripts/acquisition/acquisition_diagnostics.sh"
+    print_info "Diagnostics: make health"
     echo ""
 }
 
@@ -930,6 +1039,8 @@ main() {
     install_docker
     detect_network_interface
     setup_dhcp_server
+    install_switch_tools
+    configure_power_profile
     create_directories
     create_env_file
     create_datajoint_config

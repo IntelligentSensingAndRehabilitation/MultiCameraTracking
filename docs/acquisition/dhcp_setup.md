@@ -1,82 +1,120 @@
 # DHCP Server Setup
 
-## Information needed for this setup
+The acquisition system uses an ISC DHCP server running on the laptop to
+assign IP addresses to the cameras.  This is only needed in laptop
+(portable) mode; in network mode an upstream DHCP server is assumed.
 
-### Find your ethernet interface name
+## Automated setup
 
-- Plug in an ethernet cable from the switch to the 10Gbit ethernet adapter on the computer
-- In a terminal run:
+The setup wizard handles all DHCP configuration automatically:
 
+```bash
+sudo ./scripts/acquisition/setup_acquisition_system.sh
 ```
- ip link show
+
+The wizard performs the following steps in laptop mode:
+
+1. Installs `isc-dhcp-server` if not already present.
+2. Detects the camera network interface (the 10 GbE adapter connected to
+   the switch via Thunderbolt) and its MAC address.
+3. Writes `/etc/dhcp/dhcpd.conf` with:
+   - Subnet `192.168.1.0/24`, pool range `.10` to `.100`
+   - Default lease 600 s, max lease 7200 s
+4. Sets `INTERFACESv4` in `/etc/default/isc-dhcp-server` to the detected
+   interface.
+5. Creates (or updates) a NetworkManager connection profile named
+   `DHCP-Server` bound to the detected interface with a static IP of
+   `192.168.1.1/24` and `autoconnect yes`, so the profile activates
+   whenever the interface comes up.
+
+After the wizard finishes, run `make_settings_persistent.sh` (the wizard
+calls this automatically) to enable `isc-dhcp-server` on boot and persist
+MTU and buffer settings.
+
+## What happens at startup
+
+`start_acquisition.sh` (called by `make run`) activates the `DHCP-Server`
+NetworkManager profile, verifies the interface has `192.168.1.1`, and
+starts `isc-dhcp-server` if it is not already running.  If either step
+fails, the script prints instructions for recovery.
+
+## When to re-run the wizard
+
+Re-run the wizard when the laptop changes.  The interface name (e.g.
+`enp5s0`, `enp37s0`) is tied to the laptop's Thunderbolt adapter, so a
+different laptop will have a different interface name.  The wizard
+detects the new interface and updates all configuration files.
+
+Swapping which switch is connected does not require any reconfiguration
+on the laptop.
+
+## Manual setup
+
+If the wizard does not work for your environment, the individual steps
+are listed below.  Replace `INTERFACE` with your camera network interface
+name throughout.
+
+### Find the interface name
+
+Plug the Ethernet cable from the switch into the 10 GbE Thunderbolt
+adapter, then run:
+
+```bash
+ip link show
 ```
 
-- The interface names will be listed, it will likely be something like enp#s0 where the # could be any number. This `interface_name` will be used for the remainder of the guide.
-- If you know the MAC address for the ethernet adapter, you can match it to the interface name with that.
-- If you don’t know the MAC and there are multiple enp names, try to unplug the cable going into the 10Gbit adapter and see which name disappears from the list
+Look for an interface named `enp<N>s0` (the number varies by laptop).
+If multiple interfaces are present, unplug the cable and see which one
+disappears.
 
-### Install DHCP Server package
+### Install the DHCP server
 
-```
+```bash
 sudo apt-get update
 sudo apt-get install isc-dhcp-server
 ```
 
-### Configure DHCP Server
+### Configure dhcpd
 
-Edit the DHCP configuration file to set up the DHCP service parameters:
-
-```bash
-sudo nano /etc/dhcp/dhcpd.conf
-```
-
-Set default and max lease time
+Write `/etc/dhcp/dhcpd.conf`:
 
 ```
 default-lease-time 600;
 max-lease-time 7200;
-```
 
-Configure subnet and IP range (`yourdomainname` can be set to anything, it is optional, I usually just put the computer host name)
-
-Add this block under the max-lease-time line. Be sure to update the `MAC Address for interface` in the host switch section.
-
-```
 subnet 192.168.1.0 netmask 255.255.255.0 {
     range 192.168.1.10 192.168.1.100;
-    option domain-name-servers 8.8.8.8, 8.8.4.4;
-    option domain-name "yourdomainname";
-    option routers 192.168.1.1;
+    option domain-name "acquisition";
     option broadcast-address 192.168.1.255;
-
-    host switch {
-		    hardware ethernet MAC Address for interface;
-		    fixed-address 192.168.1.2;
-    }
 }
 ```
 
-### Configure network interface that will be used by DHCP
+The camera subnet is isolated (no upstream router), so `option routers`
+and `option domain-name-servers` are omitted.
 
-First open the file
-```
-sudo nano /etc/default/isc-dhcp-server
-```
-Then modify the following line with your `interface_name`
-```
-INTERFACESv4="interface_name"
-```
-### Configure Network Interface with nmcli
-
-Replace `eth0` in the command below with `interface_name` below
+Set the DHCP listening interface in `/etc/default/isc-dhcp-server`:
 
 ```
-nmcli con add type ethernet con-name DHCP-Server ifname eth0 autoconnect no ipv4.method manual ipv4.addresses 192.168.1.1/24 ipv4.gateway 192.168.1.1 ipv4.dns "8.8.8.8,8.8.4.4"
+INTERFACESv4="INTERFACE"
 ```
 
-When you want to run the DHCP server:
+### Create the NetworkManager profile
 
+```bash
+nmcli con add type ethernet con-name DHCP-Server ifname INTERFACE \
+    autoconnect yes ipv4.method manual ipv4.addresses 192.168.1.1/24
 ```
+
+### Persist settings
+
+```bash
+sudo systemctl enable isc-dhcp-server
+sudo ./scripts/acquisition/make_settings_persistent.sh
+```
+
+### Start the server
+
+```bash
 nmcli con up DHCP-Server
-sudo service isc-dhcp-server start
+sudo systemctl start isc-dhcp-server
 ```
