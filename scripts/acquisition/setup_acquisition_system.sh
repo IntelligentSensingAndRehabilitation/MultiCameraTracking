@@ -113,10 +113,10 @@ check_prerequisites() {
     print_info "Checking Ubuntu version..."
     if [ -f /etc/os-release ]; then
         source /etc/os-release
-        if [ "$ID" = "ubuntu" ] && [ "$VERSION_ID" = "22.04" ]; then
-            print_success "Ubuntu 22.04 detected"
+        if [ "$ID" = "ubuntu" ] && [[ "$VERSION_ID" =~ ^(22\.04|24\.04)$ ]]; then
+            print_success "Ubuntu $VERSION_ID detected"
         else
-            print_warning "Running $PRETTY_NAME (recommended: Ubuntu 22.04)"
+            print_warning "Running $PRETTY_NAME (recommended: Ubuntu 22.04 or 24.04)"
         fi
     else
         print_warning "Could not detect OS version"
@@ -755,6 +755,12 @@ create_env_file() {
     REACT_APP_BASE_URL=$(ask_input "React app base URL" "localhost")
     DISK_SPACE_WARNING_THRESHOLD_GB=$(ask_input "Disk space warning threshold (GB)" "50")
 
+    if [ "$DEPLOYMENT_MODE" = "laptop" ]; then
+        echo ""
+        print_info "Switch management (PoE control):"
+        SWITCH_SNMP_COMMUNITY=$(ask_input "  SNMP community string" "isr-switch")
+    fi
+
     # Create .env file
     cat > .env <<EOF
 DJ_USER=$DJ_USER
@@ -769,6 +775,10 @@ CAMERA_CONFIGS=$CAMERA_CONFIGS
 DATAJOINT_EXTERNAL=$DATAJOINT_EXTERNAL
 DISK_SPACE_WARNING_THRESHOLD_GB=$DISK_SPACE_WARNING_THRESHOLD_GB
 EOF
+
+    if [ "$DEPLOYMENT_MODE" = "laptop" ] && [ -n "$SWITCH_SNMP_COMMUNITY" ]; then
+        echo "SWITCH_SNMP_COMMUNITY=$SWITCH_SNMP_COMMUNITY" >> .env
+    fi
 
     # Set ownership to actual user
     chown "$ACTUAL_USER:$ACTUAL_USER" .env
@@ -998,7 +1008,7 @@ show_summary() {
 
     echo ""
     print_info "Documentation: docs/README.md"
-    print_info "Diagnostics: ./scripts/acquisition/acquisition_diagnostics.sh"
+    print_info "Diagnostics: make health"
     echo ""
 }
 

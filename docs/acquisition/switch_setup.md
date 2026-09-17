@@ -113,7 +113,8 @@ python3 scripts/acquisition/poe_cycle.py --cycle-all
 - Swapping which switch is connected to a laptop does not require any
   laptop-side reconfiguration.  The tools discover the switch
   automatically via LLDP and the DHCP lease table.
-- With two daisy-chained switches, only the directly connected switch
-  is visible via LLDP.  Use `--switch <ip>` to target the second
-  switch, finding its IP from the DHCP lease table or the first
-  switch's web interface.
+- With two daisy-chained switches, `switch_discover.py` finds both
+  automatically — the directly connected switch via LLDP and the
+  second via the DHCP lease table.  `poe_cycle.py --cycle-all`
+  cycles ports on both.  Use `--switch <ip>` only if you need to
+  target a specific switch manually.
