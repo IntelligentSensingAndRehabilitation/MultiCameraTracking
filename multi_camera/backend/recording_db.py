@@ -155,6 +155,37 @@ def get_fin(db, participant_name: str, session_date) -> Optional[str]:
     return session.fin if session and session.fin else None
 
 
+class ParticipantByFinOut(BaseModel):
+    """The participant a FIN was most recently recorded against (#51)."""
+
+    participant_name: str
+    session_date: date
+
+
+def get_participant_by_fin(db, fin: str) -> Optional[ParticipantByFinOut]:
+    """Look up which participant a FIN was last stored against.
+
+    A FIN belongs to one patient visit, so at most one participant should
+    carry it; the only known way to get two is test data (a dummy ID entered
+    while scanning an old wristband). Most-recent session wins, with the row
+    id as a tie-breaker for two sessions on the same date. Matches the stored
+    value exactly (``sessions.fin`` is written stripped by ``POST /session``).
+    Only ``sessions.fin`` is consulted, never the deprecated ``participant_fin``
+    table. Returns None when the FIN has not been seen.
+    """
+    row = (
+        db.query(Participant.name, Session.session_date)
+        .join(Session, Session.participant_id == Participant.id)
+        .filter(Session.fin == fin)
+        .order_by(Session.session_date.desc(), Session.id.desc())
+        .first()
+    )
+    if row is None:
+        return None
+    name, session_date = row
+    return ParticipantByFinOut(participant_name=name, session_date=session_date)
+
+
 def add_recording(
     db: Session,
     participant_name: str,
