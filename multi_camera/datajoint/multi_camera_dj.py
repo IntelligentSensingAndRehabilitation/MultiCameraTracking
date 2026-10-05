@@ -198,7 +198,122 @@ class PersonKeypointReconstruction(dj.Computed):
                 ("Left Shoulder", "Left Elbow"),
                 ("Left Elbow", "Left Wrist"),
             ]
-            skeleton = np.array([(joints.index(p[0]), joints.index(p[1])) for p in pairs])
+
+        elif top_down_method_name == "Sam3dBody_movi87":
+            joints = TopDownPerson.joint_names("Sam3dBody_movi87")
+            pairs = [
+                    ("CHip", "RHip"),
+                    ("CHip", "LHip"),
+                    ("LAnkle", "LKnee"),
+                    ("RAnkle", "RKnee"),
+                    ("LKnee", "LHip"),
+                    ("RKnee", "RHip"),
+                    ("LHip", "CHip"),
+                    ("RHip", "CHip"),
+                    ("LShoulder", "LElbow"),
+                    ("RShoulder", "RElbow"),
+                    ("LElbow", "LWrist"),
+                    ("RElbow", "RWrist"),
+                    ("LHeel", "LBigToe"),
+                    ("RHeel", "RBigToe"),
+                    ("RShoulder", "LShoulder"),
+                    ("RShoulder", "RElbow"),
+                    ("RElbow", "RWrist"),
+                    ("LShoulder", "LElbow"),
+                    ("LElbow", "LWrist")
+                ]
+        
+        elif top_down_method_name == "Sam3dBody_kinematic_nodes_127":
+            joints = TopDownPerson.joint_names("Sam3dBody_kinematic_nodes_127")
+            pairs = [
+                ("root", "c_spine0"),
+                ("c_spine0", "c_spine1"),
+                ("c_spine1", "c_spine2"),
+                ("c_spine2", "c_spine3"),
+                ("c_spine3", "c_neck"),
+                ("c_neck", "c_head"),
+                ("c_head", "c_jaw"),
+                ("c_head", "r_eye"),
+                ("c_head", "l_eye"),
+                ("root", "l_upleg"),
+                ("root", "r_upleg"),
+                ("l_upleg", "l_lowleg"),
+                ("l_lowleg", "l_foot"),
+                ("l_foot", "l_talocrural"),
+                ("l_talocrural", "l_subtalar"),
+                ("l_subtalar", "l_transversetarsal"),
+                ("l_transversetarsal", "l_ball"),
+                ("r_upleg", "r_lowleg"),
+                ("r_lowleg", "r_foot"),
+                ("r_foot", "r_talocrural"),
+                ("r_talocrural", "r_subtalar"),
+                ("r_subtalar", "r_transversetarsal"),
+                ("r_transversetarsal", "r_ball"),
+                ("c_spine3", "l_clavicle"),
+                ("l_clavicle", "l_uparm"),
+                ("l_uparm", "l_lowarm"),
+                ("l_lowarm", "l_wrist"),
+                ("c_spine3", "r_clavicle"),
+                ("r_clavicle", "r_uparm"),
+                ("r_uparm", "r_lowarm"),
+                ("r_lowarm", "r_wrist"),
+                ("l_wrist", "l_pinky0"),
+                ("l_pinky0", "l_pinky1"),
+                ("l_pinky1", "l_pinky2"),
+                ("l_pinky2", "l_pinky3"),
+                ("l_wrist", "l_ring1"),
+                ("l_ring1", "l_ring2"),
+                ("l_ring2", "l_ring3"),
+                ("l_wrist", "l_middle1"),
+                ("l_middle1", "l_middle2"),
+                ("l_middle2", "l_middle3"),
+                ("l_wrist", "l_index1"),
+                ("l_index1", "l_index2"),
+                ("l_index2", "l_index3"),
+                ("l_wrist", "l_thumb0"),
+                ("l_thumb0", "l_thumb1"),
+                ("l_thumb1", "l_thumb2"),
+                ("l_thumb2", "l_thumb3"),
+                ("r_wrist", "r_pinky0"),
+                ("r_pinky0", "r_pinky1"),
+                ("r_pinky1", "r_pinky2"),
+                ("r_pinky2", "r_pinky3"),
+                ("r_wrist", "r_ring1"),
+                ("r_ring1", "r_ring2"),
+                ("r_ring2", "r_ring3"),
+                ("r_wrist", "r_middle1"),
+                ("r_middle1", "r_middle2"),
+                ("r_middle2", "r_middle3"),
+                ("r_wrist", "r_index1"),
+                ("r_index1", "r_index2"),
+                ("r_index2", "r_index3"),
+                ("r_wrist", "r_thumb0"),
+                ("r_thumb0", "r_thumb1"),
+                ("r_thumb1", "r_thumb2"),
+                ("r_thumb2", "r_thumb3"),
+                ]
+
+        elif top_down_method_name == "MMPose_VitPose_H":
+            joints = TopDownPerson.joint_names(top_down_method_name)
+            pairs = [
+                ("Nose", "Left Eye"),
+                ("Nose", "Right Eye"),
+                ("Left Eye", "Left Ear"),
+                ("Right Eye", "Right Ear"),
+                ("Left Shoulder", "Right Shoulder"),
+                ("Left Shoulder", "Left Hip"),
+                ("Right Shoulder", "Right Hip"),
+                ("Left Hip", "Right Hip"),
+                ("Left Shoulder", "Left Elbow"),
+                ("Left Elbow", "Left Wrist"),
+                ("Right Shoulder", "Right Elbow"),
+                ("Right Elbow", "Right Wrist"),
+                ("Left Hip", "Left Knee"),
+                ("Left Knee", "Left Ankle"),
+                ("Right Hip", "Right Knee"),
+                ("Right Knee", "Right Ankle"),
+            ]
+
         else:
             joints = TopDownPerson.joint_names(top_down_method_name)
             pairs = [
@@ -219,7 +334,13 @@ class PersonKeypointReconstruction(dj.Computed):
                 ("Left Shoulder", "Left Elbow"),
                 ("Left Elbow", "Left Wrist"),
             ]
-            skeleton = np.array([(joints.index(p[0]), joints.index(p[1])) for p in pairs])
+        
+        skeleton = np.array([(joints.index(p[0]), joints.index(p[1])) for p in pairs])
+
+        # select method for reconstruction
+        reconstruction_method_name = (PersonKeypointReconstructionMethodLookup & key).fetch1(
+            "reconstruction_method_name"
+        )
 
         if reconstruction_method_name == "Triangulation":
             # downweight any views less than 0.5 confidence
@@ -480,7 +601,7 @@ class ReprojectionError(dj.Computed):
     definition = """
     # Reprojection error for each camera
     -> PersonKeypointReconstruction
-    camera_name          : varchar(10)
+    camera_name          : varchar(50)
     ---
     reprojection_error : float
     reprojection_error_timeseries : longblob
@@ -560,6 +681,106 @@ class ReprojectionError(dj.Computed):
                 "num_zeros": num_zeros,
                 "num_nans": num_nans,
             })
+
+
+# ReprojectionErrorPerKeypoint: note that this is the same as ReprojectionError table, but contains reprojection errors for each keypoint. 
+# Can take the average across all the keypoints and will get the same number as in ReprojectionError -> need to consolidate into one table.
+@schema
+class ReprojectionErrorPerKeypoint(dj.Computed):
+    definition = """
+    # Reprojection error for each camera across all keypoints
+    -> PersonKeypointReconstruction
+    camera_name          : varchar(50)
+    ---
+    reprojection_error : longblob
+    reprojection_error_timeseries : longblob
+    num_zeros : longblob
+    num_nans : longblob
+    """
+    def make(self, key):
+        # print(key)  # Uncomment for debugging
+        import numpy as np
+        from body_models.losses import reprojection_loss
+        from multi_camera.datajoint.multi_camera_dj import SingleCameraVideo, MultiCameraRecording, PersonKeypointReconstruction
+        from multi_camera.datajoint.calibrate_cameras import Calibration
+        from pose_pipeline import TopDownPerson
+
+        def fetch_key_data(key):
+            """Fetch necessary data for a given key."""
+            calibration_key = (Calibration & key).fetch1("KEY")
+            recording_key = (MultiCameraRecording & key).fetch1("KEY")
+            top_down_method = key["top_down_method"]
+            tracking_method = key["tracking_method"]
+            reconstruction_method = key["reconstruction_method"]
+            k3d = (PersonKeypointReconstruction & key).fetch1("keypoints3d")
+            camera_calibration, camera_names = (Calibration & calibration_key).fetch1("camera_calibration", "camera_names")
+            keypoints, camera_name = (
+                TopDownPerson * SingleCameraVideo * MultiCameraRecording
+                & {
+                    "top_down_method": top_down_method,
+                    "tracking_method": tracking_method,
+                    "reconstruction_method": reconstruction_method,
+                }
+                & recording_key
+            ).fetch("keypoints", "camera_name")
+            recording_timestamps = (MultiCameraRecording & recording_key).fetch1("recording_timestamps")
+
+            return k3d, camera_calibration, camera_names, keypoints, camera_name, recording_timestamps
+
+        def pad_keypoints(keypoints):
+            """Pad keypoints with zeros for missing frames."""
+            N = max(len(k) for k in keypoints)
+            return np.stack([np.pad(k, ((0, N - len(k)), (0, 0), (0, 0)), mode='constant') for k in keypoints], axis=0)
+
+        def reorder_keypoints(keypoints, camera_names, camera_name):
+            """Reorder keypoints to match the calibration order."""
+            camera_name_list = camera_name.tolist()  # Convert to list
+            order = [camera_name_list.index(c) for c in camera_names]
+            return np.stack([keypoints[o] for o in order], axis=0)
+
+        def match_joint_count(points2d, points3d):
+            """Ensure the number of joints matches between points2d and points3d."""
+            num_joints = min(points2d.shape[2], points3d.shape[1])
+            points2d = points2d[:, :, :num_joints, :]
+            points3d = points3d[:, :num_joints, :]
+            return points2d, points3d
+
+        k3d, camera_calibration, camera_names, keypoints, camera_name, recording_timestamps = fetch_key_data(key)
+        keypoints = pad_keypoints(keypoints)
+        points2d = reorder_keypoints(keypoints, camera_names, camera_name)
+        points2d, k3d = match_joint_count(points2d, k3d)
+        
+        # Get reprojection errors without averaging across keypoints
+        reprojection_errors = reprojection_loss(camera_calibration, points2d, k3d, huber_max=50, average=False)
+        # Shape: (num_cameras, num_frames, num_keypoints)
+
+        for camera_idx, camera_name_str in enumerate(camera_names):
+            # Get reprojection values for this camera for all frames
+            # Shape: (num_frames, num_keypoints)
+            reprojection_value = reprojection_errors[camera_idx, :, :]
+            
+            # Calculate per-keypoint metrics
+            num_zeros = np.sum(reprojection_value == 0, axis=0)  # Shape: (num_keypoints,)
+            num_nans = np.sum(np.isnan(reprojection_value), axis=0)  # Shape: (num_keypoints,)
+
+            # Replace 0s with NaNs
+            # Shape: (num_frames, num_keypoints)
+            reprojection_value_with_nans = np.where(reprojection_value == 0, np.nan, reprojection_value)
+
+            # Calculate per-keypoint reprojection error (mean across frames)
+            # Shape: (num_keypoints,)
+            reprojection_error_per_kp = np.nanmean(reprojection_value_with_nans, axis=0)  
+            reprojection_error_per_kp = np.where(np.isnan(reprojection_error_per_kp), -1.0, reprojection_error_per_kp)
+            
+            self.insert1({
+                **key,
+                "camera_name": camera_name_str,
+                "reprojection_error": np.asarray(reprojection_error_per_kp),
+                "reprojection_error_timeseries": np.asarray(reprojection_value_with_nans),
+                "num_zeros": np.asarray(num_zeros, dtype=int),
+                "num_nans": np.asarray(num_nans, dtype=int),
+            })
+
 
 @schema
 class PersonKeypointReprojectionQuality(dj.Computed):

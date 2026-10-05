@@ -743,3 +743,232 @@ def render_raw_collated(
     if return_results:
         return output_path, results
     return output_path
+
+# Function for making reprojection video from only single camera
+def make_single_camera_reprojection_video(
+    key: dict,
+    portrait_width=288,
+    dilate=1.1,
+    return_results=False,
+    detected_keypoint_size=4,
+    projected_keypoint_size=6,
+    visible_threshold=0.35,
+    keypoints2d_detected=None,
+    keypoints3d=None,
+):
+    """
+    Create a reprojection video for a *single camera* specified in key["camera_name"].
+    Overlays detected 2D keypoints and reprojected 3D keypoints.
+    """
+
+    assert "camera_name" in key, "key must contain 'camera_name'"
+
+    import os
+    import cv2
+    import tempfile
+    import numpy as np
+    from tqdm import tqdm
+
+    from pose_pipeline import (
+        PersonBbox,
+        BlurredVideo,
+        TopDownPerson,
+        TopDownMethodLookup,
+        VideoInfo,
+    )
+    from pose_pipeline.utils.bounding_box import crop_image_bbox
+    from pose_pipeline.utils.visualization import draw_keypoints
+    from multi_camera.datajoint.multi_camera_dj import (
+        MultiCameraRecording,
+        PersonKeypointReconstruction,
+        SingleCameraVideo,
+        Calibration,
+    )
+    from multi_camera.analysis.camera import project_distortion
+    from pose_pipeline.utils.video_format import compress
+
+    camera_name = key["camera_name"]
+
+    # --------------------------------------------------
+    # Fetch video for this camera only
+    # --------------------------------------------------
+    video_key = (
+        TopDownPerson
+        * MultiCameraRecording
+        * SingleCameraVideo
+        & key
+        & {"camera_name": camera_name}
+    ).fetch1("KEY")
+
+    recording_fn = (MultiCameraRecording & key).fetch1("video_base_filename")
+
+    width, height, fps, num_frames = (
+        VideoInfo & video_key
+    ).fetch1("width", "height", "fps", "num_frames")
+
+    video_path = (BlurredVideo & video_key).fetch1("output_video")
+    bbox = (PersonBbox & video_key).fetch1("bbox")
+
+    # sanitize bbox (nan → 0)
+    bbox = bbox.copy()
+    bbox[np.isnan(bbox)] = 0
+    bbox = bbox.astype(int)
+
+    bbox_fn = PersonBbox.get_overlay_fn(video_key)
+
+    # --------------------------------------------------
+    # Calibration (single camera)
+    # --------------------------------------------------
+    camera_params, camera_names = (
+        Calibration & key
+    ).fetch1("camera_calibration", "camera_names")
+
+    assert camera_name in camera_names, "Camera not found in calibration"
+
+    cam_idx = camera_names.index(camera_name)
+
+    for k in camera_params:
+        camera_params[k] = camera_params[k][cam_idx : cam_idx + 1]
+
+    # --------------------------------------------------
+    # 3D keypoints
+    # --------------------------------------------------
+    if keypoints3d is None:
+        keypoints3d = (
+            PersonKeypointReconstruction & key
+        ).fetch1("keypoints3d")
+
+    if keypoints3d.shape[-1] == 4:
+        kp3d = keypoints3d[..., :3]
+        conf3d = keypoints3d[..., 3]
+    else:
+        kp3d = keypoints3d
+        conf3d = np.ones(kp3d.shape[:-1])
+
+    total_frames = min(kp3d.shape[0], num_frames)
+
+    # --------------------------------------------------
+    # Reproject 3D → 2D
+    # --------------------------------------------------
+    keypoints2d = np.array(project_distortion(camera_params, 0, kp3d), copy=True)
+
+    bad = np.logical_or.reduce(
+        (
+            keypoints2d[..., 0] <= 0,
+            keypoints2d[..., 0] >= width,
+            keypoints2d[..., 1] <= 0,
+            keypoints2d[..., 1] >= height,
+            np.isnan(keypoints2d[..., 0]),
+            np.isnan(keypoints2d[..., 1]),
+            conf3d < 0.5,
+        )
+    )
+
+    keypoints2d[bad] = 0
+    keypoints2d = np.concatenate(
+        [keypoints2d, (~bad)[..., None].astype(float)], axis=-1
+    )
+
+    # --------------------------------------------------
+    # Detected 2D keypoints
+    # --------------------------------------------------
+    if keypoints2d_detected is None:
+        kp2d_detected = (
+            TopDownPerson & video_key
+        ).fetch1("keypoints")[:total_frames]
+    else:
+        kp2d_detected = keypoints2d_detected[:total_frames]
+
+    # --------------------------------------------------
+    # Get SAM 3D Body Mesh
+    # --------------------------------------------------
+    top_down_method = (TopDownPerson & video_key).fetch1("top_down_method")
+    if top_down_method in (34, 35, 37):
+        from pose_pipeline.wrappers.sam3d_body import get_sam3d_callback
+        sam3d_key = dict(video_key)
+        sam3d_key["sam3d_method"] = 3
+        mesh_overlay = get_sam3d_callback(sam3d_key)
+    else:
+        mesh_overlay = None
+
+    # --------------------------------------------------
+    # Render frames
+    # --------------------------------------------------
+    cap = cv2.VideoCapture(video_path)
+    frames = []
+
+    for frame_idx in tqdm(range(total_frames), desc=f"Extracting {recording_fn} [{camera_name}]"):
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        # OpenCV -> RGB
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+        # Add mesh overlay if available
+        if mesh_overlay is not None:
+            frame = mesh_overlay(frame, frame_idx)
+
+        # Draw reprojected keypoints (blue)
+        frame = draw_keypoints(
+            frame,
+            keypoints2d[frame_idx],
+            radius=projected_keypoint_size,
+            color=(125, 125, 255),
+            threshold=visible_threshold,
+        )
+
+        # Draw detected keypoints (red)
+        frame = draw_keypoints(
+            frame,
+            kp2d_detected[frame_idx],
+            radius=detected_keypoint_size,
+            color=(255, 80, 80),
+            border_color=(64, 20, 20),
+            threshold=visible_threshold,
+        )
+
+        # Draw bounding box (white) and crop
+        frame = bbox_fn(frame, frame_idx, width=2, color=(255, 255, 255))
+        frame = crop_image_bbox(
+            frame,
+            bbox[frame_idx],
+            target_size=(portrait_width, int(portrait_width * 1920 / 1080)),
+            dilate=dilate,
+        )[0]
+
+        # Append frame
+        frames.append(frame)
+
+    cap.release()
+    if len(frames) == 0:
+        os.remove(video_path)
+        raise RuntimeError(f"Failed to read any frames from {video_path}")
+    os.remove(video_path)
+
+    # --------------------------------------------------
+    # Write video
+    # --------------------------------------------------
+    fd, filename = tempfile.mkstemp(suffix=".mp4")
+    os.close(fd)
+
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    writer = cv2.VideoWriter(
+        filename,
+        fourcc,
+        fps,
+        (frames[0].shape[1], frames[0].shape[0]),
+    )
+
+    for frame in frames:
+        writer.write(cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
+
+    writer.release()
+
+    compressed_filename = compress(filename)
+    os.remove(filename)
+
+    if return_results:
+        return compressed_filename, frames
+
+    return compressed_filename
