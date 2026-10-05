@@ -61,6 +61,8 @@ from multi_camera.backend.recording_db import (
     rename_recording_entry,
     synchronize_to_datajoint,
     push_to_datajoint,
+    get_participant_by_fin,
+    ParticipantByFinOut,
     ParticipantOut,
     SessionOut,
     RecordingMetadata,
@@ -884,6 +886,44 @@ async def get_session() -> Session:
     if state.current_session is None:
         raise HTTPException(status_code=404, detail="No current session")
     return state.current_session
+
+
+@api_router.get("/participant_by_fin", response_model=ParticipantByFinOut)
+async def participant_by_fin(fin: str, db=Depends(db_dependency)) -> ParticipantByFinOut:
+    """
+    Look up which participant a FIN was most recently recorded against (#51).
+
+    Lets the tablet pre-fill the Patient ID when a wristband is scanned for a
+    patient this server has already seen. Read-only: consults only this
+    server's recordings.db, never DataJoint. Most-recent session wins.
+
+    Args:
+        fin (str): Financial Identification Number from the patient wristband.
+            Trimmed and length-checked exactly like ``POST /session``.
+    Returns:
+        ParticipantByFinOut: the participant name (Patient ID, as originally
+        submitted) and the date of the session that carried this FIN.
+    Raises:
+        404 if no session on this server has stored this FIN.
+        422 if the FIN is empty or longer than 20 characters.
+
+    Like ``POST /session``, proper PHI access control is deferred (#20).
+    """
+    fin = fin.strip()
+    if not fin:
+        raise HTTPException(status_code=422, detail="FIN must not be empty")
+    # Same limit as POST /session (mirrors subject_extended.FIN_MAX_LENGTH,
+    # not imported for the reason given there).
+    if len(fin) > 20:
+        raise HTTPException(
+            status_code=422,
+            detail=f"FIN must be at most 20 characters (got {len(fin)})",
+        )
+
+    match = get_participant_by_fin(db, fin)
+    if match is None:
+        raise HTTPException(status_code=404, detail="No session found for this FIN")
+    return match
 
 
 ALLOWED_IMAGE_TYPES = {

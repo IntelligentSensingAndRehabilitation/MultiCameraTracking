@@ -62,7 +62,7 @@ except Exception as exc:  # pragma: no cover
 from sqlalchemy import create_engine  # noqa: E402
 from sqlalchemy.orm import sessionmaker  # noqa: E402
 
-from multi_camera.backend.recording_db import Base, Recording, add_recording  # noqa: E402
+from multi_camera.backend.recording_db import Base, Recording, add_recording, store_fin  # noqa: E402
 
 SESSION_DATE = datetime.date(2026, 7, 16)
 TIMESTAMP = datetime.datetime(2026, 7, 16, 14, 30, 52)
@@ -202,3 +202,25 @@ def test_calibrate_accepts_container_body(client, monkeypatch):
     }
     r = client.post("/api/v1/calibrate", params={"charuco_flag": True}, json=payload)
     assert r.status_code == 200
+
+
+# --- GET /participant_by_fin (#51) ------------------------------------------
+
+
+def test_participant_by_fin_returns_most_recent_match(client, db_session):
+    store_fin(db_session, "P001", SESSION_DATE, "rec", fin="12345")
+
+    r = client.get("/api/v1/participant_by_fin", params={"fin": " 12345 "})
+    assert r.status_code == 200
+    assert r.json() == {"participant_name": "P001", "session_date": "2026-07-16"}
+
+
+def test_participant_by_fin_unseen_returns_404(client):
+    r = client.get("/api/v1/participant_by_fin", params={"fin": "99999"})
+    assert r.status_code == 404
+
+
+def test_participant_by_fin_rejects_empty_and_overlong(client):
+    assert client.get("/api/v1/participant_by_fin", params={"fin": "   "}).status_code == 422
+    assert client.get("/api/v1/participant_by_fin", params={"fin": "x" * 21}).status_code == 422
+    assert client.get("/api/v1/participant_by_fin").status_code == 422

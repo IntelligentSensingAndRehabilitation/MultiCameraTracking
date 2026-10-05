@@ -23,9 +23,11 @@ from multi_camera.backend.recording_db import (
     ParticipantOut,
     _recording_to_out,
     add_recording,
+    get_participant_by_fin,
     get_recordings,
     modify_recording_entry,
     push_to_datajoint,
+    store_fin,
 )
 
 SESSION_DATE = datetime.date(2026, 7, 16)
@@ -162,3 +164,42 @@ def test_push_to_datajoint_tuple_shapes(db, tmp_path, monkeypatch):
         ("rec/trial_01", "walk trial", {"comment": "walk trial", "10mwt_time": None})
     ]
     assert calibration_calls == [[("rec/calibration_20260716_140000", "charuco")]]
+
+
+# --- get_participant_by_fin (#51) -------------------------------------------
+
+
+def test_get_participant_by_fin_returns_participant_and_date(db):
+    store_fin(db, "P001", SESSION_DATE, "rec", fin="12345")
+
+    match = get_participant_by_fin(db, "12345")
+    assert match is not None
+    assert match.participant_name == "P001"
+    assert match.session_date == SESSION_DATE
+
+
+def test_get_participant_by_fin_unseen_returns_none(db):
+    store_fin(db, "P001", SESSION_DATE, "rec", fin="12345")
+
+    assert get_participant_by_fin(db, "99999") is None
+    # Exact match only: the stored value is already stripped by POST /session.
+    assert get_participant_by_fin(db, " 12345") is None
+
+
+def test_get_participant_by_fin_most_recent_session_wins(db):
+    # Test data can leave one FIN on two participants (a dummy ID entered while
+    # scanning an old wristband); the latest session decides.
+    store_fin(db, "TEST", SESSION_DATE, "rec", fin="12345")
+    store_fin(db, "P001", SESSION_DATE + datetime.timedelta(days=3), "rec", fin="12345")
+    store_fin(db, "OLD", SESSION_DATE - datetime.timedelta(days=30), "rec", fin="12345")
+
+    match = get_participant_by_fin(db, "12345")
+    assert match.participant_name == "P001"
+    assert match.session_date == SESSION_DATE + datetime.timedelta(days=3)
+
+
+def test_get_participant_by_fin_same_date_prefers_latest_row(db):
+    store_fin(db, "FIRST", SESSION_DATE, "rec", fin="12345")
+    store_fin(db, "SECOND", SESSION_DATE, "rec", fin="12345")
+
+    assert get_participant_by_fin(db, "12345").participant_name == "SECOND"
