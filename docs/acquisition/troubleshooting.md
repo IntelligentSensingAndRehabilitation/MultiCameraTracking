@@ -256,3 +256,18 @@ If you've tried the solutions above and still have issues:
 
 3. **Report issues** with the diagnostic tarball at:
    https://github.com/IntelligentSensingAndRehabilitation/MultiCameraTracking/issues
+
+---
+## Misc troubleshooting steps:
+
+JC-MOBILE02: always do a laptop reboot before starting setup.
+
+Troubleshooting order of operations (especially if there are "Spinnaker" or Spinview issues):
+   1. In the GUI, in the config dropdown menu, select the <blank> option. Wait for GUI to say "Idle" or "Sync". Then in the config dropdown menu, select the <<maclab>> config and wait for GUI to say "Idle" or "Sync", and do a preview/test recording
+   2. Close GUI. In Terminal, type "CTRL+C", then "make run". Open GUI and do a preview/test recording.
+   3. In the GUI, click the [Reset Cameras] button, and try to do a preview/test recording.
+   4.  In the Linux "Start" menu (top left corner of JC-MOBILE02 [--] icon), search for "Spinview" and open it. On all lines that have a red dot/exclamation point, right click and select <Force IP>; otherwise doubleclick on each line to see if you can open it. In GUI, do a preview/test recording.
+   5. Close GUI. In Terminal, type "CTRL+C", then "make reset". Wait for Terminal to stop printing, then type "make run". Open GUI and do a preview/test recording. (This will reset ALL cameras in ALL configs, so if someone else is simultaneously recording, it'll reset their cameras.)
+   6. Ethernet adapter should have all green lights. If there's any orange lights that means there's not enough bandwidth, no point in waiting to see if it resolves. Unplug and replug the ethernet adapater. Run diagnostics, if no errors, then "make run".
+   7. In Terminal, CTRL+C. Unplug and replug the 12 ethernet cords in the camera/switch box. Then "make run".
+   8. Reboot entire laptop and start over from scratch. (FYI rebooting JC-COMPUTE02 will unmount and only James is able to re-mount.)
