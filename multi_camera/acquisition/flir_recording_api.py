@@ -354,6 +354,14 @@ class _RecorderInterfaceEventHandler(PySpin.InterfaceEventHandler):
         )
 
 
+def _get_chunk_line_status(chunk_data) -> int | None:
+    """Read ExposureEndLineStatusAll from PySpin chunk data, or None on failure."""
+    try:
+        return int(chunk_data.GetExposureEndLineStatusAll())
+    except Exception:
+        return None
+
+
 def init_camera(
     c: Camera,
     jumbo_packet: bool = True,
@@ -466,7 +474,7 @@ def init_camera(
             c.TriggerOverlap = "ReadOut"
             c.TriggerMode = "On"
         else:
-            if line0 != "Off":
+            if line0 not in ("Off", "SmartWheel"):
                 print(f"{line0} is not valid for line0. Setting to 'Off'")
             c.TriggerMode = "Off"
             c.TriggerSelector = "AcquisitionStart"  # Need to select AcquisitionStart for real time clock
@@ -688,8 +696,11 @@ def write_metadata_queue(
     json_data["frame_id_cross_delta"] = []
     json_data["sync_bottleneck_cameras"] = []
 
+    smartwheel_enabled = "ExposureEndLineStatusAll" in chunk_data
     if chunk_data:
         json_data["frame_id_abs"] = []
+    if smartwheel_enabled:
+        json_data["line_status_all"] = []
     if serial_enabled:
         json_data["chunk_serial_data"] = []
         json_data["serial_msg"] = []
@@ -829,6 +840,8 @@ def write_metadata_queue(
 
             if chunk_data:
                 json_data["frame_id_abs"] = [frame["frame_id_abs"]]
+            if smartwheel_enabled:
+                json_data["line_status_all"] = [frame.get("line_status_all")]
             if serial_enabled:
                 json_data["chunk_serial_data"] = [frame["chunk_serial_data"]]
                 json_data["serial_msg"] = [frame["serial_msg"]]
@@ -843,6 +856,8 @@ def write_metadata_queue(
 
             if chunk_data:
                 json_data["frame_id_abs"].append(frame["frame_id_abs"])
+            if smartwheel_enabled:
+                json_data["line_status_all"].append(frame.get("line_status_all"))
             if serial_enabled:
                 json_data["chunk_serial_data"].append(frame["chunk_serial_data"])
                 json_data["serial_msg"].append(frame["serial_msg"])
@@ -910,6 +925,7 @@ class FlirRecorder:
 
         self.preview_callback = None
         self.cams = []
+        self.smartwheel_enabled = False
         self.image_queue_dict = {}
         self.config_file = None
         self.iface = None
@@ -1228,6 +1244,12 @@ class FlirRecorder:
 
         self.serial_enabled = self.gpio_settings.get("line3") == "SerialOn"
 
+        if self.gpio_settings.get("line0") == "SmartWheel":
+            self.smartwheel_enabled = True
+            if "ExposureEndLineStatusAll" not in self.chunk_data:
+                self.chunk_data.append("ExposureEndLineStatusAll")
+            print("SmartWheel GPIO sync enabled — ExposureEndLineStatusAll added to chunk data")
+
         # Updating the binning needed to run at 60 Hz.
         # TODO: make this check more robust in the future
         if frame_rate == 60:
@@ -1422,6 +1444,8 @@ class FlirRecorder:
 
         if self.chunk_data:
             frame_metadata["frame_id_abs"] = []
+        if self.smartwheel_enabled:
+            frame_metadata["line_status_all"] = []
         if self.serial_enabled:
             frame_metadata["chunk_serial_data"] = []
             frame_metadata["serial_msg"] = []
@@ -1651,6 +1675,9 @@ class FlirRecorder:
         ) as executor:
             l = list(executor.map(start_cam, range(len(self.cams))))
 
+        if self.smartwheel_enabled and recording_path is not None:
+            print("SmartWheel GPIO sync active — Line0 state recorded via ExposureEndLineStatusAll each frame")
+
         self.frame_diff = {}
         self.prev_timestamp = {}
         self.timestamp_diff = {}
@@ -1791,6 +1818,8 @@ class FlirRecorder:
                         chunk_data = im_ref.GetChunkData()
                         frame_id_abs = chunk_data.GetFrameID()
                         serial_msg, frame_count = self.process_serial_data(camera)
+                        if self.smartwheel_enabled:
+                            line_status_all = _get_chunk_line_status(chunk_data)
 
                     if frame_id != prev_frame_id + 1 and prev_frame_id != 0:
                         gap = frame_id - prev_frame_id - 1
@@ -1967,6 +1996,8 @@ class FlirRecorder:
                         frame_data["frame_id_abs"] = frame_id_abs
                         frame_data["serial_msg"] = serial_msg
                         frame_data["frame_count"] = frame_count
+                        if self.smartwheel_enabled and line_status_all is not None:
+                            frame_data["line_status_all"] = line_status_all
 
                     # put the frame data into the acquisition queue
                     self.acquisition_queue[camera_serial].put(frame_data)
@@ -2077,6 +2108,10 @@ class FlirRecorder:
                     if self.chunk_data:
                         self.frame_metadata["frame_id_abs"].append(
                             frame_data["frame_id_abs"]
+                        )
+                    if self.smartwheel_enabled:
+                        self.frame_metadata["line_status_all"].append(
+                            frame_data.get("line_status_all")
                         )
                     if self.serial_enabled:
                         self.frame_metadata["chunk_serial_data"].append(
@@ -2224,6 +2259,9 @@ class FlirRecorder:
             for c in self.cams:
                 self.image_queue_dict[c.DeviceSerialNumber].put(None)
                 self.image_queue_dict[c.DeviceSerialNumber].join()
+
+            if self.smartwheel_enabled and recording_path is not None:
+                print("SmartWheel GPIO sync stopped — edge timestamps in line_status_all will be extracted during DataJoint population")
 
             # to allow the json queue to be processed before moving on
             self.json_queue.put(None)
