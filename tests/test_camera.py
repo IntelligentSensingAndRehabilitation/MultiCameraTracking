@@ -45,12 +45,12 @@ def test_project():
     K = np.diag([100.0, 100.0, 1.0])
     K[0, 2] = 50
     K[1, 2] = 50
-    R = np.random.normal(size=(1, 3)) * 0.1
+    R = np.random.default_rng(1).normal(size=(1, 3)) * 0.1
     T = np.array([[0.0, 0.0, 0.0]])
     dist = np.zeros((1, 5))
     camera_params = {"mtx": np.array([[K[0, 0], K[1, 1], K[0, 2], K[1, 2]]]) / 1000.0, "rvec": R, "tvec": T / 1000.0, "dist": dist}
 
-    objp = np.random.normal(size=(5, 3)) * 5 + np.array([[100.0, 0.0, 100.0]])
+    objp = np.random.default_rng(0).normal(size=(5, 3)) * 50 + np.array([[100.0, 0.0, 1000.0]])
 
     cv2_projected = cv2.projectPoints(objp, R, T, K, dist)[0][:, 0]
     projected = project_distortion(camera_params, 0, objp)
@@ -82,12 +82,12 @@ def test_distort3d():
     K = np.diag([100.0, 100.0, 1.0])
     K[0, 2] = 50
     K[1, 2] = 50
-    R = np.random.normal(size=(1, 3)) * 0.1
+    R = np.random.default_rng(1).normal(size=(1, 3)) * 0.1
     T = np.array([[0.0, 0.0, 0.0]])
     dist = np.zeros((1, 5))
     camera_params = {"mtx": np.array([[K[0, 0], K[1, 1], K[0, 2], K[1, 2]]]) / 1000.0, "rvec": R, "tvec": T / 1000.0, "dist": dist}
 
-    objp = np.random.normal(size=(5, 3)) * 5 + np.array([[100.0, 0.0, 100.0]])
+    objp = np.random.default_rng(0).normal(size=(5, 3)) * 50 + np.array([[100.0, 0.0, 1000.0]])
 
     # manually go through two steps
     distorted = distort_3d(camera_params, 0, objp)
@@ -307,3 +307,107 @@ def test_real_cam_robust_triangulate_points():
 
     # check the two are the same within epsilon
     assert np.allclose(robust_points3d_mm, robust_points3d_mm_vmap_mm, atol=1e-5)
+
+
+def _distorted_camera(dist):
+    K = np.array([[1200.0, 0.0, 1024.0], [0.0, 1210.0, 768.0], [0.0, 0.0, 1.0]])
+    R = np.array([[0.05, -0.1, 0.02]])
+    T = np.array([[100.0, -50.0, 0.0]])
+    camera_params = {
+        "mtx": np.array([[K[0, 0], K[1, 1], K[0, 2], K[1, 2]]]) / 1000.0,
+        "rvec": R,
+        "tvec": T / 1000.0,
+        "dist": np.asarray(dist, dtype=np.float64).reshape(1, -1),
+    }
+    rng = np.random.default_rng(0)
+    # spread over most of a 2048x1536 frame at 4 m depth
+    objp = rng.uniform([-2500.0, -1800.0, 4000.0], [2500.0, 1800.0, 4000.0], size=(200, 3))
+    return camera_params, K, R, T, objp
+
+
+@pytest.mark.parametrize(
+    "dist",
+    [
+        [-0.1458, 0.0, 0.0, 0.0, 0.0],
+        [-0.2071, 0.2478, -0.0014, -0.0010, -0.0031],
+        [-0.1500, 0.0831, 0.0, 0.0, 0.0],
+        [-0.0108, -0.0013, 0.0043, -0.0729, 0.0010],
+    ],
+)
+def test_project_distortion_matches_opencv_brown_conrady(dist):
+    from multi_camera.analysis.camera import project_distortion
+
+    camera_params, K, R, T, objp = _distorted_camera(dist)
+    expected = cv2.projectPoints(objp, R, T, K, np.asarray(dist, dtype=np.float64))[0][:, 0]
+    projected = np.asarray(project_distortion(camera_params, 0, objp))
+
+    assert np.max(np.linalg.norm(expected - projected, axis=-1)) < 1e-3
+
+
+def test_project_distortion_k1_only_matches_single_term_model():
+    from multi_camera.analysis.camera import project_distortion, get_intrinsic, get_extrinsic
+
+    camera_params, _, _, _, objp = _distorted_camera([-0.1458, 0.0, 0.0, 0.0, 0.0])
+    extri = np.asarray(get_extrinsic(camera_params, 0))
+    cam = objp @ extri[:3, :3].T + extri[:3, 3]
+    xp, yp = cam[:, 0] / cam[:, 2], cam[:, 1] / cam[:, 2]
+    gamma = 1.0 + camera_params["dist"][0, 0] * (xp**2 + yp**2)
+    expected = (np.asarray(get_intrinsic(camera_params, 0)) @ np.stack([gamma * xp, gamma * yp, np.ones_like(xp)]))[:2].T
+
+    projected = np.asarray(project_distortion(camera_params, 0, objp))
+
+    assert np.max(np.abs(expected - projected)) < 1e-3
+
+
+@pytest.mark.parametrize("n_coeffs", [1, 2, 3, 4])
+def test_project_distortion_short_coefficient_vectors_are_zero_padded(n_coeffs):
+    from multi_camera.analysis.camera import project_distortion
+
+    full = np.array([-0.2071, 0.2478, -0.0014, -0.0010, 0.0])
+    short = full[:n_coeffs]
+    padded = np.concatenate([short, np.zeros(5 - n_coeffs)])
+    camera_params, _, _, _, objp = _distorted_camera(short)
+    camera_params_padded, _, _, _, _ = _distorted_camera(padded)
+
+    np.testing.assert_allclose(
+        project_distortion(camera_params, 0, objp), project_distortion(camera_params_padded, 0, objp), atol=1e-3
+    )
+
+
+def test_distort3d_matches_project_distortion_with_full_coefficients():
+    from multi_camera.analysis.camera import get_intrinsic, distort_3d, project_distortion
+
+    camera_params, _, _, _, objp = _distorted_camera([-0.2071, 0.2478, -0.0014, -0.0010, -0.0031])
+
+    distorted = np.asarray(distort_3d(camera_params, 0, objp))
+    uv_1 = (np.asarray(get_intrinsic(camera_params, 0)) @ distorted.T).T
+    uv_1 = uv_1[:, :2] / uv_1[:, 2:]
+    uv_2 = np.asarray(project_distortion(camera_params, 0, objp))
+
+    assert np.max(np.linalg.norm(uv_1 - uv_2, axis=-1)) < 1e-3
+
+
+def test_undistort_points_inverts_project_distortion_with_full_coefficients():
+    from multi_camera.analysis.camera import project, project_distortion, undistort_points, get_intrinsic
+
+    camera_params, _, _, _, objp = _distorted_camera([-0.1500, 0.0831, 0.0, 0.0, 0.0])
+
+    distorted = project_distortion(camera_params, 0, objp)
+    undistorted = np.asarray(undistort_points(distorted, get_intrinsic(camera_params, 0), camera_params["dist"][0]))
+    pinhole = np.asarray(project(camera_params, 0, objp))
+
+    assert np.max(np.linalg.norm(undistorted - pinhole, axis=-1)) < 1e-3
+
+
+def test_project_distortion_is_differentiable_in_all_coefficients():
+    import jax
+    from multi_camera.analysis.camera import project_distortion
+
+    camera_params, _, _, _, objp = _distorted_camera([-0.2071, 0.2478, -0.0014, -0.0010, -0.0031])
+    camera_params = {k: jnp.asarray(v) for k, v in camera_params.items()}
+
+    def loss(dist):
+        return jnp.sum(project_distortion({**camera_params, "dist": dist}, 0, jnp.asarray(objp)))
+
+    grad = np.asarray(jax.grad(loss)(camera_params["dist"]))
+    assert np.all(np.isfinite(grad)) and np.all(np.abs(grad[0]) > 0)
