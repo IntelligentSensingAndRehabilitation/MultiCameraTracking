@@ -42,6 +42,33 @@ def project(camera_params, i, points):
     return proj[..., :-1] / proj[..., -1:]
 
 
+def brown_conrady_distort(xp, yp, dist):
+    """Apply OpenCV radial-tangential distortion to normalized image coordinates.
+
+    ``dist`` follows the OpenCV ordering ``[k1, k2, p1, p2, k3]``. A shorter
+    vector is a prefix of that ordering with the missing coefficients equal to
+    zero, which is the same convention ``undistort_points`` uses, so the forward
+    model and its inverse always agree. Coefficients past ``k3`` (rational and
+    thin-prism terms) are not supported.
+
+    Args:
+        xp, yp: normalized coordinates ``X/Z`` and ``Y/Z`` of matching shape
+        dist: (K,) distortion coefficients with 1 <= K <= 5
+
+    Returns:
+        distorted normalized coordinates ``(xpp, ypp)``
+    """
+    if dist.shape[-1] > 5:
+        raise ValueError(f"Only [k1, k2, p1, p2, k3] are supported, got {dist.shape[-1]} coefficients")
+    k1, k2, p1, p2, k3 = jnp.zeros(5, dtype=dist.dtype).at[: dist.shape[-1]].set(dist)
+
+    r2 = xp**2 + yp**2
+    radial = 1.0 + k1 * r2 + k2 * r2**2 + k3 * r2**3
+    xpp = radial * xp + 2 * p1 * xp * yp + p2 * (r2 + 2 * xp**2)
+    ypp = radial * yp + p1 * (r2 + 2 * yp**2) + 2 * p2 * xp * yp
+    return xpp, ypp
+
+
 @jit
 def project_distortion(camera_params, i, points):
     intri = get_intrinsic(camera_params, i)
@@ -59,21 +86,17 @@ def project_distortion(camera_params, i, points):
 
     xp = transformed[..., 0] / jnp.where(distance < 1e2, 1e6, transformed[..., 2])
     yp = transformed[..., 1] / jnp.where(distance < 1e2, 1e6, transformed[..., 2])
-    r2 = xp**2 + yp**2
-    r2 = jnp.where(jnp.isnan(r2), 0, r2)
 
     dist = jnp.take(camera_params["dist"], i, axis=0)
-    gamma = 1.0 + dist[0] * r2  # + dist[1] * r2**2 + dist[4] * r2**3
+    xpp, ypp = brown_conrady_distort(xp, yp, dist)
 
     # in the case of negative points, shrink them very close to center of screen
     # this is to make sure that calibration can't "see" through the back of the
     # camera
     negative = transformed[..., 2] < 0
     negative_scale = jnp.where(negative, 1e-3, 1)
-    gamma = gamma * negative_scale
-
-    xpp = gamma * xp  # + 2*dist[2]*xp*yp + dist[3] * (r2 + 2 * xp**2)
-    ypp = gamma * yp  # + dist[2]*(r2 + 2*yp**2) + 2*dist[3]*xp*yp
+    xpp = xpp * negative_scale
+    ypp = ypp * negative_scale
 
     points = jnp.stack([xpp, ypp, jnp.ones(xpp.shape)], axis=-1)
     proj = (intri @ points[..., None])[..., 0]
@@ -200,13 +223,8 @@ def distort_3d(camera_params, i, points):
     z = transformed[..., 2]
     xp = transformed[..., 0] / z
     yp = transformed[..., 1] / z
-    r2 = xp**2 + yp**2
 
-    dist = camera_params["dist"][i]
-    gamma = 1.0 + dist[0] * r2 + dist[1] * r2**2 + dist[4] * r2**3
-
-    xpp = gamma * xp + 2 * dist[2] * xp * yp + dist[3] * (r2 + 2 * xp**2)
-    ypp = gamma * yp + dist[2] * (r2 + 2 * yp**2) + 2 * dist[3] * xp * yp
+    xpp, ypp = brown_conrady_distort(xp, yp, camera_params["dist"][i])
 
     return jnp.stack([xpp * z, ypp * z, z], axis=-1)
 
